@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from PySide6.QtCore import QSettings
 
@@ -55,8 +56,13 @@ WINDOW_SIZE_OPTIONS = [
 ]
 DEFAULT_WINDOW_SIZE = (1120, 820)
 
+_SYSTEM_THEME_LABEL = {
+    "win32": "Follow Windows · default",
+    "darwin": "Follow macOS · default",
+}.get(sys.platform, "Follow system · default")
+
 THEME_OPTIONS = [
-    ("Follow Windows · default", "system"),
+    (_SYSTEM_THEME_LABEL, "system"),
     ("Light", "light"),
     ("Dark", "dark"),
 ]
@@ -173,13 +179,18 @@ class Settings:
     # -- startup and tray -------------------------------------------------
 
     @property
-    def start_with_windows(self) -> bool:
+    def start_at_login(self) -> bool:
         """On by default: a usage monitor you have to remember to launch is a
-        usage monitor you find out about after you have hit the limit."""
+        usage monitor you find out about after you have hit the limit.
+
+        Stored under the original `startWithWindows` name so an existing
+        Windows install keeps its choice; what it means is now per-platform -
+        a Run key on Windows, a LaunchAgent on macOS.
+        """
         return self._bool("startWithWindows", True)
 
-    @start_with_windows.setter
-    def start_with_windows(self, value: bool) -> None:
+    @start_at_login.setter
+    def start_at_login(self, value: bool) -> None:
         self._q.setValue("startWithWindows", bool(value))
 
     @property
@@ -257,14 +268,24 @@ class Settings:
 
     def provider_key(self, provider_id: str) -> str:
         """Decrypt and return the stored key, or '' if unset/unreadable."""
-        return secrets.unseal(str(self._q.value(f"providers/{provider_id}/key", "")))
+        path = f"providers/{provider_id}/key"
+        return secrets.unseal(str(self._q.value(path, "")), path)
 
     def set_provider_key(self, provider_id: str, plaintext: str) -> None:
+        """Store a key, or clear it when `plaintext` is empty.
+
+        The settings path doubles as the secret's handle, so the Keychain
+        backend has a stable name to file the item under - one item per
+        provider, replaced rather than accumulated when a key is re-entered.
+        """
         path = f"providers/{provider_id}/key"
         if not plaintext:
             self._q.remove(path)
+            # On macOS the settings value was only a pointer; the secret behind
+            # it has to go too, or "clear" leaves the key in the Keychain.
+            secrets.forget(path)
             return
-        self._q.setValue(path, secrets.seal(plaintext))
+        self._q.setValue(path, secrets.seal(plaintext, path))
 
     def provider_extra(self, provider_id: str) -> str:
         """A non-secret companion value (budget, project id)."""

@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from . import formatting
+from . import fonts, formatting
 from .providers import Provider, ProviderSnapshot
 from .theme import Theme, qcolor, severity_color, severity_for, severity_word
 
@@ -272,7 +272,7 @@ class TrayController(QObject):
             painter.restore()
 
         text = "—" if percent is None else f"{percent:.0f}"
-        font = QFont("Segoe UI")
+        font = fonts.ui_font()
         font.setPixelSize(int(ICON_PX * (0.46 if len(text) < 3 else 0.36)))
         font.setWeight(QFont.Weight.Bold)
         painter.setFont(font)

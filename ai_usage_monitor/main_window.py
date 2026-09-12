@@ -116,11 +116,11 @@ class MainWindow(QMainWindow):
         # launch the registry wins, so turning the entry off in Windows'
         # Startup Apps page sticks instead of being re-added here.
         effective = startup.reconcile(
-            self.settings.start_with_windows,
+            self.settings.start_at_login,
             first_run=self.settings.mark_once("startupApplied"),
         )
-        if effective != self.settings.start_with_windows:
-            self.settings.start_with_windows = effective
+        if effective != self.settings.start_at_login:
+            self.settings.start_at_login = effective
 
         self.tray: TrayController | None = None
         if TrayController.available():

@@ -22,10 +22,11 @@ installer_out/
 *.dmg
 
 # --- Generated assets -----------------------------------------------------
-# Both icons are produced by tools/make_icon.py from code, so the repository
-# carries the generator rather than the binary.
+# Every icon is produced by tools/make_icon.py from code, so the repository
+# carries the generator rather than the binaries.
 assets/icon.ico
 assets/icon.icns
+assets/icon.png
 
 # --- Design scratch -------------------------------------------------------
 design/*.html

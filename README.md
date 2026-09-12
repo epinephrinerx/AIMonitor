@@ -1,8 +1,8 @@
 # AI Usage Monitor
 
-A native Windows desktop monitor for AI usage quota — Claude, OpenAI and Gemini
-in one window. Written in Python with PySide6 (Qt), shipped as a standalone
-`.exe` and a per-user installer.
+A native desktop monitor for AI usage quota — Claude, OpenAI and Gemini in one
+window. Written in Python with PySide6 (Qt), shipped as a standalone `.exe` and
+a per-user installer on Windows, and as a `.dmg` on macOS.
 
 Two shapes in one window: a **full dashboard** with a tab per service, and a
 **desk widget** under 300×300 that stays on top and goes translucent. It also
@@ -27,6 +27,8 @@ lives in the system tray, showing your session level as a drawn icon.
 ---
 
 ## Installing
+
+### Windows
 
 Run **`AIUsageMonitor-Setup-1.1.0.exe`**.
 
@@ -56,6 +58,28 @@ installer.
 SmartScreen will show "Windows protected your PC" on a machine that has not seen
 the file before. Click **More info → Run anyway**. Removing that warning needs a
 code-signing certificate.
+
+### macOS
+
+Open **`AIUsageMonitor-1.1.0-<arch>.dmg`** and drag the app to Applications.
+Requires macOS 13 or newer, which is what the PySide6 wheels are built against.
+
+The build is ad-hoc signed rather than notarized. That is enough for the Mac
+that built it; a copy downloaded onto a different Mac arrives quarantined and
+needs a right-click → **Open** the first time (or
+`xattr -dr com.apple.quarantine "/Applications/AI Usage Monitor.app"`).
+
+Two things behave differently from the Windows build, both because macOS keeps
+them somewhere else:
+
+- **The Claude Code login lives in the Keychain**, not in
+  `~/.claude/.credentials.json`. The first refresh raises a Keychain prompt,
+  because the item belongs to Claude Code and not to this app. Answer **Always
+  Allow** once and it does not come back.
+- **Open at login** is a LaunchAgent in `~/Library/LaunchAgents`, which is the
+  same entry System Settings → General → **Login Items** lists. Turning it off
+  there wins; the app will not put itself back. Turning it on here takes effect
+  at your next login.
 
 ---
 
@@ -311,11 +335,17 @@ Three things do the work:
 Credential access is **strictly read-only**. The app never writes another tool's
 login file and never attempts a token refresh.
 
-API keys you save here are sealed with **Windows DPAPI** (`CryptProtectData`)
-before being written to settings, bound to your Windows user account — copying
-the blob to another machine or user yields nothing, and the plaintext never
-touches disk. Where DPAPI is unavailable, storage refuses rather than silently
-writing plaintext.
+API keys you save here are handed to the OS keystore, never to a file this app
+writes. On Windows that is **DPAPI** (`CryptProtectData`): the ciphertext goes
+into settings, bound to your Windows user account, so copying the blob to
+another machine or user yields nothing. On macOS the key goes into the **login
+Keychain** and settings holds only a reference to the item — the plaintext is
+never in the settings file at all. On any other platform storage refuses rather
+than silently writing plaintext.
+
+Writes to the Keychain go through `security -i`, which takes its arguments on
+stdin: passing a key as `-w <key>` would leave it in this process's command
+line for anything else running as you to read out of `ps`.
 
 Network requests are only ever made to the services you have connected, using
 their documented endpoints.
@@ -323,6 +353,8 @@ their documented endpoints.
 ---
 
 ## Building
+
+### Windows
 
 ```powershell
 .\build_ai_installer.ps1     # portable .exe + installer
@@ -357,6 +389,34 @@ To change the version, edit `AppVersion` in `installer\AIUsageMonitor.iss` and
 `version_info.txt`. The `AppId` GUID must stay fixed: it is what makes an upgrade
 replace the existing install instead of stacking a second entry in Apps &
 features.
+
+### macOS
+
+```bash
+./build_mac.sh               # .app + .dmg
+```
+
+Creates the virtual environment on first run, renders the icons (including the
+`.icns` the bundle needs), builds the one-directory `.app` from
+`AIUsageMonitor-mac.spec`, and wraps it in a drag-to-Applications disk image
+with `hdiutil`. No Homebrew formula or extra packaging tool involved —
+`hdiutil` and `iconutil` ship with the Xcode command line tools.
+
+It needs **Python 3.10 or newer**, which the system `/usr/bin/python3` is not:
+PySide6 6.11 does not publish wheels for 3.9. Install one from python.org,
+Homebrew or `uv`, or point the script at an existing interpreter:
+
+```bash
+PYTHON=/opt/homebrew/bin/python3.12 ./build_mac.sh
+```
+
+The bundle builds for the architecture of whichever Python runs it. For a
+universal2 build that also runs on Intel, use a universal2 interpreter (the
+python.org installer is one) and set `target_arch="universal2"` in
+`AIUsageMonitor-mac.spec`.
+
+To change the version, edit `APP_VERSION` in both `build_mac.sh` and
+`AIUsageMonitor-mac.spec`.
 
 ---
 

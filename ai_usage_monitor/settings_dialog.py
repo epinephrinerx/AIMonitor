@@ -7,6 +7,8 @@ single place - and a single UI - for every AI.
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -71,8 +73,8 @@ class ProviderSettingsDialog(QDialog):
 
         if not secrets.available():
             warning = QLabel(
-                "⚠ Encrypted key storage needs Windows DPAPI. Keys cannot be "
-                "saved on this platform."
+                "⚠ Encrypted key storage needs Windows or macOS. Keys cannot "
+                "be saved on this platform."
             )
             warning.setWordWrap(True)
             layout.addWidget(warning)
@@ -103,24 +105,31 @@ class ProviderSettingsDialog(QDialog):
         form = QFormLayout(box)
         form.setSpacing(8)
 
-        self.start_with_windows = QCheckBox("Start with Windows")
-        self.start_with_windows.setChecked(self.settings.start_with_windows)
+        self.start_at_login = QCheckBox(startup.describe())
+        self.start_at_login.setChecked(self.settings.start_at_login)
         if not startup.supported():
-            self.start_with_windows.setEnabled(False)
-            self.start_with_windows.setToolTip("Windows only.")
+            self.start_at_login.setEnabled(False)
+            self.start_at_login.setToolTip("Windows and macOS only.")
+        elif sys.platform == "darwin":
+            self.start_at_login.setToolTip(
+                "Adds a per-user LaunchAgent. System Settings' Login Items "
+                "page lists the same entry, and whatever you set there wins on "
+                "the next launch. Takes effect at your next login."
+            )
         else:
-            self.start_with_windows.setToolTip(
+            self.start_at_login.setToolTip(
                 "Adds a per-user entry under Run. Windows' own Startup Apps "
                 "page edits the same entry, and whatever you set there wins on "
                 "the next launch."
             )
-        form.addRow(self.start_with_windows)
+        form.addRow(self.start_at_login)
 
-        self.minimize_to_tray = QCheckBox("Minimize to tray when closed")
+        tray_word = "the menu bar" if sys.platform == "darwin" else "the tray"
+        self.minimize_to_tray = QCheckBox(f"Minimize to {tray_word} when closed")
         self.minimize_to_tray.setChecked(self.settings.minimize_to_tray)
         self.minimize_to_tray.setToolTip(
-            "Closing the window parks it in the notification area and keeps "
-            "watching. Exit in the tray menu quits for real."
+            f"Closing the window parks it in {tray_word} and keeps watching. "
+            "Exit in its menu quits for real."
         )
         form.addRow(self.minimize_to_tray)
 
@@ -223,16 +232,16 @@ class ProviderSettingsDialog(QDialog):
             row = self._rows.get(provider.id, {})
             self.settings.set_provider_enabled(provider.id, row["enabled"].isChecked())
 
-        self.settings.start_with_windows = self.start_with_windows.isChecked()
+        self.settings.start_at_login = self.start_at_login.isChecked()
         self.settings.minimize_to_tray = self.minimize_to_tray.isChecked()
         self.settings.theme = THEME_OPTIONS[self.theme_combo.currentIndex()][1]
         self.settings.window_size = WINDOW_SIZE_OPTIONS[
             self.window_size_combo.currentIndex()
         ][1]
 
-        # An explicit choice in this dialog goes straight to the registry;
+        # An explicit choice in this dialog goes straight to the OS entry;
         # `reconcile` at launch only ever defers to what it finds there.
-        startup.apply(self.settings.start_with_windows)
+        startup.apply(self.settings.start_at_login)
 
         self.settings.always_on_top = self.on_top.isChecked()
         self.settings.opacity = self.opacity.value()

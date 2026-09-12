@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from . import fonts
 from .main_window import MainWindow
 from .settings import APP, ORG, Settings
 from .single_instance import SingleInstance
@@ -19,6 +20,21 @@ def asset_path(name: str) -> Path:
     base = getattr(sys, "_MEIPASS", None)
     root = Path(base) if base else Path(__file__).resolve().parent.parent
     return root / "assets" / name
+
+
+def app_icon() -> QIcon:
+    """The window and Dock/taskbar icon.
+
+    PNG first: it is the one container every platform's Qt build reads without
+    an image plugin. The .ico stays as the fallback for an older asset folder
+    that predates the PNG, and .icns is not read here at all - macOS takes the
+    Dock tile from the bundle, not from the running app.
+    """
+    for name in ("icon.png", "icon.ico"):
+        path = asset_path(name)
+        if path.exists():
+            return QIcon(str(path))
+    return QIcon()
 
 
 def main() -> int:
@@ -33,8 +49,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP)
     app.setOrganizationName(ORG)
-    app.setStyle("Fusion")  # honours the palette consistently across Windows themes
-    app.setFont(QFont("Segoe UI", 9))
+    # Fusion honours the palette consistently across platform themes; the
+    # app paints its own surfaces anyway, so the native style would only
+    # add inconsistency between the widgets it draws and the ones we do.
+    app.setStyle("Fusion")
+    app.setFont(fonts.ui_font(9))
     # Hiding the window to the tray must not end the process; MainWindow calls
     # QApplication.quit() itself on a real exit.
     app.setQuitOnLastWindowClosed(False)
@@ -46,13 +65,13 @@ def main() -> int:
         # A copy is already running and has been told to come to the front.
         return 0
 
-    icon_file = asset_path("icon.ico")
-    if icon_file.exists():
-        app.setWindowIcon(QIcon(str(icon_file)))
+    icon = app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     window = MainWindow(Settings())
-    if icon_file.exists():
-        window.setWindowIcon(QIcon(str(icon_file)))
+    if not icon.isNull():
+        window.setWindowIcon(icon)
     # Launching the app again is the same request as double-clicking the tray
     # icon: show me the window I already have.
     guard.activated.connect(window.resume_from_tray)

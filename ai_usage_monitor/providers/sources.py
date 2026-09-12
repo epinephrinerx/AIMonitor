@@ -33,9 +33,13 @@ from .. import credentials as claude_credentials
 # -- Claude ---------------------------------------------------------------
 
 def _claude_code_login() -> Credential | None:
-    data = read_json(claude_credentials.credentials_path())
-    if not data:
-        return None
+    data, keychain = claude_credentials.probe()
+    if data is None:
+        # macOS keeps this login in the Keychain, and reading the token needs
+        # the user's consent - a dialog this probe must not raise from the GUI
+        # thread. Presence is all the card needs; the worker reads the token,
+        # and reports an expired one when the fetch comes back.
+        return Credential(kind=OAUTH, account="Keychain login") if keychain else None
     oauth = data.get("claudeAiOauth") or {}
     token = oauth.get("accessToken")
     if not token:

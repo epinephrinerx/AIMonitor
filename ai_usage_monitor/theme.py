@@ -8,10 +8,12 @@ set of steps rather than an automatic inversion of the light one.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import dataclass, field
 
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPalette
 
 
 # Categorical slots, in fixed assignment order.
@@ -124,7 +126,33 @@ DARK = Theme(
 
 
 def system_prefers_dark() -> bool:
-    """Read the Windows 'apps use light theme' preference; default to light."""
+    """Whether the OS is currently in dark mode; default to light.
+
+    Qt 6.5+ reports this itself on both Windows and macOS, which is one answer
+    instead of two platform readers - and it is the same value Qt uses for its
+    own default palette, so the app never disagrees with its own widgets. The
+    per-platform readers below are the fallback for a call made before
+    QGuiApplication exists (a screenshot harness, a unit test).
+    """
+    app = QGuiApplication.instance()
+    if app is not None:
+        scheme = app.styleHints().colorScheme()
+        if scheme == Qt.ColorScheme.Dark:
+            return True
+        if scheme == Qt.ColorScheme.Light:
+            return False
+
+    if sys.platform == "darwin":
+        try:
+            done = subprocess.run(
+                ["/usr/bin/defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        # The key is absent in light mode, which is an error exit, not "Light".
+        return done.returncode == 0 and done.stdout.strip() == "Dark"
+
     if sys.platform != "win32":
         return False
     try:

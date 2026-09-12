@@ -35,7 +35,7 @@ class ClaudeProvider(Provider):
         return CLAUDE_SOURCES
 
     def is_configured(self) -> bool:
-        return credentials.credentials_path().exists()
+        return credentials.available()
 
     def fetch(self, days: int, metric: str, want_history: bool) -> ProviderSnapshot:
         snapshot = ProviderSnapshot(

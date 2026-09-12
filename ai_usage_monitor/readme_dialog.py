@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFont, QPalette
+from PySide6.QtGui import QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import fonts
 from .theme import Theme, qcolor
 
 DOC_NAME = "README.md"
@@ -42,6 +43,9 @@ def readme_path() -> Path | None:
             Path(frozen) / "assets",
             exe_dir,
             exe_dir / "_internal",
+            # A macOS .app: the binary sits in Contents/MacOS, and the payload
+            # in Contents/Frameworks with Contents/Resources beside it.
+            exe_dir.parent / "Resources",
         ]
     package_root = Path(__file__).resolve().parent.parent
     roots += [package_root, package_root / "assets"]
@@ -124,7 +128,7 @@ class ReadmeDialog(QDialog):
 
     def apply_theme(self, theme: Theme) -> None:
         self.theme = theme
-        body = QFont("Segoe UI", 10)
+        body = fonts.ui_font(10)
         self.view.setFont(body)
         # Qt's markdown renderer uses the document stylesheet for block
         # elements; tables and code need explicit colours or they render on a

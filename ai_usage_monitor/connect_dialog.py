@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -217,7 +218,15 @@ class ConnectDialog(QDialog):
             typed = self._key_field.text().strip().strip('"')
             if typed:
                 # Blank means "leave the stored key alone".
-                self.settings.set_provider_key(self.provider.id, typed)
+                try:
+                    self.settings.set_provider_key(self.provider.id, typed)
+                except secrets.SecretsUnavailable as exc:
+                    # The keystore can refuse - a cancelled Keychain prompt is
+                    # the common one. Say so and keep the dialog open with the
+                    # key still typed in, rather than reporting a save that
+                    # did not happen.
+                    QMessageBox.warning(self, "Key not saved", str(exc))
+                    return
         if self._extra_field is not None:
             self.settings.set_provider_extra(
                 self.provider.id, self._extra_field.text().strip()
