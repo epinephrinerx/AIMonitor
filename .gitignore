@@ -1,8 +1,46 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
 .venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Build output ---------------------------------------------------------
+# PyInstaller work and output trees, and the packaged installers. The .spec
+# files are deliberately NOT ignored - they are the build definition.
 build/
 dist/
 installer_out/
-__pycache__/
-*.pyc
+
+# macOS packaging output (see the mac port notes in the README).
+*.app/
+*.dmg
+
+# --- Generated assets -----------------------------------------------------
+# Both icons are produced by tools/make_icon.py from code, so the repository
+# carries the generator rather than the binary.
 assets/icon.ico
+assets/icon.icns
+
+# --- Design scratch -------------------------------------------------------
 design/*.html
+
+# --- OS cruft -------------------------------------------------------------
+# .DS_Store turns up the moment this tree is opened on a Mac; Desktop.ini is
+# written by OneDrive, which is where this project lives.
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+
+# --- Editors --------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
