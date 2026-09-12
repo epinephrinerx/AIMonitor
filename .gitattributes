@@ -1,0 +1,23 @@
+# Normalise line endings so a Windows and a macOS checkout of this repo do not
+# show every file as modified. Everything is stored LF in the repository and
+# checked out LF, which is what Python, PyInstaller and the macOS toolchain
+# expect.
+* text=auto eol=lf
+
+# Windows-only toolchain files, consumed by Windows-only tools. Keep these CRLF
+# in the working tree so PowerShell and the Inno Setup compiler see native line
+# endings.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+
+# Binaries: never touch these. `text=auto` detects most of them, but saying so
+# explicitly means a stray heuristic can never corrupt an icon or a screenshot.
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.dmg binary
