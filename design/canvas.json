@@ -1,0 +1,34 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Widget meters" },
+    { "id": "page-2", "name": "Dashboard + throughput" }
+  ],
+  "artboards": [
+    { "file": "WidgetRadial.dc.html",    "page": "page-1", "x": 0,    "y": 0,   "w": 700, "h": 430 },
+    { "file": "WidgetSegmented.dc.html", "page": "page-1", "x": 800,  "y": 0,   "w": 700, "h": 430 },
+    { "file": "WidgetLinear.dc.html",    "page": "page-1", "x": 0,    "y": 570, "w": 700, "h": 430 },
+    { "file": "WidgetHero.dc.html",      "page": "page-1", "x": 800,  "y": 570, "w": 700, "h": 430 },
+
+    { "file": "Main.dc.html",             "page": "page-2", "x": 0,    "y": 0,   "w": 1440, "h": 900 },
+    { "file": "ThroughputAnatomy.dc.html","page": "page-2", "x": 1560, "y": 0,   "w": 1080, "h": 640 }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "page": "page-1",
+      "x": 0,
+      "y": -190,
+      "w": 700,
+      "text": "Widget mode — pick one.\nAll four fit 260×230 and use the existing meter contract: fill carries severity, unfilled track is a lighter step of the same blue ramp, and the severity word sits beside the colour so state never rests on hue alone.\nShown at Session 82% so the warning treatment is visible."
+    },
+    {
+      "id": "sampling",
+      "page": "page-2",
+      "x": 1560,
+      "y": 700,
+      "w": 1080,
+      "text": "DECIDED — throughput is summarised, not sampled.\nEach point is the average output tokens/sec over one interval (default 3 min, selectable 1/3/5/10/15). The app diffs cumulative output tokens between refreshes and closes a bucket when the interval elapses, so there is no second clock and no per-second work — the sampler concern is gone.\nStill true: the trace only sees CLI sessions, the same blind spot as the daily chart, so a VS Code or desktop-app response reads as 0 tok/s.\nWidget mode (Option A) carries no throughput trace — it stays at ~12 MB by not parsing transcripts at all."
+    }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}
