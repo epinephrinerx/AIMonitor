@@ -6,9 +6,9 @@ now?" It returns meters (things with a percentage and a reset time), stats
 
 Not every service can fill in every field, and the model is deliberate about
 that. Claude exposes a real server-side quota endpoint, so its meters carry true
-percentages. OpenAI and Gemini expose spend and token counts but no consumer
-quota, so they return meters with `percent=None`, which the UI renders as a stat
-rather than inventing a denominator.
+percentages, as does OpenAI's Codex quota. API spend without a local budget and
+Gemini request counts use `percent=None`, rendered as a stat without inventing
+a denominator.
 """
 
 from __future__ import annotations

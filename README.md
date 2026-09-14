@@ -23,6 +23,7 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Credential handling](#credential-handling)
 - [Building](#building)
 - [Architecture](#architecture)
+- [Working with Claude Code](#working-with-claude-code)
 
 ---
 
@@ -68,19 +69,64 @@ found for each.
 | Service | Detected from | What it reports |
 |---|---|---|
 | **Claude** | Claude Code login | **True quota.** Session (5-hour), weekly, and per-model weekly windows, with real percentages and reset times. Plus local history: tokens per day, by model, by project. |
-| **OpenAI** | Codex CLI login · `OPENAI_API_KEY` · Admin key saved here | **API platform spend only.** Month-to-date and today's cost, tokens by model. Needs an Admin key (`sk-admin-…`), not a project key. |
+| **OpenAI** | Codex ChatGPT login · `OPENAI_ADMIN_KEY` / `OPENAI_API_KEY` · Admin key saved here | **Codex quota:** server-reported percentages and reset times, plus available daily token totals. Without a Codex ChatGPT login, an optional Admin key (`sk-admin-…`) provides API platform spend and tokens by model. |
 | **Gemini** | Gemini CLI · `GOOGLE_APPLICATION_CREDENTIALS` · gcloud ADC · service account | **Request counts only.** From Cloud Monitoring, which is OAuth-only. Needs Monitoring Viewer on the project. |
 
-### What no provider can show
+### OpenAI: Codex quota and API spend
 
-There is **no public API** for ChatGPT Plus/Pro or Gemini Advanced
-*subscription* message limits. Only Claude exposes a real quota endpoint, which
-is why only Claude gets true percentage gauges. Services with no denominator
-show their figure plainly rather than inventing a percentage.
+Sign in to Codex with ChatGPT, then refresh the OpenAI tab. The monitor reads
+`auth.json` from `CODEX_HOME` (default `~/.codex`) and uses the installed Codex
+executable's [App Server protocol](https://learn.chatgpt.com/docs/app-server)
+to read `account/rateLimits/read`. Both Claude and Codex therefore have real
+percentage gauges in the dashboard, widget and tray. Window durations and reset
+times come from the server, including additional limit groups when returned.
 
-Consumer-account login was deliberately not built. It would mean storing your
-Google or OpenAI password, or scraping session cookies from undocumented
-endpoints that break constantly and violate those services' terms.
+`account/usage/read` supplies available daily **total** tokens. Missing history
+does not discard quota. This data does not provide output-token, model/project,
+or dollar breakdowns; select **Total tokens** to see the daily chart. Missing
+days are not filled with invented zeroes. Codex limits are not a promise of
+visibility into every ChatGPT feature's message limits.
+
+A Codex ChatGPT login takes priority, including when an older installation has
+saved Admin keys. No settings reset or key deletion is needed. Expired Codex
+logins show a renewal message instead of silently switching to API spend.
+Without a Codex ChatGPT login, the app tries the saved Admin key, environment
+key, then a CLI API key. Ordinary project keys are marked Limited. API mode
+retains its separate monthly spend/budget and history views.
+
+Codex CLI or the Codex desktop app must be installed separately. The monitor
+finds `codex.exe` on PATH or in the desktop app's per-user installation. It starts
+a hidden App Server only during refresh, using an isolated temporary home and
+the experimental externally supplied token login. Access tokens travel through
+stdin, not command arguments; refresh tokens and the user's Codex configuration
+are never copied. Token refresh requests are refused: open Codex to renew the
+original login. This experimental integration may need updates when Codex changes.
+
+Services with no denominator show their figure plainly. The monitor does not
+collect consumer passwords or browser cookies.
+
+### OpenAI shows no data: do not reset settings
+
+The 2026-09-14 fix makes Codex ChatGPT login take priority over existing Admin
+keys. An earlier Codex integration build still selected saved Admin keys first,
+so existing installations could stay in API spend mode instead of showing quota.
+The fix preserves keys and settings; no Registry reset is needed.
+
+To diagnose an empty OpenAI tab:
+
+1. Check **Connections** for the selected source. With a Codex ChatGPT login,
+   the fixed build should select **Codex CLI login (ChatGPT)**.
+2. Check the running executable path. Exit the old copy from the tray before
+   opening another build: the single-instance guard can bring an older copy to
+   the front instead. Closing the window alone normally only hides it.
+3. Open the OpenAI tab and read its error banner. If the token is expired, open
+   Codex to renew the login; then refresh the monitor.
+4. Select **Total tokens** for the daily chart. History availability is separate
+   from quota; unavailable history should not remove valid quota gauges.
+
+The build verified in the live GUI on 2026-09-14 is
+`dist/codex-first/AIUsageMonitor.exe`. The earlier `dist/openai-quota` build and
+the previously installed Start Menu shortcut were not updated in that repair.
 
 ---
 
@@ -268,6 +314,10 @@ Settings live in the registry under `HKCU\Software\AIUsageMonitor`.
 
 Measured on the packaged executable, not estimated.
 
+These measurements predate the Codex App Server integration. OpenAI quota
+refresh temporarily starts a separate Codex process, which adds memory and
+startup overhead until the request finishes; it is closed after each refresh.
+
 | State | Memory | 1-second timer |
 |---|---|---|
 | Dashboard | 75–94 MB | running |
@@ -303,6 +353,10 @@ Three things do the work:
 - **Expired Claude token.** The app never refreshes it — Claude Code owns that
   cycle, and a second process writing that file can invalidate your login. If it
   expires the app says so and asks you to start Claude Code.
+- **Codex login and runtime.** Requires a file-backed ChatGPT login and an
+  installed Codex executable. Keyring-only logins are not detected. Expired or
+  rejected tokens require opening Codex again. A timeout or unavailable token
+  history is shown as an error rather than being presented as zero usage.
 
 ---
 
@@ -367,10 +421,11 @@ ai_usage_monitor/
   providers/
     base.py              the Provider contract: Meter / Stat / ProviderSnapshot
     claude_provider.py   OAuth quota + local transcript history
-    openai_provider.py   Admin Usage & Costs API
+    openai_provider.py   Codex quota/history or Admin Usage & Costs API
     gemini_provider.py   Cloud Monitoring via service-account JWT
     sources.py           where each service's login can live
   detection.py           finds an existing sign-in, read-only
+  codex_usage.py         isolated Codex App Server client and quota/history mapping
   usage_log.py           incremental, aggregate-on-ingest transcript parsing
   api.py                 Claude OAuth usage/profile endpoints
   credentials.py         read-only access to ~/.claude/.credentials.json
@@ -395,14 +450,28 @@ Adding a service means writing one `Provider` subclass and adding it to
 `providers/__init__.py`; the tabs, connection cards and refresh loop are all
 driven off that list.
 
+Run the OpenAI detection, protocol, quota/history and API regression tests with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
 ### Notes
 
 - Charts avoid a second y-axis, assign categorical hues in fixed order, and fold
   past the eighth series into "Other". Axis maxima are chosen by rounding the
   *step*, so ticks land on round numbers.
 - Dollar figures for Claude are labelled *equivalent API value* — a Max or Pro
-  subscription is not billed per token. OpenAI figures are real spend.
+  subscription is not billed per token. OpenAI dollar figures in Admin API mode
+  are real spend; Codex quota mode does not report dollar values.
 - Cache pricing follows the published multipliers: a 5-minute cache write costs
   1.25× the input rate, a 1-hour write 2×, and a cache read 0.1×.
 - A failure in one service never discards another's result; each is fetched and
   reported independently, with its own error banner.
+
+## Working with Claude Code
+
+Read [CLAUDE.md](CLAUDE.md) before changing the project. It records the active
+package, Codex-first detection requirements, credential handling, the
+2026-09-14 fix and verification results, and commands for testing and building.
+Keep both documents aligned with the implementation when behavior changes.

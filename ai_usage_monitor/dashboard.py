@@ -150,6 +150,7 @@ class ProviderPage(QWidget):
 
         configured = snapshot.configured
         self.setup_card.setVisible(not configured)
+        self.setup_body.setText(snapshot.setup_hint or self.provider.setup_hint)
 
         meters = snapshot.meters
         while len(self._gauges) < len(meters):
@@ -186,6 +187,7 @@ class ProviderPage(QWidget):
             self.chart_title.setText(f"Usage per day · last {history.days} days")
             self.daily_chart.set_data(history.buckets, history.series, history.metric)
             self.model_chart.set_data(history.by_model, history.metric)
+            self.model_card.setVisible(bool(history.by_model))
             self.model_title.setText(f"By model · last {history.days} days")
             self.project_card.setVisible(bool(history.by_project))
             if history.by_project:

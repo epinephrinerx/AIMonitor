@@ -1,6 +1,6 @@
 """Claude provider - server-side quota plus local transcript history.
 
-This is the only provider with true quota percentages: Claude Code ships an
+Claude Code ships an
 OAuth usage endpoint that reports utilisation against the plan's real limits.
 Credentials are the ones Claude Code already stored, read-only.
 """

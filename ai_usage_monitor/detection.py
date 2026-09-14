@@ -57,10 +57,13 @@ class Credential:
     """One usable credential plus where it came from."""
 
     kind: str
-    value: str = ""            # token, key, or a path for service accounts
+    value: str = field(default="", repr=False)  # never include secrets in repr
     account: str = ""
     expires_at: dt.datetime | None = None
     project: str = ""
+    account_id: str = ""
+    usage_capable: bool = True
+    limited_reason: str = ""
 
     @property
     def expired(self) -> bool:
@@ -147,9 +150,9 @@ def resolve(provider_id: str, sources: list[Source]) -> Detection:
         if credential.expired:
             detection.state = EXPIRED
             detection.hint = source.refresh_hint or "Sign in again to refresh."
-        elif not source.usage_capable:
+        elif not source.usage_capable or not credential.usage_capable:
             detection.state = PARTIAL
-            detection.hint = source.limited_reason
+            detection.hint = credential.limited_reason or source.limited_reason
         else:
             detection.state = CONNECTED
 
