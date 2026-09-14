@@ -7,7 +7,7 @@
 
 - แอป Windows ใช้ Python + PySide6 มี Dashboard, Widget และ System tray
 - ซอร์สหลักคือ `ai_usage_monitor/`; entry point คือ `run_ai_monitor.py`
-- `claude_monitor/` และ `run_app.py` เป็นโปรแกรมรุ่นเก่า อย่าใช้เป็น entry point ของ AI Usage Monitor
+- `run_ai_monitor.py` เป็น entry point เดียว โปรแกรมรุ่นเก่า `claude_monitor/` กับ `run_app.py` ถูกลบออกจาก repo แล้ว ยังกู้ได้จาก history ถ้าจำเป็น
 - ใช้ `.venv\Scripts\python.exe` และ `AIUsageMonitor.spec` สำหรับ portable build
 - ตรวจ `git status` ก่อนแก้ และรักษางานที่ยังไม่ได้ commit ของผู้ใช้หรือผู้ช่วยอื่น
 

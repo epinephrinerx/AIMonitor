@@ -31,9 +31,9 @@ EXCLUDED_QT = [
 EXCLUDED_STDLIB = ["tkinter", "unittest", "pydoc_data", "test", "distutils"]
 
 a = Analysis(
-    # Must be the ai_usage_monitor entry point. `run_app.py` imports the older
-    # claude_monitor package, so pointing here at that file built the wrong app
-    # under this name.
+    # The ai_usage_monitor entry point. A second entry point once existed for a
+    # retired predecessor and was briefly named here by mistake, which built the
+    # wrong application under this name; both are gone now.
     ["run_ai_monitor.py"],
     pathex=[],
     binaries=[],

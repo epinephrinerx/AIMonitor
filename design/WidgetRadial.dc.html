@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+    a { color: #2a78d6; } a:hover { color: #1c5cab; }
+    .cap { font-size: 12px; letter-spacing: .01em; }
+  </style>
+</helmet>
+
+<div style="display:flex; flex-direction:column; gap:18px; padding:28px; background:#f2f1ee; width:100%; box-sizing:border-box;">
+
+  <div style="display:flex; flex-direction:column; gap:4px;">
+    <div style="font-size:15px; font-weight:600; color:#0b0b0b;">Option A · Radial arc row</div>
+    <div class="cap" style="color:#52514e; max-width:620px;">Three 270° arcs in a row. Same meter language as the dashboard gauges, shrunk. Reads as one glance.</div>
+  </div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start;">
+
+    <!-- LIGHT -->
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <div class="cap" style="color:#898781;">Light · 260 × 230</div>
+      <div style="width:260px; height:230px; background:#fcfcfb; border:1px solid rgba(11,11,11,0.10); border-radius:10px; box-sizing:border-box; padding:12px; display:flex; flex-direction:column; gap:10px;">
+
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:12px; font-weight:600; color:#0b0b0b;">Claude</div>
+          <div style="font-size:10px; color:#898781;">Max · 5x</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; gap:6px;">
+          <sc-for list="{{meters}}" as="m" hint-placeholder-count="3">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:3px; width:72px;">
+              <svg viewBox="0 0 80 80" style="width:72px; height:72px; display:block;">
+                <path d="M 17.37 62.63 A 32 32 0 1 1 62.63 62.63"
+                      fill="none" stroke="#b7d3f6" stroke-width="8" stroke-linecap="round"></path>
+                <path d="M 17.37 62.63 A 32 32 0 1 1 62.63 62.63"
+                      fill="none" stroke="{{m.color}}" stroke-width="8" stroke-linecap="round"
+                      stroke-dasharray="{{m.dash}}"></path>
+                <text x="40" y="44" text-anchor="middle"
+                      style="font:600 17px 'Segoe UI', system-ui, sans-serif; fill:#0b0b0b;">{{m.pct}}</text>
+              </svg>
+              <div style="font-size:10px; font-weight:600; color:#0b0b0b; text-align:center; line-height:1.15;">{{m.title}}</div>
+              <div style="font-size:9px; color:#898781; text-align:center; line-height:1.15;">{{m.sub}}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:auto; display:flex; flex-direction:column; gap:2px;">
+          <div style="display:flex; align-items:center; gap:5px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fab219" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
+            <div style="font-size:10px; font-weight:600; color:#52514e;">Session high · resets in 1h 12m</div>
+          </div>
+          <div style="font-size:9px; color:#898781;">updated 14s ago</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DARK -->
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <div class="cap" style="color:#898781;">Dark · 260 × 230</div>
+      <div style="width:260px; height:230px; background:#1a1a19; border:1px solid rgba(255,255,255,0.10); border-radius:10px; box-sizing:border-box; padding:12px; display:flex; flex-direction:column; gap:10px;">
+
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:12px; font-weight:600; color:#ffffff;">Claude</div>
+          <div style="font-size:10px; color:#898781;">Max · 5x</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; gap:6px;">
+          <sc-for list="{{metersDark}}" as="m" hint-placeholder-count="3">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:3px; width:72px;">
+              <svg viewBox="0 0 80 80" style="width:72px; height:72px; display:block;">
+                <path d="M 17.37 62.63 A 32 32 0 1 1 62.63 62.63"
+                      fill="none" stroke="#104281" stroke-width="8" stroke-linecap="round"></path>
+                <path d="M 17.37 62.63 A 32 32 0 1 1 62.63 62.63"
+                      fill="none" stroke="{{m.color}}" stroke-width="8" stroke-linecap="round"
+                      stroke-dasharray="{{m.dash}}"></path>
+                <text x="40" y="44" text-anchor="middle"
+                      style="font:600 17px 'Segoe UI', system-ui, sans-serif; fill:#ffffff;">{{m.pct}}</text>
+              </svg>
+              <div style="font-size:10px; font-weight:600; color:#ffffff; text-align:center; line-height:1.15;">{{m.title}}</div>
+              <div style="font-size:9px; color:#898781; text-align:center; line-height:1.15;">{{m.sub}}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:auto; display:flex; flex-direction:column; gap:2px;">
+          <div style="display:flex; align-items:center; gap:5px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fab219" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
+            <div style="font-size:10px; font-weight:600; color:#c3c2b7;">Session high · resets in 1h 12m</div>
+          </div>
+          <div style="font-size:9px; color:#898781;">updated 14s ago</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:10px; align-items:flex-start; max-width:640px; padding:12px 14px; background:#fcfcfb; border:1px solid rgba(11,11,11,0.10); border-radius:8px;">
+    <div style="width:3px; align-self:stretch; background:#2a78d6; border-radius:2px;"></div>
+    <div class="cap" style="color:#52514e; line-height:1.5;">
+      <b style="color:#0b0b0b;">Tradeoff.</b> Best legibility per meter — the arc plus a centred figure survives down to 64px.
+      Costs the most vertical room, so the countdown collapses to one shared line rather than one per window.
+      Paint cost is three stroked arcs, negligible. Only fits three windows before the arcs drop under 60px.
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":700,"height":420}}'>
+class Component extends DCLogic {
+  // 270° arc at r=32 -> 0.75 * 2πr = 150.8 user units of stroke length.
+  arc(pct, color) {
+    const LEN = 150.8;
+    const on = (Math.max(0, Math.min(100, pct)) / 100) * LEN;
+    return { dash: on.toFixed(1) + ' ' + LEN.toFixed(1), color: color };
+  }
+  build(accent) {
+    const rows = [
+      { title: 'Session', sub: '5-hour', pct: 82, color: '#fab219' },
+      { title: 'Weekly',  sub: 'all models', pct: 34, color: accent },
+      { title: 'Weekly',  sub: 'Fable', pct: 0,  color: accent },
+    ];
+    return rows.map((r) => Object.assign({}, r, this.arc(r.pct, r.color), { pct: r.pct + '%' }));
+  }
+  renderVals() {
+    return { meters: this.build('#2a78d6'), metersDark: this.build('#3987e5') };
+  }
+}
+</script>
+</body>
+</html>

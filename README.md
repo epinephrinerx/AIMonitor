@@ -30,7 +30,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.2.6.exe`**.
+Run **`AIUsageMonitor-Setup-1.2.7.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current

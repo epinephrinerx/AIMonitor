@@ -16,7 +16,18 @@ Set-Location $PSScriptRoot
 
 $python = ".\.venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
-    Write-Error "No virtual environment. Run .\build.ps1 first to create it."
+    # Was a pointer to build.ps1, which existed mainly to bootstrap this and
+    # otherwise built the retired ClaudeUsageMonitor. One script, one job.
+    Write-Host "Creating virtual environment..." -ForegroundColor Cyan
+    python -m venv .venv
+    if (-not (Test-Path $python)) {
+        Write-Error "python -m venv did not produce $python. Is Python on PATH?"
+    }
+    & $python -m pip install --upgrade pip --quiet
+    & $python -m pip install -r requirements.txt
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "pip install -r requirements.txt failed with exit code $LASTEXITCODE"
+    }
 }
 
 # winget installs Inno Setup per-user by default, so %LocalAppData%\Programs is
