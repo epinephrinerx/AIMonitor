@@ -29,7 +29,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.1.0.exe`**.
+Run **`AIUsageMonitor-Setup-1.2.0.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -46,7 +46,7 @@ settings, including any stored API keys. A *silent* uninstall always keeps them.
 
 ### Portable alternative
 
-`AIUsageMonitor.exe` is a single 46 MB file that needs no install. It is slower
+`AIUsageMonitor.exe` is a single 49 MB file that needs no install. It is slower
 to start — a one-file build unpacks its whole payload into `%TEMP%` on every
 launch, measured at **1.40 s** against **0.63 s** for the installed build, and
 it leaves `_MEI*` folders behind. Use it for a USB stick; otherwise prefer the
@@ -213,7 +213,7 @@ formula is, the meters reflect it.
 
 | | Dashboard | Widget |
 |---|---|---|
-| Size | any, from 300×220 | ≤ 300 × 300 |
+| Size | any, from 300×220 | 150×96 to 300×300, opens at 230×175 |
 | Frame | normal window | frameless, draggable anywhere on its surface |
 | Always on top | no | optional (default on) |
 | Transparency | opaque | adjustable, default 92% |
@@ -223,6 +223,23 @@ formula is, the meters reflect it.
 **Switching:** drag the window below 380 px on either edge and it collapses.
 Double-click the widget, or use its right-click menu, to expand again. `Ctrl+W`
 toggles. Each mode remembers its own position and size.
+
+**Resizing the widget.** A frameless window has no border to grab, so the
+widget carves one out of its own edge: the outer 7 px resize, the rest still
+drags the window, and the cursor says which you are about to get. The drag is
+handed to Windows itself, so snapping and the 150×96–300×300 bounds come for
+free. The row degrades as it shrinks rather than squashing — meters that
+cannot reach a legible size are dropped, the percentage moves out of the ring
+into the caption below a 46 px arc, and the "updated" line is the first thing
+sacrificed when the content reaches the bottom edge.
+
+**Rotation.** The widget cycles through every configured service every two
+seconds, in step with the tray icon. Services that returned no data are
+skipped, so an unconfigured Gemini never takes a turn. Picking one service
+from the right-click **Show** menu pins it and stops the rotation; **All
+services (rotate)** starts it again. Pinning also restores the single-service
+fetch — a rotating widget has to ask every service for its quota, while a
+pinned one asks only the service you are looking at.
 
 The widget's right-click menu carries always-on-top, an **opacity slider** with a
 live % readout, which service to show, refresh, expand and quit.
@@ -250,7 +267,7 @@ you can go to lunch first.
 
 The widget degrades rather than squashing — meters that cannot reach a legible
 size are dropped, and below a 46 px arc the percentage moves out to the caption
-instead of overprinting the ring. At the 180×120 floor, one arc survives.
+instead of overprinting the ring. At the 150×96 floor, one arc survives.
 
 ### Displays and resolution
 

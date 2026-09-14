@@ -32,6 +32,12 @@ INTERVAL_OPTIONS = [
 RANGE_OPTIONS = [("7 days", 7), ("14 days", 14), ("30 days", 30), ("90 days", 90)]
 
 WIDGET_MAX_EDGE = 300  # the widget must fit inside 300x300
+# The floor the user can drag down to. The meter row degrades on the way
+# down - arcs that cannot reach a legible size are dropped, and the
+# percentage moves out of the ring into the caption - so this is about the
+# smallest that still reads at a glance.
+WIDGET_MIN_W = 150
+WIDGET_MIN_H = 96
 WIDGET_TRIGGER_EDGE = 380  # shrinking past this switches modes
 
 # A sane dashboard size: used to validate stored geometry and as the floor when
@@ -135,6 +141,20 @@ class Settings:
     @always_on_top.setter
     def always_on_top(self, value: bool) -> None:
         self._q.setValue("widget/alwaysOnTop", bool(value))
+
+    @property
+    def widget_rotate(self) -> bool:
+        """Cycle the widget through every service, the way the tray does.
+
+        On by default: a widget pinned to one service looked broken next to
+        a tray icon that was visibly rotating. Pinning one service from the
+        Show menu turns this off and restores the single-provider fetch.
+        """
+        return self._bool("widget/rotate", True)
+
+    @widget_rotate.setter
+    def widget_rotate(self, value: bool) -> None:
+        self._q.setValue("widget/rotate", bool(value))
 
     # -- refresh ---------------------------------------------------------
 

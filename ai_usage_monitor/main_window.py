@@ -53,6 +53,8 @@ from .settings import (
     RANGE_OPTIONS,
     Settings,
     WIDGET_MAX_EDGE,
+    WIDGET_MIN_H,
+    WIDGET_MIN_W,
     WIDGET_TRIGGER_EDGE,
 )
 from .settings_dialog import ProviderSettingsDialog
@@ -65,6 +67,11 @@ from .worker import RefreshResult, RefreshWorker
 DASHBOARD = "dashboard"
 WIDGET = "widget"
 CONNECTIONS = "connections"
+
+
+# Matches the tray's rotation so the two never disagree about which service
+# they are showing at a given moment.
+WIDGET_ROTATE_MS = 2000
 
 
 class MainWindow(QMainWindow):
@@ -206,6 +213,14 @@ class MainWindow(QMainWindow):
         self.compact = CompactView(self.theme)
         self.compact.expand_requested.connect(self.enter_dashboard_mode)
         self.compact.menu_requested.connect(self._show_widget_menu)
+        # Widget rotation: the tray has always cycled services every two
+        # seconds, so a widget frozen on one service read as broken beside
+        # it. Pinning a service from the Show menu stops the timer.
+        self._widget_pinned: str | None = None
+        self._rotate_index = 0
+        self._rotate_widget = QTimer(self)
+        self._rotate_widget.setInterval(WIDGET_ROTATE_MS)
+        self._rotate_widget.timeout.connect(self._advance_widget)
         self.stack.addWidget(self.compact)
 
         active = self.settings.active_provider
@@ -355,8 +370,12 @@ class MainWindow(QMainWindow):
         self.refresh_button.setEnabled(False)
         self.refresh_button.setText("Refreshing…")
         want_history = self.mode != WIDGET
-        # Widget mode only ever shows the active provider, so fetch just that one.
-        only = self._active_provider_id() if self.mode == WIDGET else ""
+        # Widget mode normally fetches only the service on screen. While the
+        # widget is rotating it shows all of them, so all of them have to be
+        # fetched - history stays off either way, which is the expensive part.
+        only = ""
+        if self.mode == WIDGET and not self._rotate_widget.isActive():
+            only = self._widget_provider_id()
         self.request_refresh.emit(
             self._days(), self._metric(), want_history, only
         )
@@ -370,6 +389,7 @@ class MainWindow(QMainWindow):
         if any(snap.ok for snap in result.snapshots.values()):
             self.last_success = result.finished_at
 
+        self._sync_widget_rotation()
         show_history = self.mode != WIDGET
         for provider_id, snapshot in result.snapshots.items():
             page = self.pages.get(provider_id)
@@ -411,6 +431,49 @@ class MainWindow(QMainWindow):
 
     # -- mode switching ---------------------------------------------------
 
+    def _widget_provider_id(self) -> str:
+        """Which service the widget shows: the pinned one, or the rotation."""
+        if self._widget_pinned:
+            return self._widget_pinned
+        if not self.settings.widget_rotate:
+            return self._active_provider_id()
+        showable = self._rotatable_ids()
+        if not showable:
+            return self._active_provider_id()
+        self._rotate_index %= len(showable)
+        return showable[self._rotate_index]
+
+    def _rotatable_ids(self) -> list[str]:
+        """Services worth cycling through: the ones that returned data."""
+        if self.last_result is None:
+            return [p.id for p in self.providers]
+        ids = [
+            p.id for p in self.providers
+            if (snap := self.last_result.snapshots.get(p.id)) is not None
+            and snap.configured
+        ]
+        return ids or [p.id for p in self.providers]
+
+    def _advance_widget(self) -> None:
+        showable = self._rotatable_ids()
+        if len(showable) < 2:
+            return
+        self._rotate_index = (self._rotate_index + 1) % len(showable)
+        self._render_compact()
+
+    def _sync_widget_rotation(self) -> None:
+        """Run the timer only while the widget is up and unpinned."""
+        rotate = (
+            self.mode == WIDGET
+            and self.settings.widget_rotate
+            and self._widget_pinned is None
+            and len(self._rotatable_ids()) > 1
+        )
+        if rotate and not self._rotate_widget.isActive():
+            self._rotate_widget.start()
+        elif not rotate and self._rotate_widget.isActive():
+            self._rotate_widget.stop()
+
     def _active_provider_id(self) -> str:
         index = self.tabs.currentIndex()
         if 0 <= index < len(self.providers):
@@ -443,12 +506,17 @@ class MainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setWindowOpacity(self.settings.opacity)
-        self.setMinimumSize(180, 120)
+        self.setMinimumSize(WIDGET_MIN_W, WIDGET_MIN_H)
         self.setMaximumSize(WIDGET_MAX_EDGE, WIDGET_MAX_EDGE)
         # Geometry is applied after show(): changing window flags re-creates the
         # native window, and a geometry set before that is discarded.
         self.show()
-        self._restore_geometry(WIDGET, QSize(260, 230))
+        self._sync_widget_rotation()
+        # The smallest size that still fits all three meters with their reset
+        # line - 260x230 left dead space under the content and read as
+        # oversized for a desk widget. Only new installs see this; a saved
+        # widget geometry still wins.
+        self._restore_geometry(WIDGET, QSize(230, 175))
         memory.trim_working_set()
         self._switching = False
         self._fit_to_screen()
@@ -482,6 +550,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.dashboard_page)
         self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowOpacity(1.0)
+        self._rotate_widget.stop()
         self.setMaximumSize(16777215, 16777215)
         self.setMinimumSize(DASHBOARD_DRAG_MIN_W, DASHBOARD_DRAG_MIN_H)
         self.show()
@@ -523,11 +592,21 @@ class MainWindow(QMainWindow):
             provider_menu = menu.addMenu("Show")
             group = QActionGroup(provider_menu)
             group.setExclusive(True)
-            active = self._active_provider_id()
+
+            rotating = self.settings.widget_rotate and self._widget_pinned is None
+            every = QAction("All services (rotate)", provider_menu)
+            every.setCheckable(True)
+            every.setChecked(rotating)
+            every.triggered.connect(self._rotate_all_providers)
+            group.addAction(every)
+            provider_menu.addAction(every)
+            provider_menu.addSeparator()
+
+            showing = self._widget_provider_id()
             for index, provider in enumerate(self.providers):
                 action = QAction(provider.display_name, provider_menu)
                 action.setCheckable(True)
-                action.setChecked(provider.id == active)
+                action.setChecked(not rotating and provider.id == showing)
                 action.triggered.connect(
                     lambda _checked=False, i=index: self._select_provider(i)
                 )
@@ -591,6 +670,19 @@ class MainWindow(QMainWindow):
 
     def _select_provider(self, index: int) -> None:
         self.tabs.setCurrentIndex(index)
+        if self.mode == WIDGET:
+            # An explicit choice pins the widget: rotating away from what the
+            # user just asked for would undo the click a second later.
+            self._widget_pinned = self.providers[index].id
+            self.settings.widget_rotate = False
+            self._sync_widget_rotation()
+        self._render_compact()
+        self.refresh()
+
+    def _rotate_all_providers(self) -> None:
+        self._widget_pinned = None
+        self.settings.widget_rotate = True
+        self._sync_widget_rotation()
         self._render_compact()
         self.refresh()
 
@@ -612,7 +704,7 @@ class MainWindow(QMainWindow):
             self.setWindowOpacity(value)
 
     def _render_compact(self) -> None:
-        provider_id = self._active_provider_id()
+        provider_id = self._widget_provider_id()
         snapshot = (
             self.last_result.snapshots.get(provider_id) if self.last_result else None
         )

@@ -7,8 +7,9 @@ dropped except how full each window is and when it resets.
 Painted in a single `paintEvent` rather than assembled from child widgets: at
 this size a layout of QLabels costs more memory and more layout passes than
 drawing directly, and there is nothing here to interact with. The whole surface
-is a drag handle (frameless windows have no title bar), double-click returns to
-the dashboard, and right-click opens the mode menu.
+is a drag handle (frameless windows have no title bar) except for a thin band
+at the edges, which resizes; double-click returns to the dashboard, and
+right-click opens the mode menu.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from ..settings import WIDGET_MIN_H, WIDGET_MIN_W
 from .. import formatting
 from ..providers import Meter, ProviderSnapshot
 from ..theme import (
@@ -39,6 +41,11 @@ GAP = 6.0
 # percentage moves out to the caption instead of overprinting the arc.
 INLINE_VALUE_MIN = 46.0
 
+# A frameless window has no border to grab, so one is carved out of the
+# widget's own edge. Wide enough to hit without aiming, narrow enough that
+# the middle still reads as a drag handle at the 150x96 floor.
+RESIZE_MARGIN = 7
+
 
 class CompactView(QWidget):
     """A row of radial meters plus a header naming the active provider."""
@@ -53,11 +60,15 @@ class CompactView(QWidget):
         self.snapshot: ProviderSnapshot | None = None
         self.status = ""
         self._drag_origin: QPointF | None = None
-        self.setMinimumSize(180, 120)
+        self.setMinimumSize(WIDGET_MIN_W, WIDGET_MIN_H)
+        # Needed for the hover cursor over the resize band; without it Qt
+        # only delivers moves while a button is held.
+        self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setToolTip(
-            "Drag to move · double-click to expand · right-click for options"
+            "Drag to move · drag an edge to resize · double-click to expand"
+            " · right-click for options"
         )
 
     def set_snapshot(
@@ -213,8 +224,13 @@ class CompactView(QWidget):
                     reset_text, Qt.TextElideMode.ElideRight, int(width)
                 ),
             )
+            cursor += small_metrics.height()
 
-        if self.status:
+        # Every line above is guarded against the footer; the footer itself was
+        # not, so at the smallest sizes "updated just now" printed on top of the
+        # meter caption. When the content already reaches the bottom, the age of
+        # the reading is the least valuable line on screen - drop it.
+        if self.status and cursor <= footer_top:
             painter.setPen(qcolor(self.theme.ink_muted))
             painter.drawText(
                 QRectF(
@@ -320,16 +336,64 @@ class CompactView(QWidget):
 
     # -- interaction ------------------------------------------------------
 
+    # -- resizing ----------------------------------------------------------
+
+    def _edges_at(self, pos) -> Qt.Edge:
+        """Which window edges, if any, the pointer is over."""
+        edges = Qt.Edge(0)
+        x, y = pos.x(), pos.y()
+        if x <= RESIZE_MARGIN:
+            edges |= Qt.Edge.LeftEdge
+        elif x >= self.width() - RESIZE_MARGIN:
+            edges |= Qt.Edge.RightEdge
+        if y <= RESIZE_MARGIN:
+            edges |= Qt.Edge.TopEdge
+        elif y >= self.height() - RESIZE_MARGIN:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    @staticmethod
+    def _cursor_for(edges: Qt.Edge) -> Qt.CursorShape:
+        left = bool(edges & Qt.Edge.LeftEdge)
+        right = bool(edges & Qt.Edge.RightEdge)
+        top = bool(edges & Qt.Edge.TopEdge)
+        bottom = bool(edges & Qt.Edge.BottomEdge)
+        if (left and top) or (right and bottom):
+            return Qt.CursorShape.SizeFDiagCursor
+        if (right and top) or (left and bottom):
+            return Qt.CursorShape.SizeBDiagCursor
+        if left or right:
+            return Qt.CursorShape.SizeHorCursor
+        if top or bottom:
+            return Qt.CursorShape.SizeVerCursor
+        return Qt.CursorShape.SizeAllCursor
+
+    # -- mouse -------------------------------------------------------------
+
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        if event.button() == Qt.MouseButton.LeftButton:
-            window = self.window()
-            self._drag_origin = (
-                event.globalPosition() - window.frameGeometry().topLeft().toPointF()
-            )
-            event.accept()
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        edges = self._edges_at(event.position())
+        if edges:
+            # Hand the drag to the window manager: it honours the window's
+            # minimum and maximum, snaps, and keeps the opposite corner fixed,
+            # none of which a hand-rolled geometry loop gets right for free.
+            handle = self.window().windowHandle()
+            if handle is not None:
+                self._drag_origin = None
+                handle.startSystemResize(edges)
+                event.accept()
+                return
+        window = self.window()
+        self._drag_origin = (
+            event.globalPosition() - window.frameGeometry().topLeft().toPointF()
+        )
+        event.accept()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
         if self._drag_origin is None:
+            # Hovering: show what the edge under the pointer would do.
+            self.setCursor(self._cursor_for(self._edges_at(event.position())))
             return
         if not event.buttons() & Qt.MouseButton.LeftButton:
             self._drag_origin = None
