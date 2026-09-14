@@ -37,6 +37,13 @@ assets/icon.icns
 Thumbs.db
 Desktop.ini
 
+# --- Design scratch -------------------------------------------------------
+# Canvas drafts and the exported meter studies. Working material, not part
+# of the build - and the export is 2.5 MB of inlined HTML. The whole folder
+# is ignored rather than a *.html rule: dropping that rule while the files
+# were still on disk is exactly how `git add -A` swept them in.
+design/
+
 # --- Editors --------------------------------------------------------------
 .vscode/
 .idea/
