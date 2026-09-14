@@ -102,8 +102,14 @@ stdin, not command arguments; refresh tokens and the user's Codex configuration
 are never copied. Token refresh requests are refused: open Codex to renew the
 original login. This experimental integration may need updates when Codex changes.
 
-Services with no denominator show their figure plainly. The monitor does not
-collect consumer passwords or browser cookies.
+**What still has no public API.** Codex quota covers the Codex surface, not
+every ChatGPT feature's message limits, and there is no public endpoint at all
+for Gemini Advanced *subscription* limits. Gemini therefore has no denominator
+and shows its request count plainly rather than inventing a percentage.
+
+Consumer-account login was deliberately not built. It would mean storing your
+Google or OpenAI password, or scraping session cookies from undocumented
+endpoints that break constantly and violate those services' terms.
 
 ### OpenAI shows no data: do not reset settings
 
@@ -424,6 +430,8 @@ ai_usage_monitor/
     openai_provider.py   Codex quota/history or Admin Usage & Costs API
     gemini_provider.py   Cloud Monitoring via service-account JWT
     sources.py           where each service's login can live
+  app.py                 QApplication setup, then the single-instance gate
+  single_instance.py     one running copy per user, via a named local socket
   detection.py           finds an existing sign-in, read-only
   codex_usage.py         isolated Codex App Server client and quota/history mapping
   usage_log.py           incremental, aggregate-on-ingest transcript parsing
@@ -433,9 +441,11 @@ ai_usage_monitor/
   startup.py             the start-with-Windows registry entry
   memory.py              working-set trim and measurement
   pricing.py             per-token list prices for equivalent-value figures
+  formatting.py          token counts, durations and reset times as text
   tray.py                the drawn tray icon, rotation and menu
   worker.py              background refresh across providers
   settings.py            typed QSettings wrapper
+  theme.py               palettes, severity thresholds, Windows theme probe
   main_window.py         tabs, mode switching, widget chrome, display handling
   dashboard.py           one provider's full page
   connections_page.py    the landing page: every service, detected the same way
@@ -471,7 +481,8 @@ Run the OpenAI detection, protocol, quota/history and API regression tests with:
 
 ## Working with Claude Code
 
-Read [CLAUDE.md](CLAUDE.md) before changing the project. It records the active
-package, Codex-first detection requirements, credential handling, the
-2026-09-14 fix and verification results, and commands for testing and building.
-Keep both documents aligned with the implementation when behavior changes.
+Read [CLAUDE.md](https://github.com/epinephrinerx/AIMonitor/blob/main/CLAUDE.md)
+before changing the project. It records the active package, Codex-first
+detection requirements, credential handling, the 2026-09-14 fix and
+verification results, and commands for testing and building. Keep both
+documents aligned with the implementation when behavior changes.
