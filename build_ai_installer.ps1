@@ -74,15 +74,35 @@ if (-not (Test-Path (Join-Path $appDir "AIUsageMonitor.exe"))) {
 }
 
 Write-Host "Compiling installer..." -ForegroundColor Cyan
+# The version Inno will stamp on the output, read from the script itself so
+# this check cannot drift from it.
+$issText = Get-Content "installer\AIUsageMonitor.iss" -Raw
+if ($issText -notmatch '#define\s+AppVersion\s+"([^"]+)"') {
+    Write-Error "Could not read AppVersion from the .iss"
+}
+$appVersion = $Matches[1]
+$expected = "installer_out\AIUsageMonitor-Setup-$appVersion.exe"
+if (Test-Path $expected) { Remove-Item -Force $expected }
+
 & $iscc "installer\AIUsageMonitor.iss"
+# ISCC is a native exe, so a failure does not trip $ErrorActionPreference.
+# Without this the script sailed past a real failure - "Resource update
+# error: EndUpdateResource failed" while OneDrive held the output folder -
+# and then reported the PREVIOUS version's installer as if it were new,
+# because the summary below just globs for the newest matching file.
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Inno Setup failed with exit code $LASTEXITCODE. If this is 'EndUpdateResource failed', the output folder was locked - OneDrive sync or antivirus - and a retry usually succeeds."
+}
+if (-not (Test-Path $expected)) {
+    Write-Error "Inno Setup reported success but $expected was not produced."
+}
 
 Write-Host ""
 $portable = Get-Item "dist\AIUsageMonitor.exe" -ErrorAction SilentlyContinue
 if ($portable) {
     Write-Host ("Portable  {0} ({1:N1} MB)" -f $portable.FullName, ($portable.Length / 1MB)) -ForegroundColor Green
 }
-$setup = Get-ChildItem "installer_out\AIUsageMonitor-Setup-*.exe" -ErrorAction SilentlyContinue |
-         Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$setup = Get-Item $expected -ErrorAction SilentlyContinue
 if ($setup) {
     Write-Host ("Installer {0} ({1:N1} MB)" -f $setup.FullName, ($setup.Length / 1MB)) -ForegroundColor Green
     Write-Host "Per-user install - no admin rights needed."

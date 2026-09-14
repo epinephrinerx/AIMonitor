@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import formatting
 from ..providers import Meter
-from ..theme import Theme, qcolor, severity_color
+from ..theme import Theme, qcolor, severity_color, severity_for
 from .cards import Card
 
 # The arc opens at the bottom: 270 degrees swept clockwise from lower-left.
@@ -158,10 +158,17 @@ class QuotaGauge(Card):
             self._arc.setVisible(True)
             self._figure.setVisible(bool(meter.detail))
             self._figure.setText(meter.detail)
-            self._arc.set_value(meter.percent, meter.severity)
+            # The local 75/90 thresholds apply here too, taking whichever is
+            # worse. The widget and the tray have always done this; the
+            # dashboard used the server's word raw, so a service reporting
+            # "normal" at 95% drew a calm arc on this page and a red one
+            # everywhere else. Invisible while the fill was the accent hue;
+            # not invisible once a healthy meter is green.
+            severity = severity_for(meter.percent, meter.severity)
+            self._arc.set_value(meter.percent, severity)
             self._severity.setVisible(True)
             glyph, word = _SEVERITY_WORDS.get(
-                meter.severity, ("", meter.severity.title())
+                severity, ("", severity.title())
             )
             self._severity.setText(f"{glyph} {word}".strip())
 

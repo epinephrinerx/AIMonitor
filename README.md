@@ -29,7 +29,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.2.2.exe`**.
+Run **`AIUsageMonitor-Setup-1.2.5.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -259,10 +259,19 @@ two people signed in to the same machine each get their own copy.
 ### Meters
 
 Both modes use the same meter language: a 270° arc, filled to the level, with
-the percentage in the middle. Colour follows local thresholds — **yellow from
-75%, red from 90%** — applied on top of whatever severity the server reports,
-taking whichever is worse. A ⚠ glyph rides along past the threshold so the state
-never rests on colour alone.
+the percentage in the middle, on a neutral grey track.
+
+Colour is a **traffic light**: green while there is room, **yellow from 75%**,
+**red from 90%**, with the server's own "serious" sitting between the last
+two. Local thresholds are applied on top of whatever severity the server
+reports, taking whichever is worse — so a service calling 95% "normal" still
+goes red. A ⚠ glyph and a written word (Normal / High / Critical) ride along
+with it, so the state never rests on colour alone. That pairing matters more
+than usual here: red and green are the pair most often confused.
+
+The dashboard, the widget and the tray icon all read from the same rule. They
+did not always — the dashboard used to take the server's word without applying
+the local thresholds, which only showed when a healthy meter turned green.
 
 Reset always shows **both** the countdown and the wall-clock time
 (`resets in 1h 43m · 18:32`): one answers how long you have, the other whether
@@ -289,13 +298,25 @@ signals.
 ## System tray
 
 The tray icon is **drawn, not loaded**: a tile filled to the active service's
-session level with the percentage across it, coloured by the same 75/90 rule. The
-number is painted twice — ink above the fill line, white below — because the fill
-line usually cuts through the digits.
+**five-hour window** with the percentage across it, coloured by the same 75/90
+traffic light. The number is painted twice — ink above the fill line, white
+below — because the fill line usually cuts through the digits.
 
-With several services connected it **rotates every 2 seconds**, over only those
-that have a percentage to show, and holds still when there is just one. The
-tooltip names the service, since a rotating icon cannot.
+Only the five-hour window is *drawn*, because one tile holds one number, and
+the short window is the one that decides whether you can keep working now.
+Which window that is comes from the service, not from an assumption: Claude
+labels its five-hour limit, and Codex reports each window's duration in
+minutes. The menu below is **not** filtered this way — it lists every window.
+
+With several services connected it **rotates every 2 seconds**, and holds still
+when there is just one. The tooltip names the service, since a rotating icon
+cannot.
+
+A service whose refresh fails — rate limited, token expired, no network — keeps
+its place in the rotation showing the last reading that arrived, and both the
+tooltip and its menu header say the refresh failed. Dropping it instead used to
+stop the rotation outright the moment only one service was left, which is
+indistinguishable from a frozen icon.
 
 - **Double-click** restores the full window.
 - **Right-click** opens the menu:

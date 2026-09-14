@@ -9,7 +9,7 @@
 
 #define AppName        "AI Usage Monitor"
 #define AppShortName   "AIUsageMonitor"
-#define AppVersion     "1.2.2"
+#define AppVersion     "1.2.5"
 #define AppPublisher   "Apichart Chantanis"
 #define AppExe         "AIUsageMonitor.exe"
 #define SourceDir      "..\dist\AIUsageMonitor"
