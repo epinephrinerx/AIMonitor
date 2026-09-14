@@ -29,7 +29,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.2.1.exe`**.
+Run **`AIUsageMonitor-Setup-1.2.2.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -233,9 +233,12 @@ cannot reach a legible size are dropped, the percentage moves out of the ring
 into the caption below a 46 px arc, and the "updated" line is the first thing
 sacrificed when the content reaches the bottom edge.
 
-**Rotation.** The widget cycles through every configured service every two
-seconds, in step with the tray icon. Services that returned no data are
-skipped, so an unconfigured Gemini never takes a turn. Picking one service
+**Rotation.** The widget cycles through every configured service every four
+seconds — slower than the tray's two, because the tray shows one number in
+one glyph while the widget shows a row of meters with captions and a reset
+line, and two seconds was not long enough to finish reading one service
+before it was replaced. Services that returned no data are skipped, so an
+unconfigured Gemini never takes a turn. Picking one service
 from the right-click **Show** menu pins it and stops the rotation; **All
 services (rotate)** starts it again. Pinning also restores the single-service
 fetch — a rotating widget has to ask every service for its quota, while a

@@ -69,9 +69,12 @@ WIDGET = "widget"
 CONNECTIONS = "connections"
 
 
-# Matches the tray's rotation so the two never disagree about which service
-# they are showing at a given moment.
-WIDGET_ROTATE_MS = 2000
+# Slower than the tray's two seconds, deliberately. The tray shows one
+# number in one glyph, so a quick cycle reads fine; the widget shows a row
+# of meters with captions and a reset line, and swapping all of that every
+# two seconds gave the eye no time to finish reading a service before it
+# was replaced.
+WIDGET_ROTATE_MS = 4000
 
 
 class MainWindow(QMainWindow):
