@@ -786,6 +786,15 @@ class MainWindow(QMainWindow):
             # This is the drag that collapsed the window, not a dashboard size
             # anyone wants back. Storing it would reopen the app squeezed.
             return
+        if mode == WIDGET and (
+            rect.width() > WIDGET_MAX_EDGE or rect.height() > WIDGET_MAX_EDGE
+        ):
+            # The mirror of the guard above. Saving here during a mode change,
+            # before the window has been resized into widget bounds, stored a
+            # full dashboard rect under the widget key - one machine had
+            # "0 0 1920 1032" - which then reopened the widget clamped to its
+            # 300x300 maximum instead of the intended default.
+            return
         self.settings.save_geometry(
             mode,
             [rect.x(), rect.y(), rect.width(), rect.height()],
@@ -816,6 +825,15 @@ class MainWindow(QMainWindow):
             and mode == DASHBOARD
             and (rect[2] < WIDGET_TRIGGER_EDGE or rect[3] < WIDGET_TRIGGER_EDGE)
         ):
+            rect = None
+
+        if (
+            rect
+            and mode == WIDGET
+            and (rect[2] > WIDGET_MAX_EDGE or rect[3] > WIDGET_MAX_EDGE)
+        ):
+            # Written by an older build before the save guard existed. Falling
+            # back repairs it: the next save stores a sane rect.
             rect = None
 
         if rect and rect[2] > 0 and rect[3] > 0 and self._on_a_screen(rect):
