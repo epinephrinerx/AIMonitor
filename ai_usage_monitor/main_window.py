@@ -13,6 +13,12 @@ window position you chose for either.
 
 Widget mode also refreshes less work, not just less pixels: `want_history` goes
 false, so no transcripts are parsed and no chart data is retained.
+
+Commands live in the menu bar (File / Settings / About); the header row keeps
+the controls that change what the figures mean - metric, range, interval -
+plus the two buttons pressed often enough that a menu would be in the way,
+Widget and Refresh. Widget mode hides the bar, so every menu action is added
+to the window as well and its shortcut keeps working while the bar is hidden.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import datetime as dt
 import hashlib
 
 from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -38,20 +44,34 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import api, formatting, memory, startup, theme as theming
+from . import (
+    api,
+    detection,
+    formatting,
+    memory,
+    report as reporting,
+    startup,
+    theme as theming,
+)
+from .about_dialog import DeveloperDialog, VersionDialog
 from .connect_dialog import ConnectDialog
 from .connections_page import ConnectionsPage
 from .dashboard import ProviderPage
+from .log_dialog import UsageLogDialog, print_preview
 from .providers import build_all
-from .readme_dialog import ReadmeDialog
+from .readme_dialog import LicenceDialog, NoticesDialog, ReadmeDialog
 from .settings import (
     DASHBOARD_DRAG_MIN_H,
     DASHBOARD_DRAG_MIN_W,
     DASHBOARD_MIN_H,
     DASHBOARD_MIN_W,
     INTERVAL_OPTIONS,
+    OPACITY_MAX,
+    OPACITY_MIN,
+    OPACITY_STEP,
     RANGE_OPTIONS,
     Settings,
+    THEME_OPTIONS,
     WIDGET_MAX_EDGE,
     WIDGET_MIN_H,
     WIDGET_MIN_W,
@@ -100,6 +120,9 @@ class MainWindow(QMainWindow):
         self._last_available = None
         self._window_size_seen = settings.window_size
         self._detections: dict[str, object] = {}
+        # The usage log is modeless so the dashboard can keep refreshing
+        # behind it; one at a time, kept current rather than reopened.
+        self._log_dialog: UsageLogDialog | None = None
 
         # Providers are mirrored here purely for display metadata; the worker
         # owns the instances that actually do the fetching.
@@ -165,15 +188,13 @@ class MainWindow(QMainWindow):
         self._fit_timer.timeout.connect(self._fit_to_screen)
         self._watch_screens()
 
-        QShortcut(QKeySequence("F5"), self, activated=self.refresh)
-        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.toggle_mode)
-        QShortcut(QKeySequence("F1"), self, activated=self.open_readme)
-
+        self._sync_menus()
         QTimer.singleShot(0, self.refresh)
 
     # -- construction -----------------------------------------------------
 
     def _build_ui(self) -> None:
+        self._build_menus()
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
@@ -268,30 +289,12 @@ class MainWindow(QMainWindow):
         self.interval_combo.currentIndexChanged.connect(self._apply_interval)
         row.addWidget(self.interval_combo)
 
-        self.theme_button = QPushButton()
-        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_button.clicked.connect(self._cycle_theme)
-        row.addWidget(self.theme_button)
-
-        self.connections_button = QPushButton("Connections")
-        self.connections_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.connections_button.setToolTip("Manage sign-ins for all AI services")
-        self.connections_button.clicked.connect(self.enter_connections_mode)
-        row.addWidget(self.connections_button)
-
-        self.settings_button = QPushButton("Settings…")
-        self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_button.clicked.connect(lambda: self.open_settings(""))
-        row.addWidget(self.settings_button)
-
-        self.readme_button = QPushButton("Readme")
-        self.readme_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.readme_button.setToolTip(
-            "What every figure means, including how the quota counts tokens (F1)"
-        )
-        self.readme_button.clicked.connect(self.open_readme)
-        row.addWidget(self.readme_button)
-
+        # Connections, Settings, Readme and the theme cycle used to sit here as
+        # well. They are commands you reach for occasionally, and they now live
+        # in the menu bar. Widget and Refresh stayed: collapsing to the desk
+        # widget is the gesture this app is used through all day, and burying a
+        # daily action two clicks deep to tidy a toolbar is a bad trade. Both
+        # are in the menus too, which is where their shortcuts are declared.
         self.widget_button = QPushButton("Widget")
         self.widget_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.widget_button.setToolTip("Collapse to the desk widget (Ctrl+W)")
@@ -304,6 +307,150 @@ class MainWindow(QMainWindow):
         self.refresh_button.clicked.connect(self.refresh)
         row.addWidget(self.refresh_button)
         return header
+
+    # -- menu bar ---------------------------------------------------------
+
+    def _build_menus(self) -> None:
+        """File / Settings / About, per the Windows convention.
+
+        Every entry here is a command or a preference. The header row keeps
+        the three controls that change what the numbers below it mean - metric,
+        range and interval - plus the two buttons used often enough that a menu
+        would be in the way: Widget and Refresh.
+        """
+        bar = self.menuBar()
+        bar.setNativeMenuBar(False)
+
+        file_menu = bar.addMenu("&File")
+        self._add_action(
+            file_menu, "&Refresh", self.refresh, "F5",
+            "Fetch every enabled service now",
+        )
+        self._add_action(
+            file_menu, "&Sign-in…", self.enter_connections_mode, None,
+            "Manage sign-ins for all AI services",
+        )
+        file_menu.addSeparator()
+        self._add_action(
+            file_menu, "Save to &Log…", self.open_usage_log, "Ctrl+L",
+            "Read the per-day usage log, then save or print it",
+        )
+        self._add_action(
+            file_menu, "&Print Report…", self.print_report, "Ctrl+P",
+            "Print the usage log",
+        )
+        file_menu.addSeparator()
+        self._add_action(file_menu, "E&xit", self.quit_app, "Ctrl+Q")
+
+        settings_menu = bar.addMenu("&Settings")
+        self.startup_action = QAction("Start on start up", self)
+        self.startup_action.setCheckable(True)
+        self.startup_action.setChecked(self.settings.start_with_windows)
+        self.startup_action.toggled.connect(self._set_start_with_windows)
+        settings_menu.addAction(self.startup_action)
+
+        theme_menu = settings_menu.addMenu("Themes")
+        self.theme_group = QActionGroup(self)
+        self.theme_group.setExclusive(True)
+        self.theme_actions: dict[str, QAction] = {}
+        for label, value in THEME_OPTIONS:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(value == self.theme_name)
+            action.triggered.connect(lambda _=False, v=value: self._set_theme(v))
+            self.theme_group.addAction(action)
+            theme_menu.addAction(action)
+            self.theme_actions[value] = action
+
+        self.widget_action = QAction("Widget mode", self)
+        self.widget_action.setCheckable(True)
+        self.widget_action.setShortcut(QKeySequence("Ctrl+W"))
+        self.widget_action.setToolTip("Collapse to the desk widget")
+        self.widget_action.triggered.connect(self._toggle_widget_action)
+        settings_menu.addAction(self.widget_action)
+        # Ctrl+W is the way back out of the widget, where the menu is hidden.
+        self.addAction(self.widget_action)
+
+        settings_menu.addSeparator()
+        self._add_action(
+            settings_menu, "&Settings…", lambda: self.open_settings(""), None,
+            "Services, appearance and startup",
+        )
+
+        about_menu = bar.addMenu("&About")
+        self._add_action(
+            about_menu, "&Version…", self.open_version, None,
+            "Which build this is, and whether a newer one has been released",
+        )
+        self._add_action(
+            about_menu, "&Readme", self.open_readme, "F1",
+            "What every figure means, including how the quota counts tokens",
+        )
+        self._add_action(
+            about_menu, "&License Agreement", self.open_licence, None,
+            "GPL-3.0-or-later, the licence this program is given to you under",
+        )
+        self._add_action(about_menu, "Third-party &notices", self.open_notices)
+        about_menu.addSeparator()
+        self._add_action(about_menu, "About the &developer", self.open_developer)
+
+    def _add_action(
+        self,
+        menu: QMenu,
+        text: str,
+        slot,
+        shortcut: str | None = None,
+        tip: str = "",
+    ) -> QAction:
+        action = QAction(text, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        if tip:
+            action.setToolTip(tip)
+            action.setStatusTip(tip)
+        action.triggered.connect(lambda _=False: slot())
+        menu.addAction(action)
+        # Also a window action, so its shortcut still fires in widget mode,
+        # where the menu bar is hidden and a menu-only shortcut goes dead.
+        self.addAction(action)
+        return action
+
+    def _sync_menus(self) -> None:
+        """Keep the menu's checkmarks honest about the live state.
+
+        The same preferences are reachable from the Settings dialog, the tray
+        and a drag on the window edge, so the menu has to be told rather than
+        assumed to be the only writer.
+        """
+        if not hasattr(self, "startup_action"):
+            return
+        self.startup_action.blockSignals(True)
+        self.startup_action.setChecked(self.settings.start_with_windows)
+        self.startup_action.blockSignals(False)
+
+        action = self.theme_actions.get(self.theme_name)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
+
+        self.widget_action.blockSignals(True)
+        self.widget_action.setChecked(self.mode == WIDGET)
+        self.widget_action.blockSignals(False)
+
+    def _toggle_widget_action(self, checked: bool) -> None:
+        if checked:
+            self.enter_widget_mode()
+        else:
+            self.enter_dashboard_mode()
+        self._sync_menus()
+
+    def _set_start_with_windows(self, enabled: bool) -> None:
+        self.settings.start_with_windows = enabled
+        startup.apply(enabled)
+
+    def _set_theme(self, name: str) -> None:
+        self.theme_name = name
+        self.settings.theme = name
+        self._apply_theme(theming.resolve(name))
 
     # -- worker -----------------------------------------------------------
 
@@ -365,6 +512,7 @@ class MainWindow(QMainWindow):
         self.mode = CONNECTIONS
         self.redetect()
         self.stack.setCurrentWidget(self.connections)
+        self._sync_menus()
 
     def refresh(self) -> None:
         if self._refreshing:
@@ -398,6 +546,14 @@ class MainWindow(QMainWindow):
             page = self.pages.get(provider_id)
             if page is not None:
                 page.render(snapshot, show_history)
+
+        # Every provider re-detects its sign-in on the way to fetching, so the
+        # connections page can be as fresh as the figures instead of frozen at
+        # whatever was true when it was last opened by hand.
+        detection.adopt(self._detections, result.snapshots)
+        self.connections.set_detections(self._detections)
+        if self._log_dialog is not None:
+            self._log_dialog.set_report(self._build_report())
 
         active = self._active_provider_id()
         snapshot = result.snapshots.get(active)
@@ -500,6 +656,9 @@ class MainWindow(QMainWindow):
 
         self.mode = WIDGET
         self.stack.setCurrentWidget(self.compact)
+        # A frameless 230x175 widget has no room for a menu bar, and one drawn
+        # across the top would eat a third of it.
+        self.menuBar().setVisible(False)
         # Charts hold the largest arrays on the page; let them go.
         for page in self.pages.values():
             page.release_charts()
@@ -524,6 +683,7 @@ class MainWindow(QMainWindow):
         self._switching = False
         self._fit_to_screen()
         self._render_compact()
+        self._sync_menus()
         self.refresh()
 
     @staticmethod
@@ -544,6 +704,7 @@ class MainWindow(QMainWindow):
             # No window chrome change needed - just swap the page.
             self.mode = DASHBOARD
             self.stack.setCurrentWidget(self.dashboard_page)
+            self._sync_menus()
             self.refresh()
             return
         self._switching = True
@@ -551,6 +712,7 @@ class MainWindow(QMainWindow):
 
         self.mode = DASHBOARD
         self.stack.setCurrentWidget(self.dashboard_page)
+        self.menuBar().setVisible(True)
         self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowOpacity(1.0)
         self._rotate_widget.stop()
@@ -564,6 +726,7 @@ class MainWindow(QMainWindow):
         # (a taskbar that changed size, a scale-factor change), and nothing
         # would otherwise notice until the geometry happened to change again.
         self._fit_to_screen()
+        self._sync_menus()
         self.refresh()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
@@ -648,9 +811,9 @@ class MainWindow(QMainWindow):
         row.addWidget(caption)
 
         slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(25, 100)  # below ~25% the widget is unreadable
-        slider.setSingleStep(5)
-        slider.setPageStep(10)
+        slider.setRange(OPACITY_MIN, OPACITY_MAX)
+        slider.setSingleStep(OPACITY_STEP)
+        slider.setPageStep(OPACITY_STEP * 2)
         slider.setValue(int(round(self.settings.opacity * 100)))
         slider.setMinimumWidth(140)
         row.addWidget(slider, 1)
@@ -1062,24 +1225,72 @@ class MainWindow(QMainWindow):
     def open_readme(self) -> None:
         """Show the shipped README. One copy, read from disk, never duplicated
         into the source as a second version that can drift."""
-        dialog = ReadmeDialog(self.theme, self)
-        dialog.exec()
+        ReadmeDialog(self.theme, self).exec()
+
+    def open_licence(self) -> None:
+        LicenceDialog(self.theme, self).exec()
+
+    def open_notices(self) -> None:
+        NoticesDialog(self.theme, self).exec()
+
+    def open_version(self) -> None:
+        VersionDialog(self.theme, self).exec()
+
+    def open_developer(self) -> None:
+        DeveloperDialog(self.theme, self).exec()
+
+    # -- usage log --------------------------------------------------------
+
+    def _build_report(self) -> reporting.Report:
+        """The log of what is on screen right now, per service and per day."""
+        snapshots = self.last_result.snapshots if self.last_result else {}
+        return reporting.build(
+            self.providers,
+            snapshots,
+            self._detections,
+            self._days(),
+            self._metric(),
+        )
+
+    def open_usage_log(self) -> None:
+        """Read the log first; saving and printing are buttons inside it."""
+        if self._log_dialog is not None:
+            self._log_dialog.raise_()
+            self._log_dialog.activateWindow()
+            return
+        dialog = UsageLogDialog(self._build_report(), self.theme, self)
+        self._log_dialog = dialog
+        dialog.finished.connect(self._on_log_closed)
+        dialog.show()
+
+    def _on_log_closed(self) -> None:
+        self._log_dialog = None
+
+    def print_report(self) -> None:
+        """File > Print Report: the same document, straight to the preview."""
+        print_preview(self._build_report(), self)
+
+    # -- settings ---------------------------------------------------------
 
     def open_settings(self, focus_provider: str = "") -> None:
         dialog = ProviderSettingsDialog(
             self.providers, self.settings, self.theme, focus_provider, self
         )
         dialog.changed.connect(self._on_settings_changed)
+        dialog.preview.connect(self._apply_appearance)
         dialog.exec()
 
-    def _on_settings_changed(self) -> None:
-        self._push_all_credentials()
+    def _apply_appearance(self) -> None:
+        """Re-read the appearance settings and show them, without refetching.
+
+        The preview signal fires on every drag of the opacity slider, so this
+        path must not touch the network, the providers or the worker - it is
+        only what the window looks like.
+        """
         if self.theme_name != self.settings.theme:
             self.theme_name = self.settings.theme
             self._apply_theme(theming.resolve(self.theme_name))
 
-        # Picking a new default size is an instruction, not a preference for
-        # some later launch - apply it to the window in front of the user.
         size = self.settings.window_size
         if size != self._window_size_seen:
             self._window_size_seen = size
@@ -1089,22 +1300,17 @@ class MainWindow(QMainWindow):
         if self.mode == WIDGET:
             self.setWindowOpacity(self.settings.opacity)
             self._set_always_on_top(self.settings.always_on_top)
-        self.refresh()
 
-    def _cycle_theme(self) -> None:
-        order = ["system", "light", "dark"]
-        self.theme_name = order[(order.index(self.theme_name) + 1) % len(order)]
-        self.settings.theme = self.theme_name
-        self._apply_theme(theming.resolve(self.theme_name))
+    def _on_settings_changed(self) -> None:
+        self._push_all_credentials()
+        self._apply_appearance()
+        self._sync_menus()
+        self.refresh()
 
     def _apply_theme(self, theme: Theme) -> None:
         self.theme = theme
         QApplication.instance().setPalette(theming.build_qpalette(theme))
-        self.theme_button.setText(
-            {"system": "Theme: System", "light": "Theme: Light", "dark": "Theme: Dark"}[
-                self.theme_name
-            ]
-        )
+        self._sync_menus()
         self.setStyleSheet(self._stylesheet(theme))
         self.title_label.setStyleSheet(
             f"color: {theme.ink}; font-size: 17px; font-weight: 600;"
@@ -1117,6 +1323,8 @@ class MainWindow(QMainWindow):
             page.apply_theme(theme)
         self.connections.apply_theme(theme)
         self.compact.apply_theme(theme)
+        if self._log_dialog is not None:
+            self._log_dialog.apply_theme(theme)
         if getattr(self, "tray", None) is not None:
             self.tray.apply_theme(theme)
 
@@ -1184,6 +1392,16 @@ class MainWindow(QMainWindow):
             font-weight: 600;
         }}
         QGroupBox::title {{ left: 10px; padding: 0 4px; }}
+        QMenuBar {{
+            background-color: {theme.surface};
+            color: {theme.ink};
+            border-bottom: 1px solid {ring};
+            padding: 2px 6px;
+            font-size: 12px;
+        }}
+        QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; background: transparent; }}
+        QMenuBar::item:selected {{ background-color: {theme.plane}; }}
+        QMenuBar::item:pressed {{ background-color: {theme.accent}; color: #ffffff; }}
         QMenu {{
             background-color: {theme.surface};
             border: 1px solid {ring};
@@ -1191,6 +1409,7 @@ class MainWindow(QMainWindow):
         }}
         QMenu::item {{ padding: 5px 22px 5px 12px; border-radius: 4px; }}
         QMenu::item:selected {{ background-color: {theme.accent}; color: #ffffff; }}
+        QMenu::separator {{ height: 1px; background: {ring}; margin: 4px 8px; }}
         QSlider::groove:horizontal {{
             height: 4px; background: {theme.track}; border-radius: 2px;
         }}

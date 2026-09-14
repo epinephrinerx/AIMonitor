@@ -16,6 +16,8 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Services and what each can report](#services-and-what-each-can-report)
 - [How usage is counted](#how-usage-is-counted) — read this if the numbers surprise you
 - [Window modes](#window-modes)
+- [Menus](#menus)
+- [Usage log and reports](#usage-log-and-reports)
 - [System tray](#system-tray)
 - [Settings](#settings)
 - [Resource use](#resource-use)
@@ -296,6 +298,92 @@ signals.
 
 ---
 
+## Menus
+
+The window carries a menu bar. Everything in it is a command or a preference;
+the header row below it keeps the three controls that change what the figures
+mean — metric, range, refresh interval — plus the two buttons pressed often
+enough that a menu would be in the way: **Widget** and **Refresh**. Both are in
+the menus as well, which is where their shortcuts are declared.
+
+| Menu | Entry | What it does |
+|---|---|---|
+| **File** | Refresh · `F5` | Fetches every enabled service now. |
+| | Sign-in… | Opens the Connections page. |
+| | Save to Log… · `Ctrl+L` | Opens the [usage log](#usage-log-and-reports). |
+| | Print Report… · `Ctrl+P` | Print preview of the same document. |
+| | Exit · `Ctrl+Q` | Quits for real, past minimize-to-tray. |
+| **Settings** | Start on start up | The `Run` entry, toggled in place. |
+| | Themes | Follow Windows / Light / Dark. |
+| | Widget mode · `Ctrl+W` | Collapses to the desk widget, and back. |
+| | Settings… | The full preferences dialog. |
+| **About** | Version… | This build, and a check against GitHub releases. |
+| | Readme · `F1` | This document, inside the app. |
+| | License Agreement | GPL-3.0, which the licence requires be showable. |
+| | Third-party notices | The redistributed components' notices. |
+| | About the developer | Who wrote it, and how to reach them. |
+
+Widget mode hides the menu bar — there is no room for it in 230 × 175 — so
+every shortcut above is bound to the window as well and keeps working while
+the bar is hidden. `Ctrl+W` is how you get back out.
+
+### Checking for updates
+
+**About > Version** asks GitHub for the newest release of this project. It is
+one unauthenticated `GET`; nothing is downloaded, nothing is installed, and no
+usage data leaves the machine. A repository with tags but no published release
+falls back to the highest version tag. If GitHub will not show the repository
+to an anonymous request — a **private** repository, for instance — the dialog
+says so rather than reporting "up to date" from a check that saw nothing.
+
+The version is defined once, in `ai_usage_monitor/__init__.py`.
+`version_info.txt` and `installer\AIUsageMonitor.iss` carry the same number for
+the Windows file-version resource and the installer, and `tests\test_version.py`
+fails if the three ever disagree.
+
+---
+
+## Usage log and reports
+
+**File > Save to Log…** opens the log on screen before it is anywhere else:
+per service, who is signed in and on what plan, then one row per day.
+
+```
+AI Usage Monitor — usage log
+Generated 2026-09-14 20:29  ·  last 14 days  ·  Total tokens
+
+Claude
+Apichart Chantanis — Max plan · max 5x  ·  Claude Code login  ·  Connected
+  2026-09-11 (Fri)        110,014,283
+  2026-09-12 (Sat)         13,461,480
+  2026-09-13 (Sun)                  0
+  2026-09-14 (Mon)        120,534,844
+  Total (6 active of 14 days)   418,026,236
+```
+
+Three things make it trustworthy rather than merely pretty:
+
+- **It is a record of what was on screen.** The log is folded from the
+  snapshots the dashboard already holds and never fetches anything of its own,
+  so the window you read, the file you save and the page you print cannot
+  disagree about the numbers.
+- **It follows the metric you are looking at.** `Total tokens` is the default
+  and the usual case; a log taken while the window shows `Equivalent value`
+  says so in its heading instead of labelling dollars as tokens.
+- **Nothing is invented.** A service that reports no daily history gets a
+  section saying so, not a column of zeroes, and a service that failed keeps
+  its section with the reason in it rather than vanishing from the log.
+
+Leave the window open and it follows the dashboard's refreshes.
+
+**Save as…** writes `.csv` (one flat row per day, for a spreadsheet), `.md` or
+`.html`. **Print…** opens a print preview, always in the light palette — a
+dark-themed window still prints dark ink on white paper.
+
+**File > Print Report…** is the same document, straight to the preview.
+
+---
+
 ## System tray
 
 The tray icon is **drawn, not loaded**: a tile filled to the active service's
@@ -349,12 +437,29 @@ time the menu opens so the countdowns are live rather than frozen at app start.
 | Theme | **Follow Windows** | Light / Dark / Follow. Re-checked every 10 s while set to Follow. |
 | Default window size | **1120 × 820** | Compact / Standard / Wide / Remember last size. Seeds the size when nothing is remembered, and is the target after a display change — a size you dragged to wins over it. Changing the setting applies immediately. |
 | Refresh interval | **3 minutes** | 30 s · 1 · 3 · 5 · 10 · 30 min · manual. `F5` forces one. |
-| Widget opacity | **92%** | Slider, 25–100%. |
+| Widget opacity | **92%** | Slider, 25–100%, in 5% steps. |
 | Always on top | **On** | Widget mode only. |
 | Chart range | **14 days** | 7 / 14 / 30 / 90 days. |
 | Chart metric | **Total tokens** | Total tokens · output tokens · equivalent value. |
 
 Settings live in the registry under `HKCU\Software\AIUsageMonitor`.
+
+### Appearance settings preview live
+
+Theme, opacity, always-on-top and the default window size are applied to the
+real window the moment you change them — judging any of them from a combo box
+label is guesswork. **Cancel** puts back every value the dialog found on the
+way in, so a live preview is never a decision you are stuck with; **Save** is
+what writes to the registry.
+
+Opacity only takes effect on the window itself in widget mode, so the slider
+carries a swatch that fades with it. That is the preview while the dashboard
+is on screen.
+
+Start-with-Windows is the exception: it writes to the `Run` key, so it is
+applied on **Save** rather than on every click. The same checkbox in
+**Settings > Start on start up** applies immediately, which is what a menu
+checkmark is expected to do.
 
 ---
 

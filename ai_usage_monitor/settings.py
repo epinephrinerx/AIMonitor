@@ -31,6 +31,15 @@ INTERVAL_OPTIONS = [
 
 RANGE_OPTIONS = [("7 days", 7), ("14 days", 14), ("30 days", 30), ("90 days", 90)]
 
+# Widget opacity, in whole percent. Below about 25% the meters stop being
+# readable against a busy desktop, so that is the floor the UI offers and the
+# floor `Settings.opacity` clamps to. Both sliders - the one in Settings and
+# the one in the widget's context menu - work in these units.
+OPACITY_MIN = 25
+OPACITY_MAX = 100
+OPACITY_STEP = 5
+DEFAULT_OPACITY = 92
+
 WIDGET_MAX_EDGE = 300  # the widget must fit inside 300x300
 # The floor the user can drag down to. The meter row degrades on the way
 # down - arcs that cannot reach a legible size are dropped, and the
@@ -128,7 +137,8 @@ class Settings:
 
     @property
     def opacity(self) -> float:
-        return min(1.0, max(0.25, self._float("widget/opacity", 0.92)))
+        stored = self._float("widget/opacity", DEFAULT_OPACITY / 100)
+        return min(OPACITY_MAX / 100, max(OPACITY_MIN / 100, stored))
 
     @opacity.setter
     def opacity(self, value: float) -> None:

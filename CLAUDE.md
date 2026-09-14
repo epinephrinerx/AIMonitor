@@ -78,3 +78,66 @@ OAuth หมดอายุ และ Admin fallback เมื่อไม่ม
 การ build portable ไม่ได้อัปเดตตัวติดตั้ง หากต้องออกรุ่นติดตั้ง ให้ทำตาม README
 และตรวจ `build_ai_installer.ps1` ก่อนใช้ เพราะสคริปต์ปิด monitor และล้าง build outputs
 เมื่อเปลี่ยนเวอร์ชันต้องรักษา installer `AppId` เดิมไว้
+
+## บันทึกการแก้ไข 2026-09-14 (รอบที่สอง) — เมนูบาร์ รายงาน และ Connections ที่ค้าง
+
+ผู้ใช้รายงานว่า "ไม่มีการอัพเดทข้อมูลการเชื่อมต่อ" ทำซ้ำได้จริง: worker เรียก
+`provider.detect()` ใหม่ทุกรอบ refresh และใส่ผลไว้ใน `snapshot.detection` ครบทุกเส้นทาง
+แต่ `MainWindow._on_result()` ไม่เคยอ่านค่านั้น การ์ดบนหน้า Connections จึงค้างที่ค่าตอน
+เปิดหน้า จนกว่าจะกด Re-detect เอง
+
+แก้โดยเพิ่ม `detection.adopt()` แล้วเรียกจาก `_on_result()` ทดสอบใน
+`tests/test_connections_freshness.py` ซึ่งมี test เชิงสัญญาที่ parse ซอร์สของ provider
+ทั้งสามด้วย AST เพื่อยืนยันว่าทุกจุดที่สร้าง `ProviderSnapshot` ยังส่ง `detection` มาด้วย
+ถ้าเพิ่มเส้นทาง fetch ใหม่แล้วลืมใส่ `detection=` test นี้จะจับได้
+
+### สิ่งที่เพิ่มในรอบนี้
+
+- เมนูบาร์ File / Settings / About; ย้าย Connections, Settings, Readme และปุ่ม Theme
+  ออกจาก header เหลือ metric / range / interval / Widget / Refresh
+  (ผู้ใช้ขอให้เก็บปุ่ม Widget ไว้ที่ header เพราะใช้บ่อย ทั้งสองปุ่มมีในเมนูด้วย
+  ซึ่งเป็นที่ประกาศ shortcut อย่าเอาออกจาก header อีก)
+- `report.py` โมเดลรายงานเดียว render ได้สามแบบ (HTML บนจอและสำหรับพิมพ์, CSV, Markdown)
+- `log_dialog.py` หน้าต่าง Usage log แบบ modeless พร้อม Save as… และ Print preview
+- `about_dialog.py` Version + ตรวจอัปเดตจาก GitHub (ทำงานบน QThreadPool ไม่บล็อก GUI)
+  และหน้าผู้พัฒนา
+- `readme_dialog.py` ขยายเป็น `DocumentDialog` ใช้ร่วมกับ LICENSE และ THIRD-PARTY-NOTICES
+- `settings_dialog.py` opacity เป็น slider พร้อม swatch พรีวิว และพรีวิวสด
+  (theme / opacity / always-on-top / ขนาดหน้าต่าง) โดย Cancel คืนค่าเดิมทุกตัว
+- `version.py` เวอร์ชันมีแหล่งเดียวคือ `__init__.__version__`; `tests/test_version.py`
+  จะ fail ถ้า `version_info.txt` หรือ `installer/AIUsageMonitor.iss` ไม่ตรงกัน
+
+### ข้อกำหนดที่ตั้งใจไว้ อย่าเปลี่ยนโดยไม่ตั้งใจ
+
+- รายงานสร้างจาก snapshot ที่แดชบอร์ดถืออยู่แล้ว **ห้ามยิง fetch ของตัวเอง** มิฉะนั้น
+  เอกสารที่พิมพ์จะไม่ตรงกับหน้าต่างที่สั่งพิมพ์
+- รายงานใช้ metric ที่ผู้ใช้เลือกอยู่ และเขียนชื่อ metric ไว้ในหัวตาราง ห้ามสมมติว่าเป็น token
+- พิมพ์ด้วย palette สว่างเสมอ (`to_html(dark=False)`) ธีมมืดต้องไม่ทำให้พิมพ์ออกมาดำทั้งหน้า
+- บริการที่ไม่มีประวัติรายวันต้องขึ้นหมายเหตุ ห้ามเติมวันเป็นศูนย์ และบริการที่ fetch ล้มเหลว
+  ต้องยังมีหัวข้อพร้อมเหตุผล ห้ามหายไปเงียบ ๆ
+- ตรวจอัปเดตเป็น GET เดียวแบบไม่ยืนยันตัวตน ไม่ดาวน์โหลดและไม่ติดตั้งอะไร
+  ถ้า GitHub ตอบ 404 ทั้งสอง endpoint ให้บอกว่ามองไม่เห็น repo ห้ามรายงานว่า "up to date"
+- พรีวิวสดของ Settings ต้องไม่แตะเครือข่ายหรือ worker (`_apply_appearance`)
+  ส่วน `_on_settings_changed` เท่านั้นที่ push credentials แล้ว refresh
+
+## ข้อควรระวังตอนรันจากซอร์ส
+
+`startup.reconcile()` ทำงานใน `MainWindow.__init__` และ **เขียนทับ** ค่า
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIUsageMonitor` ให้ชี้มาที่
+`launch_command()` ของโปรเซสปัจจุบัน การรัน `python -m ai_usage_monitor` บนเครื่องที่
+ติดตั้งรุ่น .exe ไว้แล้วจึงทำให้ทางลัด startup ชี้ไปที่ checkout แทนตัวที่ติดตั้ง
+
+ก่อนรันจากซอร์สให้จดค่าเดิมไว้ และคืนค่าหลังทดสอบ:
+
+```powershell
+$k = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+(Get-ItemProperty $k).AIUsageMonitor            # จดไว้ก่อน
+Set-ItemProperty -Path $k -Name AIUsageMonitor `
+  -Value '"C:\Program Files\AIUsageMonitor\AIUsageMonitor.exe"'   # คืนค่า
+```
+
+ในสคริปต์ทดสอบอัตโนมัติให้ stub `startup.set_enabled` เป็น no-op ก่อนสร้าง `MainWindow`
+
+การขับ UI ด้วยการคลิกตามพิกัดหน้าจอเคยพลาดไปโดน combo box ของ header และเปลี่ยน
+`metric` กับ `range_days` ในค่าตั้งจริงของผู้ใช้ ให้ใช้ UI Automation เรียกตามชื่อปุ่ม
+หรือเรียกเมธอดของหน้าต่างตรง ๆ แทนการคลิกตามพิกัด

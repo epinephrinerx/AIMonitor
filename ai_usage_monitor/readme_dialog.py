@@ -1,9 +1,13 @@
-"""The README, shown inside the app.
+"""Bundled documents, shown inside the app.
 
-Rendered with `QTextBrowser.setMarkdown`, which Qt has built in - no markdown
-library, nothing extra in the build. The document ships beside the executable so
-the copy you read in the app is the same file the repository carries; there is
-no second, drifting copy of the text.
+Markdown is rendered with `QTextBrowser.setMarkdown`, which Qt has built in -
+no markdown library, nothing extra in the build. Every document ships beside
+the executable so the copy you read in the app is the same file the repository
+carries; there is never a second, drifting copy of the text.
+
+One dialog serves all of them. The README, the GPL-3.0 licence and the
+third-party notices differ only in which file they load and whether it is
+markdown, so About > License Agreement is the same window as F1.
 """
 
 from __future__ import annotations
@@ -25,10 +29,18 @@ from PySide6.QtWidgets import (
 from .theme import Theme, qcolor
 
 DOC_NAME = "README.md"
+# The installer renames LICENSE to LICENSE.txt so Windows will open it; the
+# PyInstaller bundle keeps the repository's extension-less name. Look for both
+# rather than guessing which kind of install this is.
+LICENCE_NAMES = ("LICENSE.txt", "LICENSE")
+NOTICES_NAME = "THIRD-PARTY-NOTICES.md"
 
 
-def readme_path() -> Path | None:
-    """Find the README whether running frozen or from source."""
+def doc_path(*names: str) -> Path | None:
+    """Find a bundled document whether running frozen or from source.
+
+    Accepts several names for one document and returns the first that exists.
+    """
     frozen = getattr(sys, "_MEIPASS", None)
     roots = []
     if frozen:
@@ -46,19 +58,34 @@ def readme_path() -> Path | None:
     package_root = Path(__file__).resolve().parent.parent
     roots += [package_root, package_root / "assets"]
     for root in roots:
-        candidate = root / DOC_NAME
-        if candidate.is_file():
-            return candidate
+        for name in names:
+            candidate = root / name
+            if candidate.is_file():
+                return candidate
     return None
 
 
-class ReadmeDialog(QDialog):
-    """A scrollable, themed view of the project README."""
+def readme_path() -> Path | None:
+    return doc_path(DOC_NAME)
 
-    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+
+class DocumentDialog(QDialog):
+    """A scrollable, themed view of one bundled document."""
+
+    def __init__(
+        self,
+        theme: Theme,
+        title: str,
+        names: tuple[str, ...] = (DOC_NAME,),
+        markdown: bool = True,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.theme = theme
-        self.setWindowTitle("AI Usage Monitor — Readme")
+        self._names = names
+        self._markdown = markdown
+        self._label = names[0]
+        self.setWindowTitle(title)
         self.resize(860, 720)
         self.setSizeGripEnabled(True)
 
@@ -87,15 +114,23 @@ class ReadmeDialog(QDialog):
         buttons.setContentsMargins(16, 10, 16, 12)
         layout.addWidget(buttons)
 
-        self._path = readme_path()
+        self._path = doc_path(*names)
         self._load()
         self.apply_theme(theme)
 
+    def _set_text(self, text: str) -> None:
+        if self._markdown:
+            self.view.setMarkdown(text)
+        else:
+            # A licence is not markdown. Rendering it as markdown eats the
+            # indentation the GPL relies on and turns section numbers into
+            # ordered lists.
+            self.view.setPlainText(text)
+
     def _load(self) -> None:
         if self._path is None:
-            self.view.setMarkdown(
-                "# Readme not found\n\n"
-                f"`{DOC_NAME}` was not installed beside the application.\n\n"
+            self._set_text(
+                f"{self._label} was not installed beside the application.\n\n"
                 "Reinstalling should restore it."
             )
             self.open_file.setEnabled(False)
@@ -103,10 +138,10 @@ class ReadmeDialog(QDialog):
         try:
             text = self._path.read_text(encoding="utf-8")
         except OSError as exc:
-            self.view.setMarkdown(f"# Could not read the readme\n\n`{exc}`")
+            self._set_text(f"Could not read {self._label}:\n\n{exc}")
             self.open_file.setEnabled(False)
             return
-        self.view.setMarkdown(text)
+        self._set_text(text)
         self.view.moveCursor(self.view.textCursor().MoveOperation.Start)
 
     def _on_anchor(self, url: QUrl) -> None:
@@ -124,8 +159,7 @@ class ReadmeDialog(QDialog):
 
     def apply_theme(self, theme: Theme) -> None:
         self.theme = theme
-        body = QFont("Segoe UI", 10)
-        self.view.setFont(body)
+        self.view.setFont(QFont("Segoe UI", 10))
         # Qt's markdown renderer uses the document stylesheet for block
         # elements; tables and code need explicit colours or they render on a
         # white ground in dark mode.
@@ -185,3 +219,34 @@ class ReadmeDialog(QDialog):
         )
         # Re-render so the new stylesheet is applied to the existing document.
         self._load()
+
+
+class ReadmeDialog(DocumentDialog):
+    """The project README (header button, F1, About > Readme)."""
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(
+            theme, "AI Usage Monitor — Readme", (DOC_NAME,), True, parent
+        )
+
+
+class LicenceDialog(DocumentDialog):
+    """GPL-3.0, which the licence itself requires the program to be able to show."""
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(
+            theme, "AI Usage Monitor — Licence", LICENCE_NAMES, False, parent
+        )
+
+
+class NoticesDialog(DocumentDialog):
+    """Third-party notices the redistributed components require."""
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(
+            theme,
+            "AI Usage Monitor — Third-party notices",
+            (NOTICES_NAME,),
+            True,
+            parent,
+        )
