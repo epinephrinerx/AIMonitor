@@ -23,13 +23,14 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Credential handling](#credential-handling)
 - [Building](#building)
 - [Architecture](#architecture)
+- [Licence](#licence)
 - [Working with Claude Code](#working-with-claude-code)
 
 ---
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.2.5.exe`**.
+Run **`AIUsageMonitor-Setup-1.2.6.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -519,6 +520,29 @@ Run the OpenAI detection, protocol, quota/history and API regression tests with:
   1.25× the input rate, a 1-hour write 2×, and a cache read 0.1×.
 - A failure in one service never discards another's result; each is fetched and
   reported independently, with its own error banner.
+
+## Licence
+
+**GNU General Public License v3.0** — see [LICENSE](LICENSE).
+
+This program comes with **ABSOLUTELY NO WARRANTY**. It is free software, and
+you are welcome to redistribute it under the conditions in that file.
+
+GPL-3.0 is a deliberate fit rather than a default. Qt for Python is offered
+under a choice of LGPL-3.0, GPL-2.0, GPL-3.0 or a commercial licence, and the
+packaged application redistributes sixteen Qt libraries. Taking Qt under its
+**GPL-3.0** option makes the whole distributed work consistently GPL-3.0, with
+no LGPL relinking provision to rely on. A permissive licence for this code
+would have been possible, but every binary release would then have had to
+satisfy the LGPL separately.
+
+PyInstaller is GPL-2.0-or-later, but its licence carries an explicit exception
+for the bootloader it compiles into the executable, so it places no condition
+on this application.
+
+Every redistributed component, its licence and where to get its source is
+listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Both files ship
+beside the installed executable.
 
 ## Working with Claude Code
 

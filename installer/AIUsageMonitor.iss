@@ -9,7 +9,7 @@
 
 #define AppName        "AI Usage Monitor"
 #define AppShortName   "AIUsageMonitor"
-#define AppVersion     "1.2.5"
+#define AppVersion     "1.2.6"
 #define AppPublisher   "Apichart Chantanis"
 #define AppExe         "AIUsageMonitor.exe"
 #define SourceDir      "..\dist\AIUsageMonitor"
@@ -38,6 +38,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\installer_out
 OutputBaseFilename={#AppShortName}-Setup-{#AppVersion}
 SetupIconFile=..\assets\icon.ico
+; Shown as a page in the wizard before installing.
+LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 
@@ -69,6 +71,13 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; file to open.
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
+; GPL-3.0 requires the licence to travel with the program, and the Apache-2.0
+; and BSD-2-Clause components require their notices reproduced in binary
+; distributions. Both are bundled inside the exe as well, but a user looking
+; for them will look in the install folder.
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 ; Opened through Notepad rather than by association: a stock Windows install
@@ -77,6 +86,8 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 ; the in-app Readme window (header button, or F1).
 Name: "{group}\{#AppName} Readme"; Filename: "{sys}\notepad.exe"; \
     Parameters: """{app}\README.md"""; IconFilename: "{app}\{#AppExe}"
+Name: "{group}\{#AppName} Licence"; Filename: "{sys}\notepad.exe"; \
+    Parameters: """{app}\LICENSE.txt"""; IconFilename: "{app}\{#AppExe}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
