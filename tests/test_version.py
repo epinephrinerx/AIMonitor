@@ -37,6 +37,47 @@ class SingleSourceTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), version.VERSION)
 
+    def test_the_version_sent_to_codex_is_imported_not_typed(self):
+        """The one version string that leaves the machine.
+
+        It said 1.1.0 while the app shipped 1.3.0, so a Codex-side log could
+        not identify the build a report came from. A literal here cannot be
+        caught by comparing files, so the rule is that there is no literal.
+        """
+        import ast
+
+        source = (ROOT / "ai_usage_monitor" / "codex_usage.py").read_text(
+            encoding="utf-8"
+        )
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "version":
+                    self.assertIsInstance(
+                        value,
+                        ast.Name,
+                        f"line {node.lineno}: clientInfo carries a literal "
+                        "version; import __version__ instead",
+                    )
+
+    def test_no_file_advertises_a_version_that_is_not_this_one(self):
+        """Documentation drifts silently; this is what notices.
+
+        The readme told people to run an installer two releases old, and the
+        build script's own header named one older still.
+        """
+        pattern = re.compile(r"AIUsageMonitor-(?:Setup-)?(\d+\.\d+\.\d+)")
+        for name in ("README.md", "build_ai_installer.ps1"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for found in pattern.findall(text):
+                self.assertEqual(
+                    found,
+                    version.VERSION,
+                    f"{name} names version {found}, but this is "
+                    f"{version.VERSION}",
+                )
+
 
 class CompareTests(unittest.TestCase):
     def test_parses_tags_with_and_without_the_v(self):

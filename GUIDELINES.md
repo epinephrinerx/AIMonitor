@@ -250,11 +250,11 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
    `severity_for()` ถูกต้องแล้วใช้กับ arc และคำกำกับ แต่ `_restyle_severity()` กลับไปอ่าน
    `self.meter.severity` ดิบ server ที่ส่ง `normal` ที่ 95% จึงได้ arc แดงกับคำว่า Critical
    แต่สีตัวอักษรยังเป็นสีปกติ **สีกับคำขัดกันเองผิดกฎ accessibility ของโปรเจกต์นี้**
-8. **version ยังหลุดสามจุด** `README.md` บอก installer 1.2.7, comment ใน
+8. ~~**version ยังหลุดสามจุด**~~ **แก้แล้ว 2026-09-18** `README.md` บอก installer 1.2.7, comment ใน
    `build_ai_installer.ps1` บอก 1.1.0 และ `codex_usage.py` ส่ง `clientInfo` เป็น 1.1.0
    ตัวหลังสำคัญสุดเพราะเป็นค่าที่ส่งออกนอกเครื่องจริง ให้ `import __version__`
    แล้วขยาย `tests/test_version.py` ให้คุมทั้งสามจุด
-9. **build script ตรวจแค่ว่า venv มีอยู่ ไม่ได้ตรวจว่ารันได้** ให้ลองรัน
+9. ~~**build script ตรวจแค่ว่า venv มีอยู่ ไม่ได้ตรวจว่ารันได้**~~ **แก้แล้ว 2026-09-18** ให้ลองรัน
    `& $python -c "import sys"` ก่อน แล้วแจ้งวิธีสร้างใหม่ถ้าล้ม
 
 ### ข้อที่รายงานบอกว่าเสีย แต่ตรวจแล้วไม่เสีย
@@ -388,3 +388,38 @@ instance ของคลาสที่ patch ไว้ ไม่ใช่ `date
 ท้าย `now()` ทันที ถ้าคืนค่าเป็น datetime จริงมันจะไปอ่านโซนของเครื่องที่รันเทสต์
 และต้องตีความค่า naive ว่าอยู่ในโซนที่จำลอง ไม่ใช่โซนของเครื่อง
 ผมเขียนผิดทั้งสองจุดตอนแรกและทำให้ test แดงโดยที่โค้ดโปรแกรมถูกอยู่แล้ว
+
+### แก้แล้ว 2026-09-18 — version, build script และการออกรุ่น 1.3.1
+
+**version มีแหล่งเดียวจริง ๆ แล้ว** `codex_usage.py` import `__version__` แทนการเขียน
+สตริงไว้ตรง ๆ ตัวนี้สำคัญที่สุดในสามจุดเพราะเป็น **ค่าเดียวที่ออกไปนอกเครื่อง**
+มันบอกว่า 1.1.0 ขณะที่แอปเป็น 1.3.0 ซึ่งทำให้ log ฝั่ง Codex ระบุ build ต้นทางไม่ได้
+
+`tests/test_version.py` ขยายเป็นคุมห้าจุดแล้ว: `__init__`, `version_info.txt`, `.iss`,
+`README.md` และ header ของ `build_ai_installer.ps1` สองตัวหลังตรวจด้วย regex
+ที่จับรูปแบบ `AIUsageMonitor-Setup-<version>` ส่วน clientInfo ตรวจด้วย AST
+ว่าต้องเป็น `ast.Name` ไม่ใช่ literal เพราะการเทียบไฟล์จับ literal ไม่ได้
+กฎคือ **ห้ามมี literal** test นี้จับ README ที่ยังบอก 1.2.7 ได้ทันทีที่เขียนเสร็จ
+
+**build script ตรวจว่า venv รันได้ ไม่ใช่แค่มีอยู่** `Test-VenvUsable` ลองรัน
+`python -c "import sys"` จริง เพราะ venv จำ path ของ interpreter ที่สร้างมัน
+การอัปเกรดหรือถอน Python นั้นทิ้งไว้ซึ่ง `.venv` ที่มีอยู่แต่ตายแล้ว
+และความล้มเหลวจะไปโผล่อีกหลายนาทีถัดมาข้างใน PyInstaller โดยไม่บอกสาเหตุ
+ข้อความ error บอกวิธีแก้ให้เลย พร้อมอ่าน `home =` จาก `pyvenv.cfg` มาแสดง
+
+**build script ตั้งชื่อ asset ให้ถูกตั้งแต่ต้น** คัดลอก portable ไปเป็น
+`installer_out\AIUsageMonitor-<version>-portable.exe` วางคู่กับตัวติดตั้ง
+เพราะรุ่น 1.3.0 เคยอัปโหลดเป็น `AIUsageMonitor.exe` เปล่า ๆ แล้วต้องตามไปเปลี่ยนชื่อ
+ผ่าน API ทีหลัง ซึ่งทำให้ลิงก์ดาวน์โหลดเดิมใช้ไม่ได้
+
+README แก้สามจุดที่ค้าง: บรรทัดติดตั้งบอก 1.2.7, ขนาด portable บอก 49 MB
+(จริง 46.7 MB) และหัวข้อ "Working with Claude Code" ชี้ไป `CLAUDE.md`
+ซึ่งตอนนี้เป็นแค่ pointer เปลี่ยนไปชี้ `GUIDELINES.md` โดยตรง
+
+ผลตรวจรุ่น 1.3.1:
+
+- ชุดทดสอบ 127 กรณีผ่าน (จาก 51 ตอนเริ่มวัน)
+- เปิด **ไฟล์ .exe ที่ build จริง** `installer_out\AIUsageMonitor-1.3.1-portable.exe`
+  ยืนยัน FileVersion 1.3.1.0 เมนูบาร์ ปุ่ม Widget/Refresh บน header และข้อมูลสดขึ้นครบ
+- คืนค่า `Run` registry หลังเปิด build ทุกครั้งตามหัวข้อ "ข้อควรระวังตอนรันจากซอร์ส"
+  ซึ่งใช้กับ .exe ที่อยู่นอกโฟลเดอร์ติดตั้งเหมือนกัน

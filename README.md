@@ -32,7 +32,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.2.7.exe`**.
+Run **`AIUsageMonitor-Setup-1.3.1.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -49,8 +49,8 @@ settings, including any stored API keys. A *silent* uninstall always keeps them.
 
 ### Portable alternative
 
-`AIUsageMonitor.exe` is a single 49 MB file that needs no install. It is slower
-to start — a one-file build unpacks its whole payload into `%TEMP%` on every
+`AIUsageMonitor-1.3.1-portable.exe` is a single 47 MB file that needs no
+install. It is slower to start — a one-file build unpacks its whole payload into `%TEMP%` on every
 launch, measured at **1.40 s** against **0.63 s** for the installed build, and
 it leaves `_MEI*` folders behind. Use it for a USB stick; otherwise prefer the
 installer.
@@ -560,10 +560,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m ai_usage_monitor
 ```
 
-To change the version, edit `AppVersion` in `installer\AIUsageMonitor.iss` and
-`version_info.txt`. The `AppId` GUID must stay fixed: it is what makes an upgrade
-replace the existing install instead of stacking a second entry in Apps &
-features.
+The version lives in `ai_usage_monitor/__init__.py`. `version_info.txt` and
+`installer\AIUsageMonitor.iss` carry the same number for the Windows
+file-version resource and the installer, and `tests	est_version.py` fails if
+any of them - or this readme - disagrees. The `AppId` GUID must stay fixed: it
+is what makes an upgrade replace the existing install instead of stacking a
+second entry in Apps & features.
 
 ---
 
@@ -651,8 +653,9 @@ beside the installed executable.
 
 ## Working with Claude Code
 
-Read [CLAUDE.md](https://github.com/epinephrinerx/AIMonitor/blob/main/CLAUDE.md)
-before changing the project. It records the active package, Codex-first
+Read [GUIDELINES.md](https://github.com/epinephrinerx/AIMonitor/blob/main/GUIDELINES.md)
+before changing the project. `CLAUDE.md` and `AGENTS.md` are pointers to it,
+so that Claude Code and Codex cannot end up reading two different documents. It records the active package, Codex-first
 detection requirements, credential handling, the 2026-09-14 fix and
 verification results, and commands for testing and building. Keep both
 documents aligned with the implementation when behavior changes.

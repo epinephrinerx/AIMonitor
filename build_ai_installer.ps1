@@ -2,7 +2,7 @@
     Builds both deliverables for AI Usage Monitor:
 
       dist\AIUsageMonitor.exe                      portable single file
-      installer_out\AIUsageMonitor-Setup-1.1.0.exe per-user installer
+      installer_out\AIUsageMonitor-Setup-<version>.exe per-user installer
 
     The installer wraps a one-directory build, which cold-starts far faster
     than the portable onefile (that one unpacks its whole payload into %TEMP%
@@ -15,13 +15,41 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 $python = ".\.venv\Scripts\python.exe"
-if (-not (Test-Path $python)) {
+
+# Existing is not the same as working. A virtual environment records the path
+# of the interpreter that created it, so upgrading or uninstalling that Python
+# leaves a .venv that is present and dead - and the failure then surfaced
+# several minutes later inside PyInstaller, saying nothing about the cause.
+function Test-VenvUsable {
+    param([string]$Exe)
+    if (-not (Test-Path $Exe)) { return $false }
+    try {
+        & $Exe -c "import sys" 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+if (-not (Test-VenvUsable $python)) {
+    if (Test-Path $python) {
+        $home_ = (Get-Content ".\.venv\pyvenv.cfg" -ErrorAction SilentlyContinue |
+                  Where-Object { $_ -like "home =*" }) -join ""
+        Write-Error @"
+$python exists but will not run. The virtual environment points at an
+interpreter that is gone or unusable ($home_).
+
+Remove it and let this script rebuild it:
+    Remove-Item -Recurse -Force .venv
+    .\build_ai_installer.ps1
+"@
+    }
     # Was a pointer to build.ps1, which existed mainly to bootstrap this and
     # otherwise built the retired ClaudeUsageMonitor. One script, one job.
     Write-Host "Creating virtual environment..." -ForegroundColor Cyan
     python -m venv .venv
-    if (-not (Test-Path $python)) {
-        Write-Error "python -m venv did not produce $python. Is Python on PATH?"
+    if (-not (Test-VenvUsable $python)) {
+        Write-Error "python -m venv did not produce a working $python. Is Python on PATH?"
     }
     & $python -m pip install --upgrade pip --quiet
     & $python -m pip install -r requirements.txt
@@ -108,10 +136,21 @@ if (-not (Test-Path $expected)) {
     Write-Error "Inno Setup reported success but $expected was not produced."
 }
 
+# Both release assets, named as they will be published, in one folder. The
+# portable exe was uploaded once as a bare AIUsageMonitor.exe and had to be
+# renamed through the API afterwards, which breaks the download link it was
+# first given. Naming it here means nobody has to remember.
+$portableName = "installer_out\AIUsageMonitor-$appVersion-portable.exe"
+if (Test-Path "dist\AIUsageMonitor.exe") {
+    Copy-Item "dist\AIUsageMonitor.exe" $portableName -Force
+}
+
 Write-Host ""
-$portable = Get-Item "dist\AIUsageMonitor.exe" -ErrorAction SilentlyContinue
+$portable = Get-Item $portableName -ErrorAction SilentlyContinue
 if ($portable) {
     Write-Host ("Portable  {0} ({1:N1} MB)" -f $portable.FullName, ($portable.Length / 1MB)) -ForegroundColor Green
+} else {
+    Write-Error "PyInstaller finished but no portable executable was produced."
 }
 $setup = Get-Item $expected -ErrorAction SilentlyContinue
 if ($setup) {

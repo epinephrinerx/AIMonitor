@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 
+from . import __version__
 from .detection import Credential, epoch
 
 TIMEOUT_SECONDS = 25
@@ -167,7 +168,10 @@ def fetch(
             )
             client = _Client(process, cancel)
             client.call("initialize", {
-                "clientInfo": {"name": "ai_usage_monitor", "version": "1.1.0"},
+                # Imported, not written out: this is the one version string
+                # that leaves the machine, and a stale one here is a bug
+                # report from a build nobody can identify.
+                "clientInfo": {"name": "ai_usage_monitor", "version": __version__},
                 "capabilities": {"experimentalApi": True},
             })
             client.send({"method": "initialized"})
