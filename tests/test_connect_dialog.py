@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 # A scope of our own, so the tests never read or write the real user's keys.
+# Applied per test rather than at import: `Settings` reads the variable each
+# time it is constructed, so a module-level assignment would leak into every
+# other test file and leave whichever imported last in charge of all of them.
 SCOPE = "ConnectDialogTests"
-os.environ["AI_USAGE_MONITOR_SETTINGS_SCOPE"] = SCOPE
-# No display is needed to exercise dialog logic, and the CI/build machine may
-# not have one.
+# Qt reads this once, when the first QApplication is built, so it does belong
+# at import time. No display is needed to exercise dialog logic.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings  # noqa: E402
@@ -26,7 +29,7 @@ from ai_usage_monitor import secrets  # noqa: E402
 from ai_usage_monitor.connect_dialog import ConnectDialog  # noqa: E402
 from ai_usage_monitor.detection import CONNECTED, Detection  # noqa: E402
 from ai_usage_monitor.providers.base import Provider  # noqa: E402
-from ai_usage_monitor.settings import ORG, Settings  # noqa: E402
+from ai_usage_monitor.settings import ORG, SCOPE_ENV_VAR, Settings  # noqa: E402
 from ai_usage_monitor.theme import resolve  # noqa: E402
 
 KEY = "sk-admin-existing-key-value"
@@ -63,6 +66,9 @@ class ClearAndCancelTests(unittest.TestCase):
         cls.theme = resolve("light")
 
     def setUp(self):
+        scope = patch.dict(os.environ, {SCOPE_ENV_VAR: SCOPE})
+        scope.start()
+        self.addCleanup(scope.stop)
         self.settings = Settings()
         self.settings.set_provider_key(PROVIDER_ID, KEY)
         self.assertEqual(self.settings.provider_key(PROVIDER_ID), KEY)

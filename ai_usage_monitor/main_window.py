@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
 )
 
 from . import (
-    api,
     detection,
     formatting,
     memory,
@@ -96,9 +95,20 @@ CONNECTIONS = "connections"
 # was replaced.
 WIDGET_ROTATE_MS = 4000
 
+# How long shutdown waits for the worker after asking it to give up. The wait
+# is short because cancellation is what does the work: the thread normally
+# stops between providers within a poll interval. This is only the allowance
+# for a socket read that is already in flight.
+SHUTDOWN_GRACE_MS = 3000
+
+# A worker thread that outlasted its grace period. Module level so the QThread
+# object survives the window that owned it: deleting a running QThread aborts
+# the process, and at this point the app is a moment from exiting anyway.
+_ABANDONED_THREADS: list[QThread] = []
+
 
 class MainWindow(QMainWindow):
-    request_refresh = Signal(int, str, bool, str)
+    request_refresh = Signal(int, str, bool, str, int)
     push_credentials = Signal(str, str, str)
     push_enabled = Signal(str, bool)
 
@@ -111,6 +121,11 @@ class MainWindow(QMainWindow):
         self.last_result: RefreshResult | None = None
         self.last_success: dt.datetime | None = None
         self._refreshing = False
+        # A refresh asked for while one is already running. Only the newest
+        # matters, so it is replaced rather than queued: changing the range
+        # twice in a row should fetch the second range, not both in turn.
+        self._pending_refresh: tuple | None = None
+        self._request_id = 0
         self._theme_check = 0
         self._switching = False
         self._working_set = 0.0
@@ -454,6 +469,28 @@ class MainWindow(QMainWindow):
 
     # -- worker -----------------------------------------------------------
 
+    def _release_worker(self) -> None:
+        """Stop the refresh thread without ever destroying it while it runs.
+
+        The old shutdown waited two seconds, then waited out Claude's socket
+        timeout. That was never the right budget: providers are fetched one
+        after another, so the real worst case was the sum of all of them -
+        about a minute against the nineteen seconds allowed. Past that the
+        window went on to be destroyed, taking its child QThread with it, and
+        deleting a running QThread aborts the process.
+
+        So: ask the worker to give up, wait a short grace, and if it is still
+        inside a socket read, let it go. The thread is detached from the
+        window and parked where it will outlive this teardown, rather than
+        being deleted underneath itself. Process exit reclaims it.
+        """
+        self.worker.cancel()
+        self.thread.quit()
+        if self.thread.wait(SHUTDOWN_GRACE_MS):
+            return
+        self.thread.setParent(None)
+        _ABANDONED_THREADS.append(self.thread)
+
     def _start_worker(self) -> None:
         self.thread = QThread(self)
         self.worker = RefreshWorker()
@@ -515,11 +552,13 @@ class MainWindow(QMainWindow):
         self._sync_menus()
 
     def refresh(self) -> None:
-        if self._refreshing:
-            return
-        self._refreshing = True
-        self.refresh_button.setEnabled(False)
-        self.refresh_button.setText("Refreshing…")
+        """Fetch with the view's current settings, or queue it if one is running.
+
+        A request made while the worker is busy used to be dropped on the
+        floor. Changing the range or the metric calls straight through to
+        here, so the new choice was simply lost and the window kept the old
+        figures until the interval timer came round - up to half an hour.
+        """
         want_history = self.mode != WIDGET
         # Widget mode normally fetches only the service on screen. While the
         # widget is rotating it shows all of them, so all of them have to be
@@ -527,9 +566,21 @@ class MainWindow(QMainWindow):
         only = ""
         if self.mode == WIDGET and not self._rotate_widget.isActive():
             only = self._widget_provider_id()
-        self.request_refresh.emit(
-            self._days(), self._metric(), want_history, only
-        )
+        request = (self._days(), self._metric(), want_history, only)
+
+        if self._refreshing:
+            # Replaced, not queued: only the latest view matters.
+            self._pending_refresh = request
+            return
+        self._dispatch(request)
+
+    def _dispatch(self, request: tuple) -> None:
+        self._pending_refresh = None
+        self._refreshing = True
+        self._request_id += 1
+        self.refresh_button.setEnabled(False)
+        self.refresh_button.setText("Refreshing…")
+        self.request_refresh.emit(*request, self._request_id)
 
     def _on_result(self, result: RefreshResult) -> None:
         self._refreshing = False
@@ -574,6 +625,11 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.set_snapshots(result.snapshots)
         self._tick()
+
+        # Anything asked for while this one was in flight goes now, rather
+        # than waiting for the interval timer.
+        if self._pending_refresh is not None:
+            self._dispatch(self._pending_refresh)
 
     def _update_tab_labels(self, result: RefreshResult) -> None:
         """Put the headline number on the tab, so it reads at a glance."""
@@ -1242,14 +1298,19 @@ class MainWindow(QMainWindow):
     # -- usage log --------------------------------------------------------
 
     def _build_report(self) -> reporting.Report:
-        """The log of what is on screen right now, per service and per day."""
-        snapshots = self.last_result.snapshots if self.last_result else {}
+        """The log of what is on screen right now, per service and per day.
+
+        The range and metric come from the result, not from the combo boxes.
+        They are usually the same, but a refresh is in flight for a moment
+        after either one changes, and heading 30 days of tokens over 14 days
+        of dollars is exactly the kind of thing a saved log gets quoted on.
+        """
+        result = self.last_result
+        snapshots = result.snapshots if result else {}
+        days = result.days if result and result.days else self._days()
+        metric = result.metric if result and result.metric else self._metric()
         return reporting.build(
-            self.providers,
-            snapshots,
-            self._detections,
-            self._days(),
-            self._metric(),
+            self.providers, snapshots, self._detections, days, metric
         )
 
     def open_usage_log(self) -> None:
@@ -1469,11 +1530,7 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.hide()
         self.hide()
-        self.thread.quit()
-        if not self.thread.wait(2000):
-            # A request is still unwinding. Destroying a running QThread aborts
-            # the process, so wait out the remaining socket timeout instead.
-            self.thread.wait(api.TIMEOUT_SECONDS * 1000 + 2000)
+        self._release_worker()
         super().closeEvent(event)
         # Quit explicitly rather than relying on quitOnLastWindowClosed: this
         # window changes flags at runtime and the app runs with that behaviour

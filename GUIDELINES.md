@@ -219,12 +219,12 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
 ### ยังไม่ได้แก้ เรียงตามลำดับที่ตั้งใจจะทำ
 
 1. ~~**`ConnectDialog` Clear แล้ว Cancel ก็ยังลบ key**~~ — **แก้แล้ว 2026-09-18** ดูหัวข้อถัดไป
-2. **คำขอ refresh หายระหว่าง refresh** `MainWindow.refresh()` `return` ทันทีเมื่อ
+2. ~~**คำขอ refresh หายระหว่าง refresh**~~ **แก้แล้ว 2026-09-18** `MainWindow.refresh()` `return` ทันทีเมื่อ
    `_refreshing` เป็นจริง เปลี่ยน range หรือ metric ตอน worker ทำงานอยู่แล้วคำขอหายไปเลย
    ผลเก่าจึงถูก render ใต้ตัวเลือกใหม่จนกว่า timer รอบถัดไปจะมา ซึ่งนานได้ถึง 30 นาที
    ต้องเก็บคำขอล่าสุดเป็น pending แล้ว dispatch หลัง `_on_result()` พร้อม request id
    เพื่อทิ้งผลที่ล้าสมัยแทนที่จะวาด
-3. **ปิดโปรแกรมระหว่าง network request รอไม่พอ** `closeEvent()` รอ 2 วินาที แล้วรอเพิ่ม
+3. ~~**ปิดโปรแกรมระหว่าง network request รอไม่พอ**~~ **แก้แล้ว 2026-09-18** `closeEvent()` รอ 2 วินาที แล้วรอเพิ่ม
    `api.TIMEOUT_SECONDS + 2` รวม **19 วินาที** แต่ worker เรียก provider เรียงกัน และ
    งบเวลาจริงคือ Claude 15 + Codex 25 + Gemini 20 = **60 วินาที** ในกรณีเลวร้าย
    เกินงบแล้ว `super().closeEvent()` เดินต่อขณะ QThread ยังทำงาน ซึ่งทำให้โปรเซส abort
@@ -321,3 +321,41 @@ Gemini แยก try/except ของช่วง history ออกมาเพ�
 (ยืนยัน `snapshot.error` ซึ่งคือพฤติกรรมที่เป็นบั๊ก) แก้ให้ยืนยัน `history_error`
 เป็น None ที่ `error` และ `ok` เป็นจริง พร้อมเพิ่มกรณีคู่ตรงข้ามว่าไม่มี quota window
 ต้องยังนับเป็นล้มเหลวจริง
+
+### แก้แล้ว 2026-09-18 — วงจร refresh และการปิดโปรแกรม
+
+**คำขอที่มาระหว่าง refresh ไม่หายอีกแล้ว** `refresh()` เก็บคำขอล่าสุดไว้ที่
+`_pending_refresh` แล้ว `_on_result()` ส่งต่อทันที เก็บแบบ **แทนที่ ไม่ใช่ต่อคิว**
+เพราะเปลี่ยนช่วงวันสองครั้งติดกันต้องดึงช่วงที่สอง ไม่ใช่ดึงทั้งสองเรียงกัน
+
+`RefreshResult` พก `days`, `metric` และ `request_id` กลับมาด้วย
+**อะไรที่บรรยายผลลัพธ์ต้องอ่านจากตรงนี้ ห้ามอ่านจาก combo box** เพราะผู้ใช้อาจเปลี่ยน
+ค่าไปแล้วระหว่างที่คำขอยังบินอยู่ `_build_report()` เปลี่ยนมาใช้ค่าจาก result แล้ว
+ไม่งั้น log จะขึ้นหัวว่า 30 วัน/ดอลลาร์ คร่อมแถวที่เป็น 14 วัน/token
+ส่วนกราฟไม่มีปัญหานี้อยู่แล้วเพราะมันเขียนหัวข้อจาก `history.days` ของตัวเอง
+
+**ปิดโปรแกรมไม่ค้างและไม่ abort** งบเวลาเดิมคือ 2 วิ แล้วรอเพิ่ม
+`api.TIMEOUT_SECONDS + 2` รวม 19 วินาที ซึ่งไม่เคยเป็นงบที่ถูก เพราะ provider
+ถูกเรียกเรียงกัน กรณีเลวร้ายจริงคือผลรวม ~60 วินาที พอเกินงบแล้วหน้าต่างถูกทำลายต่อ
+พา QThread ลูกไปด้วย และการลบ QThread ที่ยังทำงานทำให้โปรเซส abort
+
+ตอนนี้เป็น cancellation แทนการรอ: `RefreshWorker.cancel()` ตั้ง `threading.Event`
+ที่ worker เช็คก่อนเริ่ม provider ตัวถัดไป และส่งต่อให้ provider ผ่าน `Provider.cancel`
+(เป็น attribute ไม่ใช่พารามิเตอร์ของ `fetch()` โดยตั้งใจ เพื่อให้สัญญาที่ทุก provider
+ต้องทำยังเป็นคำถามเดียวเหมือนเดิม provider ที่ใช้ประโยชน์ได้เท่านั้นที่ต้องรู้ว่ามีอยู่)
+`codex_usage._Client.call()` รอทีละ `CANCEL_POLL_SECONDS` แทนการ block ยาว 25 วินาที
+และ `GeminiProvider._query()` เช็คก่อนยิงทุก request ซึ่งเป็นคอขวดเดียวของ Monitoring
+
+`_release_worker()` สั่ง cancel รอ `SHUTDOWN_GRACE_MS` (3 วินาที) ถ้ายังไม่จบ
+**ไม่ทำลาย thread** แต่ `setParent(None)` แล้วฝากไว้ที่ `_ABANDONED_THREADS`
+ระดับโมดูล ให้ object อยู่รอดพ้นการ teardown ของหน้าต่าง แล้วปล่อยให้ process exit
+เก็บกวาด งบ 3 วินาทีนี้เป็นเผื่อ socket read ที่ค้างอยู่เท่านั้น ไม่ใช่เผื่อทั้ง refresh
+`tests/test_refresh_lifecycle.py` มี test ที่ยืนยันว่า `SHUTDOWN_GRACE_MS` ต้อง
+**สั้นกว่า** ผลรวม timeout ของ provider เพื่อกันไม่ให้ใครแก้กลับไปเป็นการรออีก
+
+เทสต์ 17 กรณี รวมถึงการสร้าง `MainWindow` จริงโดย stub `startup.set_enabled`,
+`startup.reconcile`, tray และ worker thread ยืนยันแล้วว่า 2 กรณีแดงเมื่อย้อน queue ออก
+
+**scope ของ settings ในเทสต์ต้องตั้งใน `setUp` ไม่ใช่ระดับโมดูล** เพราะ `Settings`
+อ่าน env ใหม่ทุกครั้งที่สร้าง การตั้งตอน import ทำให้ไฟล์ที่ import ทีหลังคุมทุกไฟล์
+ส่วน `QT_QPA_PLATFORM` ตั้งระดับโมดูลได้ เพราะ Qt อ่านครั้งเดียวตอนสร้าง QApplication

@@ -23,6 +23,10 @@ import time
 from .detection import Credential, epoch
 
 TIMEOUT_SECONDS = 25
+# How often the wait for an answer looks up to see whether it still matters.
+# Short enough that closing the window feels immediate, long enough not to
+# spin. Only affects responsiveness to cancellation, never the deadline.
+CANCEL_POLL_SECONDS = 0.25
 
 
 class CodexError(Exception):
@@ -46,11 +50,14 @@ def executable() -> str | None:
 
 
 class _Client:
-    def __init__(self, process: subprocess.Popen) -> None:
+    def __init__(
+        self, process: subprocess.Popen, cancel: threading.Event | None = None
+    ) -> None:
         self.process = process
         self.messages: queue.Queue = queue.Queue(maxsize=256)
         self.sequence = 0
         self.stopped = threading.Event()
+        self.cancel = cancel
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 
@@ -90,10 +97,20 @@ class _Client:
         self.send(request)
         deadline = time.monotonic() + TIMEOUT_SECONDS
         while True:
+            # Waited in slices rather than one long block, so a shutdown does
+            # not have to sit out the full timeout of an answer nobody is
+            # going to look at. This is the longest single wait in a refresh.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CodexError("Codex usage request timed out. Try refreshing again.")
+            if self.cancel is not None and self.cancel.is_set():
+                raise CodexError("Refresh cancelled.")
             try:
-                message = self.messages.get(timeout=max(0, deadline - time.monotonic()))
+                message = self.messages.get(
+                    timeout=min(CANCEL_POLL_SECONDS, remaining)
+                )
             except queue.Empty:
-                raise CodexError("Codex usage request timed out. Try refreshing again.") from None
+                continue
             if message is None:
                 raise CodexError("Codex App Server stopped. Update Codex and try again.")
             if "method" in message and "id" in message:
@@ -117,7 +134,11 @@ class _Client:
             return result
 
 
-def fetch(credential: Credential, want_history: bool) -> tuple[dict, dict | None, str | None]:
+def fetch(
+    credential: Credential,
+    want_history: bool,
+    cancel: threading.Event | None = None,
+) -> tuple[dict, dict | None, str | None]:
     if credential.expired:
         raise CodexError("Codex login expired. Open Codex to refresh the login, then "
                          "refresh here.", unauthorized=True)
@@ -144,7 +165,7 @@ def fetch(credential: Credential, want_history: bool) -> tuple[dict, dict | None
                 cwd=root, env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-            client = _Client(process)
+            client = _Client(process, cancel)
             client.call("initialize", {
                 "clientInfo": {"name": "ai_usage_monitor", "version": "1.1.0"},
                 "capabilities": {"experimentalApi": True},

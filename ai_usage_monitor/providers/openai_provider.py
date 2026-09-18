@@ -214,7 +214,9 @@ class OpenAIProvider(Provider):
         if not snapshot.configured:
             return snapshot
         try:
-            limits, usage, history_error = codex_usage.fetch(detected.credential, want_history)
+            limits, usage, history_error = codex_usage.fetch(
+                detected.credential, want_history, self.cancel
+            )
             snapshot.meters = codex_usage.meters(limits)
             snapshot.fetched_at = dt.datetime.now(dt.timezone.utc)
             snapshot.account = f"{detected.account} · Codex" if detected.account else "Codex (ChatGPT login)"

@@ -304,6 +304,11 @@ class GeminiProvider(Provider):
     def _query(
         self, token: str, project: str, start: dt.datetime, end: dt.datetime, period: int
     ) -> list[dict]:
+        # Every Monitoring request funnels through here, so one check bounds a
+        # cancelled refresh to whatever single request is already in flight
+        # rather than the whole sequence behind it.
+        if self.cancelled():
+            raise _GeminiError("Refresh cancelled.")
         params = {
             "filter": (
                 'metric.type="serviceruntime.googleapis.com/api/request_count" '
