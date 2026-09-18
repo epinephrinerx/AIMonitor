@@ -131,7 +131,13 @@ def build(
                     )
                 )
             section.rows.sort(key=lambda row: row.day)
-        elif not section.note:
+
+        # A history problem is worth saying in a log whose whole subject is
+        # the history, even when rows did arrive: partial totals that look
+        # complete are the kind of thing someone quotes in a report later.
+        if snapshot.history_error and not section.note:
+            section.note = snapshot.history_error
+        elif not section.rows and not section.note:
             section.note = "This service reports no daily history."
         report.sections.append(section)
     return report

@@ -193,21 +193,28 @@ class GeminiProvider(Provider):
             )
 
             if want_history:
-                buckets, total = self._history(token, project, days)
-                snapshot.history = HistoryView(
-                    buckets=buckets,
-                    series=["Requests"],
-                    by_model=[("Requests", float(total))] if total else [],
-                    by_project=[],
-                    days=days,
-                    metric=metric,
-                    project_label="By project",
-                )
-                snapshot.stats = [
-                    Stat("Requests in range", formatting.compact(total)),
-                    Stat("Requests today", formatting.compact(today)),
-                    Stat("Project", project),
-                ]
+                # Its own handler: the Today meter above is already read and
+                # good, and a failure fetching the range behind it must not
+                # be reported as the service having failed.
+                try:
+                    buckets, total = self._history(token, project, days)
+                except _GeminiError as exc:
+                    snapshot.history_error = str(exc)
+                else:
+                    snapshot.history = HistoryView(
+                        buckets=buckets,
+                        series=["Requests"],
+                        by_model=[("Requests", float(total))] if total else [],
+                        by_project=[],
+                        days=days,
+                        metric=metric,
+                        project_label="By project",
+                    )
+                    snapshot.stats = [
+                        Stat("Requests in range", formatting.compact(total)),
+                        Stat("Requests today", formatting.compact(today)),
+                        Stat("Project", project),
+                    ]
         except _GeminiError as exc:
             snapshot.error = str(exc)
             snapshot.unauthorized = exc.unauthorized

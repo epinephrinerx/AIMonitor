@@ -234,7 +234,7 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
    เวลาไทย UTC midnight คือ 07:00 ทำให้ **Today ตกข้อมูล 00:00–06:59 ทุกวัน**
    ต้องหา local midnight ก่อนแล้วค่อยแปลงเป็น UTC ให้ Monitoring API
    และใช้ timezone เดียวกันทั้ง query interval, bucket parsing และ label
-5. **transcript ที่ข้อมูลผิดรูปลบเกจโควตาทั้งแท็บ** `TranscriptStore._ingest()` ใส่
+5. ~~**transcript ที่ข้อมูลผิดรูปลบเกจโควตาทั้งแท็บ**~~ **แก้แล้ว 2026-09-18** `TranscriptStore._ingest()` ใส่
    message id ลง `_seen_ids` **ก่อน** validate timestamp และก่อน `int(...)` ทุกตัว
    และจุดที่เรียก `_ingest()` ไม่มี try/except ครอบ ผลจริงเป็นสองจังหวะ:
    refresh แรก `ValueError` ลอยถึง `worker.py` แล้ว snapshot กลายเป็น `Unexpected error`
@@ -242,7 +242,7 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
    refresh ถัดไป id ติด seen-set แล้วจึงข้าม record นั้นและกลับมาทำงานได้
    แต่ **นับ record นั้นไม่ครบตลอดไป** ต้อง validate ให้จบก่อนค่อย dedupe
    รับเฉพาะ int ที่ไม่ติดลบและไม่ใช่ bool และข้ามเฉพาะ record ที่เสีย
-6. **quota สำเร็จแต่ history ล้ม ถูกรายงานเป็น provider ล้มทั้งตัว** Codex เขียนลง
+6. ~~**quota สำเร็จแต่ history ล้ม ถูกรายงานเป็น provider ล้มทั้งตัว**~~ **แก้แล้ว 2026-09-18** Codex เขียนลง
    `snapshot.error` ต้องแยกเป็น `history_error` เพื่อให้โควตาที่สดยังนับเป็น refresh สำเร็จ
    **การแตะ `ProviderSnapshot` คือการแตะสัญญากลางของทุก provider** ต้องไล่ให้ครบทั้ง
    dashboard, widget, tray และ report
@@ -287,3 +287,37 @@ Save หรือ Cancel ก็ลบทั้งคู่ และไม่ม
 
 เทสต์ตั้ง `AI_USAGE_MONITOR_SETTINGS_SCOPE` เป็น scope ของตัวเองและล้างทิ้งเมื่อจบ
 จึงไม่แตะ key จริงของผู้ใช้ และตั้ง `QT_QPA_PLATFORM=offscreen` เพื่อให้รันได้โดยไม่ต้องมีจอ
+
+### แก้แล้ว 2026-09-18 — history ล้มต้องไม่ลากโควตาไปด้วย
+
+สองอาการนี้คือเรื่องเดียวกัน เปอร์เซ็นต์โควตามาจากเซิร์ฟเวอร์ของผู้ให้บริการ
+ส่วน transcript ในเครื่องกับ endpoint ยอดรายวันไม่เกี่ยวกับมันเลย การทำ history หาย
+จึงต้องไม่ทำให้เกจหายตาม
+
+**`TranscriptStore._ingest()`** เรียงใหม่ให้ validate ครบก่อนแล้วค่อยจำ id
+เพิ่ม `usage_log.token_count()` เป็นตัวแปลงค่าเดียวที่ทุกฟิลด์ต้องผ่าน รับ
+ค่าที่หายไปเป็น 0 รับสตริงตัวเลขเหมือนโค้ดเดิม รับ float ที่ลงตัวพอดี
+แต่ **ปฏิเสธ bool** (Python บอกว่า `isinstance(True, int)` แต่ transcript ที่เขียน
+`True` เป็นจำนวน token คือคนเขียนสับสน) และปฏิเสธค่าติดลบ
+จุดเรียก `_ingest()` มี try/except ครอบไว้เป็นชั้นสุดท้าย พร้อมคอมเมนต์อธิบายว่า
+ไม่ควรมีอะไรหลุดมาถึงตรงนั้น แต่ทางเลือกของการคิดผิดคือ exception วิ่งออกไปถึง worker
+แล้วลบ snapshot ทั้งก้อน `TranscriptStore.malformed` นับ record ที่อ่านไม่ได้
+โดยไม่ log เนื้อหา เพราะ transcript คือบทสนทนาของผู้ใช้
+
+**`ProviderSnapshot.history_error`** เป็นช่องใหม่แยกจาก `error`
+`snapshot.ok` ยังดูแค่ `error` ดังนั้น refresh ที่ได้โควตาสดยังนับเป็นสำเร็จ
+ไล่แก้ครบทั้งสาม provider: Codex เคยยัด `history_error` ลง `snapshot.error`,
+Claude รายงาน `last_error`/`malformed` ผ่าน `_history_note()`,
+Gemini แยก try/except ของช่วง history ออกมาเพื่อไม่ให้ทับเกจ Today ที่อ่านมาแล้ว
+
+หน้า dashboard มี `history_note` ของตัวเองวางไว้ตรงที่กราฟจะอยู่ ไม่ใช่ banner ด้านบน
+เพราะการขึ้นว่า "บริการนี้ล้มเหลว" คร่อมเกจที่กำลังทำงานอยู่คือคำที่ไม่จริง
+ส่วน Usage log เขียนหมายเหตุลงไปด้วยแม้จะมีแถวข้อมูลมาแล้ว เพราะยอดที่ขาดไปบางส่วน
+แต่ดูเหมือนครบคือสิ่งที่คนเอาไปอ้างต่อ
+
+เทสต์: `tests/test_transcript_ingest.py` 20 กรณี และ `tests/test_partial_success.py`
+12 กรณี ตรวจแล้วว่า 10 จาก 20 กรณีแรกแดงจริงเมื่อย้อนโค้ดกลับ
+`test_openai_usage.test_history_failure_preserves_quota` เดิมเขียน assert ไว้ผิดช่อง
+(ยืนยัน `snapshot.error` ซึ่งคือพฤติกรรมที่เป็นบั๊ก) แก้ให้ยืนยัน `history_error`
+เป็น None ที่ `error` และ `ok` เป็นจริง พร้อมเพิ่มกรณีคู่ตรงข้ามว่าไม่มี quota window
+ต้องยังนับเป็นล้มเหลวจริง

@@ -113,6 +113,39 @@ def projects_dir() -> Path:
     return credentials.config_dir() / "projects"
 
 
+def token_count(value) -> int | None:
+    """A token count from a transcript field, or None when it is not one.
+
+    Missing is zero: transcripts omit fields that did not apply. Everything
+    else has to prove itself, because these values are fed straight into
+    arithmetic and a bad one used to raise out of the whole refresh.
+
+    A bool is rejected even though Python calls it an int - `True` as a token
+    count means the writer was confused, not that one token was used - and so
+    is anything negative.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        # Some writers emit 1.0 rather than 1. Accept it only when it is an
+        # exact whole number; 1.5 tokens is not a thing.
+        return int(value) if value.is_integer() and value >= 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0
+        try:
+            number = int(text)
+        except ValueError:
+            return None
+        return number if number >= 0 else None
+    return None
+
+
 def _project_from_dirname(name: str) -> str:
     """Best-effort project label when a record carries no `cwd`.
 
@@ -137,6 +170,9 @@ class TranscriptStore:
         self._seen_ids: dict[str, None] = {}  # insertion-ordered set
         self.files_scanned = 0
         self.last_error: str | None = None
+        # Records that looked like usage but could not be read. Counted rather
+        # than logged: a transcript line is the user's own conversation.
+        self.malformed = 0
 
     # -- ingest -----------------------------------------------------------
 
@@ -196,14 +232,35 @@ class TranscriptStore:
                     record = json.loads(line.decode("utf-8", "replace"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
-                if isinstance(record, dict) and self._ingest(record, fallback_project):
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    counted = self._ingest(record, fallback_project)
+                except Exception:  # noqa: BLE001 - see below
+                    # `_ingest` validates every field it uses, so this should
+                    # be unreachable. It is here because the alternative to
+                    # being wrong about that is an exception travelling out of
+                    # the worker and blanking the whole Claude snapshot -
+                    # losing the server's quota gauges, which have nothing to
+                    # do with the local transcripts, over one bad line.
+                    self.malformed += 1
+                    continue
+                if counted:
                     added += 1
 
         self._offsets[path] = offset
         return added
 
     def _ingest(self, record: dict, fallback_project: str) -> bool:
-        """Fold one record into the counters. Returns True if it counted."""
+        """Fold one record into the counters. Returns True if it counted.
+
+        Nothing is remembered about a record until it has fully parsed. The
+        de-duplication id used to be recorded first, which had two costs: a
+        record with an unparseable token count raised out of the whole refresh
+        and took the quota gauges down with the history, and the id it had
+        already claimed meant the same record could never be counted later,
+        even once a corrected copy arrived.
+        """
         if record.get("type") != "assistant":
             return False
         message = record.get("message")
@@ -213,18 +270,20 @@ class TranscriptStore:
         if not isinstance(usage, dict):
             return False
 
+        # Cheap exit for a record already counted. The id is only *recorded*
+        # further down, once this record has proved it can be read.
         key = message.get("id") or record.get("requestId")
-        if key:
-            if key in self._seen_ids:
-                return False
-            self._seen_ids[key] = None
+        if key and key in self._seen_ids:
+            return False
 
         timestamp = record.get("timestamp")
         if not isinstance(timestamp, str):
+            self.malformed += 1
             return False
         try:
             when = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError:
+            self.malformed += 1
             return False
         if when.tzinfo is None:
             when = when.replace(tzinfo=dt.timezone.utc)
@@ -232,17 +291,26 @@ class TranscriptStore:
 
         cache_creation = usage.get("cache_creation")
         if isinstance(cache_creation, dict):
-            write_5m = int(cache_creation.get("ephemeral_5m_input_tokens") or 0)
-            write_1h = int(cache_creation.get("ephemeral_1h_input_tokens") or 0)
+            write_5m = token_count(cache_creation.get("ephemeral_5m_input_tokens"))
+            write_1h = token_count(cache_creation.get("ephemeral_1h_input_tokens"))
         else:
             # Older transcripts report only the aggregate; treat it as 5-minute.
-            write_5m = int(usage.get("cache_creation_input_tokens") or 0)
+            write_5m = token_count(usage.get("cache_creation_input_tokens"))
             write_1h = 0
 
+        input_tokens = token_count(usage.get("input_tokens"))
+        output_tokens = token_count(usage.get("output_tokens"))
+        cache_read = token_count(usage.get("cache_read_input_tokens"))
+        if None in (write_5m, write_1h, input_tokens, output_tokens, cache_read):
+            self.malformed += 1
+            return False
+
+        # Past this point the record is known good, so claiming its id cannot
+        # strand a record that would otherwise have counted.
+        if key:
+            self._seen_ids[key] = None
+
         model = message.get("model") or ""
-        input_tokens = int(usage.get("input_tokens") or 0)
-        output_tokens = int(usage.get("output_tokens") or 0)
-        cache_read = int(usage.get("cache_read_input_tokens") or 0)
         cost = pricing.cost(
             model,
             input_tokens=input_tokens,

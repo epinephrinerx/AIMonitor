@@ -218,7 +218,11 @@ class OpenAIProvider(Provider):
             snapshot.meters = codex_usage.meters(limits)
             snapshot.fetched_at = dt.datetime.now(dt.timezone.utc)
             snapshot.account = f"{detected.account} · Codex" if detected.account else "Codex (ChatGPT login)"
-            snapshot.error = history_error
+            # A history failure is not a provider failure. The quota windows
+            # above came from the server on this same call; reporting them as
+            # broken because the daily totals were unavailable took working
+            # gauges off the screen.
+            snapshot.history_error = history_error
             if not snapshot.meters:
                 snapshot.error = "OpenAI returned no percentage quota windows for this account."
             if usage is not None:

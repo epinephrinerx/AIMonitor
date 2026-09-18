@@ -69,7 +69,14 @@ class ProviderSnapshot:
     stats: list[Stat] = field(default_factory=list)
     history: HistoryView | None = None
     account: str = ""
+    # A refresh that produced nothing usable. Setting this means the service
+    # failed, and the tab says so.
     error: str | None = None
+    # The daily history could not be read, but whatever else arrived is good.
+    # Quota comes from the server and local or historical data has no bearing
+    # on it, so a history failure must never travel as `error`: doing that
+    # marked the whole service failed and took live gauges off the screen.
+    history_error: str | None = None
     unauthorized: bool = False
     setup_hint: str = ""
     value_note: str = ""

@@ -66,6 +66,15 @@ class ProviderPage(QWidget):
         self.tiles_row.setSpacing(24)
         body.addWidget(self.tiles_card)
 
+        # Sits where the charts would be, above them. A history problem is a
+        # gap in one part of the page, not a failure of the service whose
+        # live gauges are still on screen just above it.
+        self.history_note = QLabel("")
+        self.history_note.setWordWrap(True)
+        self.history_note.setVisible(False)
+        self.history_note.setContentsMargins(2, 0, 2, 0)
+        body.addWidget(self.history_note)
+
         self.chart_card = Card(theme)
         chart_layout = QVBoxLayout(self.chart_card)
         chart_layout.setContentsMargins(18, 14, 18, 14)
@@ -181,6 +190,12 @@ class ProviderPage(QWidget):
 
         history = snapshot.history
         has_history = show_history and history is not None and history.buckets
+        # A history problem is reported where the history would have been,
+        # not in the banner at the top - the gauges above it are live and
+        # saying "this service failed" over them is simply untrue.
+        history_note = snapshot.history_error if show_history else None
+        self.history_note.setText(f"⚠ {history_note}" if history_note else "")
+        self.history_note.setVisible(bool(history_note) and snapshot.configured)
         self.chart_card.setVisible(bool(has_history))
         self.breakdown_row.setVisible(bool(has_history))
         if has_history:
@@ -242,5 +257,8 @@ class ProviderPage(QWidget):
             f"color: {theme.ink_secondary}; font-size: 12px;"
         )
         self.note.setStyleSheet(f"color: {theme.ink_muted}; font-size: 11px;")
+        self.history_note.setStyleSheet(
+            f"color: {Theme.status('warning')}; font-size: 11px;"
+        )
         if self.snapshot is not None:
             self._render_banner(self.snapshot)

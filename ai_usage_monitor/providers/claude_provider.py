@@ -94,6 +94,7 @@ class ClaudeProvider(Provider):
 
         if want_history:
             snapshot.history = self._history(days, metric)
+            snapshot.history_error = self._history_note()
             totals = self._store.window_totals(days)
             snapshot.stats = [
                 Stat(
@@ -116,6 +117,23 @@ class ClaudeProvider(Provider):
             ] + snapshot.stats
 
         return snapshot
+
+    def _history_note(self) -> str | None:
+        """What went wrong reading the transcripts, if anything did.
+
+        Reported separately from `error`: the gauges above come from the
+        server and are unaffected by anything in the local transcript folder.
+        """
+        if self._store.last_error:
+            return self._store.last_error
+        if self._store.malformed:
+            count = self._store.malformed
+            record = "record" if count == 1 else "records"
+            return (
+                f"{count} transcript {record} could not be read and were left "
+                "out of the daily history. The quota gauges are unaffected."
+            )
+        return None
 
     def _history(self, days: int, metric: str) -> HistoryView:
         self._store.refresh()

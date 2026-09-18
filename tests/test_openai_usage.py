@@ -101,13 +101,32 @@ class MappingTests(unittest.TestCase):
             self.assertIsNone(codex_usage.history(payload, 14, metric)[0])
 
     def test_history_failure_preserves_quota(self):
+        """A missing daily history is a gap, not a failed service.
+
+        The quota windows here came from the server on the same call. This
+        used to travel as `snapshot.error`, which put an error banner over
+        live gauges and made the refresh count as failed.
+        """
         provider = OpenAIProvider()
         detected = Mock(credential=Credential(OAUTH, "token", account_id="account"),
                         usable=True, account="test", hint="")
         with patch.object(provider, "detect", return_value=detected), patch.object(codex_usage, "fetch", return_value=(quota(), None, "History unavailable")):
             snapshot = provider.fetch(14, "Total tokens", True)
         self.assertEqual(len(snapshot.meters), 2)
-        self.assertEqual(snapshot.error, "History unavailable")
+        self.assertEqual(snapshot.history_error, "History unavailable")
+        self.assertIsNone(snapshot.error)
+        self.assertTrue(snapshot.ok, "a refresh with live quota is a success")
+
+    def test_no_quota_windows_is_still_a_real_failure(self):
+        """The separation must not swallow an actually failed refresh."""
+        provider = OpenAIProvider()
+        detected = Mock(credential=Credential(OAUTH, "token", account_id="account"),
+                        usable=True, account="test", hint="")
+        with patch.object(provider, "detect", return_value=detected), patch.object(codex_usage, "fetch", return_value=({}, None, None)):
+            snapshot = provider.fetch(14, "Total tokens", True)
+        self.assertEqual(snapshot.meters, [])
+        self.assertIsNotNone(snapshot.error)
+        self.assertFalse(snapshot.ok)
 
     def test_admin_path_still_reports_spend(self):
         provider = OpenAIProvider()
