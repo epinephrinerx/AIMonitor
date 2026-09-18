@@ -179,7 +179,11 @@ class GeminiProvider(Provider):
         snapshot.account = f"{who} · project {project} · {detected.source_label}"
 
         try:
-            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # "Today" is the user's today. Taken from UTC midnight this both
+            # dropped the first hours of the local day - seven of them in
+            # Bangkok - and reset at the wrong time of the evening.
+            local_today = dt.datetime.now().astimezone().date()
+            day_start = local_day_start(local_today)
             today = self._series_total(token, project, day_start, now)
             snapshot.meters.append(
                 Meter(
@@ -188,7 +192,7 @@ class GeminiProvider(Provider):
                     subtitle="API requests",
                     percent=None,
                     detail=formatting.compact(today),
-                    resets_at=day_start + dt.timedelta(days=1),
+                    resets_at=local_day_start(local_today + dt.timedelta(days=1)),
                 )
             )
 
@@ -345,23 +349,24 @@ class GeminiProvider(Provider):
     def _history(
         self, token: str, project: str, days: int
     ) -> tuple[list[DayBucket], int]:
+        # Days are the user's days. The window starts at local midnight and is
+        # converted to UTC for the API, so the 24-hour alignment lands on the
+        # boundaries the chart is labelled with. Starting from UTC midnight
+        # instead put every bucket seven hours out in Bangkok, enough to move
+        # most of a day's requests onto the wrong bar.
         end = dt.datetime.now(dt.timezone.utc)
-        start = (end - dt.timedelta(days=days - 1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today = dt.datetime.now().astimezone().date()
+        first = today - dt.timedelta(days=days - 1)
+        start = local_day_start(first)
+
         by_day: dict[dt.date, int] = {}
         for series in self._query(token, project, start, end, 86_400):
             for point in series.get("points") or []:
-                stamp = ((point.get("interval") or {}).get("endTime")) or ""
-                try:
-                    when = dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-                except ValueError:
+                day = bucket_day(point, 86_400)
+                if day is None:
                     continue
-                day = when.astimezone().date()
                 by_day[day] = by_day.get(day, 0) + _point_value(point)
 
-        today = dt.datetime.now().astimezone().date()
-        first = today - dt.timedelta(days=days - 1)
         buckets = []
         for offset in range(days):
             day = first + dt.timedelta(days=offset)
@@ -371,6 +376,45 @@ class GeminiProvider(Provider):
                 bucket.per_model["Requests"] = float(value)
             buckets.append(bucket)
         return buckets, sum(by_day.values())
+
+
+def local_day_start(day: dt.date) -> dt.datetime:
+    """Midnight at the start of `day` in local time, expressed in UTC.
+
+    Built from a naive local datetime so the platform applies the offset that
+    was actually in effect at that moment. Calling `.replace(hour=0)` on an
+    aware value instead carries today's offset backwards, which is wrong by
+    an hour on the day a DST change falls.
+    """
+    naive = dt.datetime.combine(day, dt.time.min)
+    return naive.astimezone().astimezone(dt.timezone.utc)
+
+
+def bucket_day(point: dt.datetime | dict, period_seconds: int) -> dt.date | None:
+    """The local day a Monitoring point belongs to.
+
+    Points are labelled with the interval they *cover*, and for an aligned
+    series that interval ends at the start of the next one. Reading the day
+    off `endTime` put every bucket on the following day; the start of the
+    interval is what it is about.
+    """
+    interval = point.get("interval") or {} if isinstance(point, dict) else {}
+    stamp = interval.get("startTime") or ""
+    when = _parse_stamp(stamp)
+    if when is None:
+        # Older payloads report only the end of the interval.
+        when = _parse_stamp(interval.get("endTime") or "")
+        if when is None:
+            return None
+        when -= dt.timedelta(seconds=period_seconds)
+    return when.astimezone().date()
+
+
+def _parse_stamp(stamp: str) -> dt.datetime | None:
+    try:
+        return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 class _GeminiError(Exception):

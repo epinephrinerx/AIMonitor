@@ -229,7 +229,7 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
    งบเวลาจริงคือ Claude 15 + Codex 25 + Gemini 20 = **60 วินาที** ในกรณีเลวร้าย
    เกินงบแล้ว `super().closeEvent()` เดินต่อขณะ QThread ยังทำงาน ซึ่งทำให้โปรเซส abort
    ต้องมี cancellation event ที่ provider กับ Codex client ตรวจระหว่างทาง และ deadline รวม
-4. **Gemini ใช้ UTC boundary แต่ UI ใช้วัน local** `day_start` มาจาก
+4. ~~**Gemini ใช้ UTC boundary แต่ UI ใช้วัน local**~~ **แก้แล้ว 2026-09-18** `day_start` มาจาก
    `now(utc).replace(hour=0)` ขณะที่ history อ่าน bucket ด้วย `when.astimezone().date()`
    เวลาไทย UTC midnight คือ 07:00 ทำให้ **Today ตกข้อมูล 00:00–06:59 ทุกวัน**
    ต้องหา local midnight ก่อนแล้วค่อยแปลงเป็น UTC ให้ Monitoring API
@@ -246,7 +246,7 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
    `snapshot.error` ต้องแยกเป็น `history_error` เพื่อให้โควตาที่สดยังนับเป็น refresh สำเร็จ
    **การแตะ `ProviderSnapshot` คือการแตะสัญญากลางของทุก provider** ต้องไล่ให้ครบทั้ง
    dashboard, widget, tray และ report
-7. **สี severity บน dashboard ไม่ตรงกับ arc** `QuotaGauge.set_meter()` คำนวณ
+7. ~~**สี severity บน dashboard ไม่ตรงกับ arc**~~ **แก้แล้ว 2026-09-18** `QuotaGauge.set_meter()` คำนวณ
    `severity_for()` ถูกต้องแล้วใช้กับ arc และคำกำกับ แต่ `_restyle_severity()` กลับไปอ่าน
    `self.meter.severity` ดิบ server ที่ส่ง `normal` ที่ 95% จึงได้ arc แดงกับคำว่า Critical
    แต่สีตัวอักษรยังเป็นสีปกติ **สีกับคำขัดกันเองผิดกฎ accessibility ของโปรเจกต์นี้**
@@ -359,3 +359,32 @@ Gemini แยก try/except ของช่วง history ออกมาเพ�
 **scope ของ settings ในเทสต์ต้องตั้งใน `setUp` ไม่ใช่ระดับโมดูล** เพราะ `Settings`
 อ่าน env ใหม่ทุกครั้งที่สร้าง การตั้งตอน import ทำให้ไฟล์ที่ import ทีหลังคุมทุกไฟล์
 ส่วน `QT_QPA_PLATFORM` ตั้งระดับโมดูลได้ เพราะ Qt อ่านครั้งเดียวตอนสร้าง QApplication
+
+### แก้แล้ว 2026-09-18 — วันของผู้ใช้ และสีที่ตรงกับคำ
+
+**Gemini ใช้วันตามเวลาท้องถิ่นแล้ว** เพิ่ม `local_day_start(day)` หาเที่ยงคืนท้องถิ่น
+แล้วแปลงเป็น UTC ให้ Monitoring API สร้างจาก datetime แบบ naive โดยตั้งใจ
+เพื่อให้ระบบใช้ offset ที่มีผลจริง ณ เวลานั้น การเรียก `.replace(hour=0)` บนค่า aware
+จะลาก offset ของวันนี้ย้อนกลับไป ซึ่งผิดไปหนึ่งชั่วโมงในวันที่มีการเปลี่ยน DST
+(ไทยไม่มี DST แต่ US Pacific มี และมี test ครอบทั้งสองแบบ)
+
+เจอบั๊กซ้อนอีกชั้นระหว่างแก้: bucket ถูกตั้งชื่อวันจาก `interval.endTime`
+ซึ่งเป็น**จุดจบ**ของช่วง 24 ชั่วโมง คือเที่ยงคืนของวันถัดไป ทุก bucket จึงเลื่อนไปหนึ่งวัน
+แม้ไม่นับเรื่อง timezone เลย `bucket_day()` ใช้ `startTime` เป็นหลัก
+และถอย `endTime` กลับมาหนึ่ง period เมื่อ payload มีแต่ endTime
+
+**`QuotaGauge.effective_severity()`** เป็นแหล่งเดียวของ severity ที่หน้านี้แสดง
+ทั้ง arc คำกำกับ และสี เดิม `set_meter()` คำนวณ `severity_for()` ให้ arc กับคำ
+แต่ `_restyle_severity()` อ่าน `meter.severity` ดิบสำหรับสี บริการที่รายงาน `normal`
+ที่ 95% จึงได้ arc แดง คำว่า Critical แต่สีตัวอักษรเป็นสีปกติ
+**สีที่ขัดกับคำแย่กว่าอย่างใดอย่างหนึ่งผิดเดี่ยว ๆ** เพราะกฎ accessibility ของโปรเจกต์นี้
+คือทั้งสองต้องยืนยันกันเอง meter ที่ไม่มีเปอร์เซ็นต์ (Gemini) คืนค่าที่เซิร์ฟเวอร์บอก
+เพราะไม่มี threshold ท้องถิ่นให้ใช้
+
+เทสต์ `tests/test_days_and_severity.py` 17 กรณี ยืนยันแล้วว่า 3 กรณีแดงเมื่อย้อนโค้ดกลับ
+
+**บทเรียนจากการเขียน test timezone** ตัวช่วยจำลองโซนเวลาต้องครอบ `now()` ให้คืน
+instance ของคลาสที่ patch ไว้ ไม่ใช่ `datetime` จริง เพราะโค้ดมักต่อ `.astimezone()`
+ท้าย `now()` ทันที ถ้าคืนค่าเป็น datetime จริงมันจะไปอ่านโซนของเครื่องที่รันเทสต์
+และต้องตีความค่า naive ว่าอยู่ในโซนที่จำลอง ไม่ใช่โซนของเครื่อง
+ผมเขียนผิดทั้งสองจุดตอนแรกและทำให้ test แดงโดยที่โค้ดโปรแกรมถูกอยู่แล้ว

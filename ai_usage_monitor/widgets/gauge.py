@@ -164,7 +164,7 @@ class QuotaGauge(Card):
             # "normal" at 95% drew a calm arc on this page and a red one
             # everywhere else. Invisible while the fill was the accent hue;
             # not invisible once a healthy meter is green.
-            severity = severity_for(meter.percent, meter.severity)
+            severity = self.effective_severity()
             self._arc.set_value(meter.percent, severity)
             self._severity.setVisible(True)
             glyph, word = _SEVERITY_WORDS.get(
@@ -208,8 +208,24 @@ class QuotaGauge(Card):
         self._arc.apply_theme(theme)
         self._restyle_severity()
 
+    def effective_severity(self) -> str:
+        """The severity this gauge is actually showing.
+
+        One value for the arc, the word and the colour. They used to be read
+        from two places: `set_meter` applied the local 75/90 thresholds, while
+        this method took `meter.severity` raw, so a service reporting "normal"
+        at 95% drew a red arc labelled Critical in the ordinary text colour.
+        Colour disagreeing with the word is worse than either being wrong -
+        this app's whole accessibility rule is that they back each other up.
+        """
+        if self.meter is None:
+            return "normal"
+        if self.meter.percent is None:
+            return self.meter.severity
+        return severity_for(self.meter.percent, self.meter.severity)
+
     def _restyle_severity(self) -> None:
-        severity = self.meter.severity if self.meter else "normal"
+        severity = self.effective_severity()
         colour = (
             severity_color(self.theme, severity)
             if severity != "normal"
