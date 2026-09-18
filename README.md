@@ -26,7 +26,8 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Building](#building)
 - [Architecture](#architecture)
 - [Licence](#licence)
-- [Working with Claude Code](#working-with-claude-code)
+- [How this was built](#how-this-was-built)
+- [Working on the project](#working-on-the-project)
 
 ---
 
@@ -651,11 +652,23 @@ Every redistributed component, its licence and where to get its source is
 listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Both files ship
 beside the installed executable.
 
-## Working with Claude Code
+## How this was built
+
+AI Usage Monitor is written and maintained by Apichart Chantanis. Two coding
+assistants helped along the way — **Claude Code** (Anthropic) and **Codex**
+(OpenAI) — as tools, in the same sense as the compiler and the profiler.
+Every design decision, every review and every release is the author's.
+
+Commits record that with an `Assisted-by:` line where it applies. It is
+deliberately not a `Co-Authored-By:` trailer: these are instruments, not
+authors, and the repository's history should not say otherwise.
+
+## Working on the project
 
 Read [GUIDELINES.md](https://github.com/epinephrinerx/AIMonitor/blob/main/GUIDELINES.md)
-before changing the project. `CLAUDE.md` and `AGENTS.md` are pointers to it,
-so that Claude Code and Codex cannot end up reading two different documents. It records the active package, Codex-first
-detection requirements, credential handling, the 2026-09-14 fix and
-verification results, and commands for testing and building. Keep both
-documents aligned with the implementation when behavior changes.
+before changing anything. `CLAUDE.md` and `AGENTS.md` are pointers to it, so
+that Claude Code and Codex cannot end up reading two different documents. It
+records the active package, Codex-first detection requirements, credential
+handling, the fixes made so far with their verification results, and the
+commands for testing and building. Keep it aligned with the implementation
+when behaviour changes.

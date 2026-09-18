@@ -26,7 +26,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 
-from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -201,6 +201,12 @@ class MainWindow(QMainWindow):
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.timeout.connect(self._fit_to_screen)
+
+        # One timer rather than a singleShot per resize event: a drag past the
+        # threshold fires dozens of them, and they would all still be queued.
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.timeout.connect(self._collapse_when_drag_ends)
         self._watch_screens()
 
         self._sync_menus()
@@ -722,19 +728,39 @@ class MainWindow(QMainWindow):
         flags = self._widget_flags()
         if self.settings.always_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
+        # The smallest size that still fits all three meters with their reset
+        # line - 260x230 left dead space under the content and read as
+        # oversized for a desk widget. Only new installs see this; a saved
+        # widget geometry still wins. Worked out before anything is applied,
+        # so the window can be put at its final size while still hidden.
+        target = self._target_geometry(WIDGET, QSize(230, 175))
+
+        if self.isMaximized() or self.isFullScreen():
+            # A maximised window ignores a geometry set on it, and `show()`
+            # after the flag change puts it back up at full screen for a
+            # frame before the widget size lands - the most visible form of
+            # the same flicker. Come down to a normal window first. The
+            # dashboard rect is safe: `_save_geometry` declines to record a
+            # maximised window, so there is nothing here to lose.
+            self.setWindowState(Qt.WindowState.WindowNoState)
+
         self.setWindowFlags(flags)
         self.setWindowOpacity(self.settings.opacity)
         self.setMinimumSize(WIDGET_MIN_W, WIDGET_MIN_H)
         self.setMaximumSize(WIDGET_MAX_EDGE, WIDGET_MAX_EDGE)
-        # Geometry is applied after show(): changing window flags re-creates the
-        # native window, and a geometry set before that is discarded.
+        # Size it before showing it. Setting the maximum alone snaps the
+        # dashboard's rect down to exactly 300x300 - the largest a widget may
+        # be - and that was the first frame drawn: the window appeared at
+        # 300x300 and only then shrank to the widget's real size. Coming from
+        # a window that had been dragged narrow, that reads as the app
+        # growing on its way to collapsing.
+        self.setGeometry(target)
+        # Changing window flags re-creates the native window, which on some
+        # platforms drops a geometry set beforehand; applied again after show
+        # so the pre-show placement is an optimisation, never the only try.
         self.show()
+        self.setGeometry(target)
         self._sync_widget_rotation()
-        # The smallest size that still fits all three meters with their reset
-        # line - 260x230 left dead space under the content and read as
-        # oversized for a desk widget. Only new installs see this; a saved
-        # widget geometry still wins.
-        self._restore_geometry(WIDGET, QSize(230, 175))
         memory.trim_working_set()
         self._switching = False
         self._fit_to_screen()
@@ -769,13 +795,19 @@ class MainWindow(QMainWindow):
         self.mode = DASHBOARD
         self.stack.setCurrentWidget(self.dashboard_page)
         self.menuBar().setVisible(True)
+        target = self._target_geometry(DASHBOARD, self._default_window_size())
         self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowOpacity(1.0)
         self._rotate_widget.stop()
         self.setMaximumSize(16777215, 16777215)
         self.setMinimumSize(DASHBOARD_DRAG_MIN_W, DASHBOARD_DRAG_MIN_H)
+        # The mirror of the collapse. Raising the minimum alone pulled the
+        # widget's rect up to exactly the draggable minimum, so the dashboard
+        # appeared as a 300x220 stub where the widget had been and only then
+        # jumped to its real size.
+        self.setGeometry(target)
         self.show()
-        self._restore_geometry(DASHBOARD, self._default_window_size())
+        self.setGeometry(target)
         self._switching = False
         # Settle it against the screen now rather than waiting for the display
         # poll: a remembered rect can outlive the usable area that produced it
@@ -795,8 +827,33 @@ class MainWindow(QMainWindow):
             return
         size = event.size()
         if size.width() < WIDGET_TRIGGER_EDGE or size.height() < WIDGET_TRIGGER_EDGE:
-            # Defer: we are inside Qt's resize handling right now.
-            QTimer.singleShot(0, self.enter_widget_mode)
+            self._collapse_when_drag_ends()
+
+    def _collapse_when_drag_ends(self) -> None:
+        """Collapse once the mouse is let go, not in the middle of the drag.
+
+        Resizing a window by its border is a modal loop inside Windows.
+        Collapsing recreates the native window - a window flag change does -
+        and doing that from inside the loop ended it badly: Windows put the
+        window back at the size it had when the drag began, past Qt's maximum,
+        so the dashboard snapped out to full size at the exact moment it
+        reached the widget. That is the bounce this waits out.
+
+        Waiting for the release also makes the gesture forgiving: drag below
+        the threshold and back out again without letting go, and nothing
+        happens, which is what the rubber-banding suggests should happen.
+        """
+        if self.mode != DASHBOARD or self._switching:
+            return
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            self._collapse_timer.start(60)
+            return
+        if (
+            self.width() >= WIDGET_TRIGGER_EDGE
+            and self.height() >= WIDGET_TRIGGER_EDGE
+        ):
+            return  # dragged back out before letting go
+        self.enter_widget_mode()
 
     def _show_widget_menu(self, global_pos) -> None:
         menu = QMenu(self)
@@ -1024,11 +1081,17 @@ class MainWindow(QMainWindow):
         )
 
     def _restore_geometry(self, mode: str, fallback: QSize) -> None:
-        """Apply the saved rect for `mode`, falling back to a default size.
+        """Apply the saved rect for `mode`, falling back to a default size."""
+        self.setGeometry(self._target_geometry(mode, fallback))
 
-        An explicit rect is stored rather than `saveGeometry()`'s opaque blob:
-        the blob encodes window state that does not survive the flag change
-        between dashboard and widget, and restored the wrong size.
+    def _target_geometry(self, mode: str, fallback: QSize) -> QRect:
+        """Where this mode's window belongs: the saved rect, or a centred default.
+
+        Separate from applying it so a mode change can size the window while
+        it is still hidden. An explicit rect is stored rather than
+        `saveGeometry()`'s opaque blob: the blob encodes window state that does
+        not survive the flag change between dashboard and widget, and restored
+        the wrong size.
         """
         saved = self.settings.load_geometry(mode, display=self._display_signature())
         rect = None
@@ -1059,20 +1122,18 @@ class MainWindow(QMainWindow):
             rect = None
 
         if rect and rect[2] > 0 and rect[3] > 0 and self._on_a_screen(rect):
-            self.setGeometry(*rect)
-            return
+            return QRect(*rect)
 
-        # No usable saved position. Resizing alone would leave the window
+        # No usable saved position. Sizing alone would leave the window
         # wherever it happened to be - which, coming back from a widget the
         # user had dragged into a corner, is nowhere sensible. Centre it.
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
-            self.resize(fallback)
-            return
+            return QRect(self.x(), self.y(), fallback.width(), fallback.height())
         available = screen.availableGeometry()
         width = min(fallback.width(), available.width())
         height = min(fallback.height(), available.height())
-        self.setGeometry(
+        return QRect(
             available.left() + (available.width() - width) // 2,
             available.top() + (available.height() - height) // 2,
             width,
@@ -1135,6 +1196,14 @@ class MainWindow(QMainWindow):
         in, but enlarging it left the window stuck at the smaller size. On a
         display change the preferred size is re-applied (bounded by the screen),
         so the window grows back as well as shrinks.
+
+        **Only a display change may grow the window.** The comfortable floor
+        used to be applied on every call, including the routine ones, so a
+        window the user was in the middle of dragging narrow was yanked back
+        out to 760 wide mid-gesture - the app visibly resisting the drag, and
+        expanding on its way to collapsing into the widget. Routine fitting
+        now only ever moves the window in or shrinks it: the size on screen is
+        the size the user chose, including one on its way to becoming a widget.
         """
         rescale = self._pending_rescale
         self._pending_rescale = False
@@ -1148,16 +1217,22 @@ class MainWindow(QMainWindow):
         self._last_available = available
 
         if self.mode == WIDGET:
-            floor_w, floor_h = 180, 120
+            # The widget's own minimum. The old floor here was 180x120, which
+            # quietly grew a widget deliberately dragged down to 150x96.
+            floor_w = min(WIDGET_MIN_W, available.width())
+            floor_h = min(WIDGET_MIN_H, available.height())
         else:
-            # Fit to a sane dashboard size where the screen allows it, but the
-            # draggable minimum stays low so collapsing still works.
-            floor_w = min(DASHBOARD_MIN_W, available.width())
-            floor_h = min(DASHBOARD_MIN_H, available.height())
             drag_w = min(DASHBOARD_DRAG_MIN_W, available.width())
             drag_h = min(DASHBOARD_DRAG_MIN_H, available.height())
             if self.minimumWidth() != drag_w or self.minimumHeight() != drag_h:
                 self.setMinimumSize(drag_w, drag_h)
+            if rescale:
+                # The display changed, so a sane dashboard size is worth
+                # aiming for again where the screen allows it.
+                floor_w = min(DASHBOARD_MIN_W, available.width())
+                floor_h = min(DASHBOARD_MIN_H, available.height())
+            else:
+                floor_w, floor_h = drag_w, drag_h
 
         rect = self.geometry()
         if rescale and self.mode == DASHBOARD:

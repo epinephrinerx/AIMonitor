@@ -231,6 +231,17 @@ class DeveloperDialog(_BaseAboutDialog):
         self.body.addSpacing(8)
         self.body.addWidget(
             self._line(
+                "Written and maintained by the author above, with help from "
+                "two coding assistants: <b>Claude Code</b> (Anthropic) and "
+                "<b>Codex</b> (OpenAI). They are tools, in the same sense as "
+                "the compiler; the design decisions and the releases are the "
+                "author's.",
+                rich=True,
+            )
+        )
+        self.body.addSpacing(8)
+        self.body.addWidget(
+            self._line(
                 f"Version {versioning.VERSION}  ·  GPL-3.0-or-later. "
                 "The full licence is under About > License Agreement, and the "
                 "notices for redistributed components sit beside it.",
