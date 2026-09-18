@@ -259,9 +259,35 @@ def _limits_from_payload(payload: dict) -> list[Limit]:
                 )
             )
 
-    # Session first, then weekly windows by descending usage.
-    limits.sort(key=lambda item: (item.group != "session", -item.percent))
+    limits.sort(key=_reading_order)
     return limits
+
+
+def _reading_order(limit: Limit) -> tuple:
+    """Order the gauges by what each window *is*, never by how full it is.
+
+    They used to be sorted by descending usage after the session window, so
+    "Weekly · All models" and a per-model window swapped places the moment one
+    overtook the other - the same three gauges in a different order between one
+    refresh and the next. A dashboard is read by position: you look at the
+    second tile because that is where the weekly total lives, and a tile that
+    moves when the number moves is the one thing a gauge must not do.
+
+    The order is the order they matter in: the five-hour window that decides
+    whether you can keep working now, then the whole account's week, then the
+    per-model windows. Ties are broken by subtitle so the row is identical on
+    every refresh, and an unrecognised kind from a newer server sorts last
+    rather than displacing anything known.
+    """
+    if limit.kind == "session" or limit.group == "session":
+        rank = 0
+    elif limit.kind == "weekly_all":
+        rank = 1
+    elif limit.kind.startswith("weekly"):
+        rank = 2
+    else:
+        rank = 3
+    return (rank, limit.subtitle.lower(), limit.kind)
 
 
 def _spend_from_payload(payload: dict) -> Spend | None:
