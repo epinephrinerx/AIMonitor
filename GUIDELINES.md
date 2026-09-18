@@ -208,3 +208,82 @@ AIUsageMonitor-<version>-arm64.dmg       macOS
 
 เมื่อเปลี่ยนเวอร์ชันต้องรักษา installer `AppId` เดิมไว้เสมอ
 และ `tests/test_version.py` จะ fail ถ้า `version_info.txt` กับ `.iss` ไม่ตรงกับ `__init__.__version__`
+
+## หนี้ที่ค้างอยู่ ณ 2026-09-18 — จากการตรวจโค้ดและการยืนยันซ้ำ
+
+รายงาน `CODE_REVIEW_2026-09-18.md` ถูกย่อยเข้ามาที่นี่แล้วและลบไฟล์ทิ้ง เพราะไฟล์นี้
+ประกาศตัวเป็นต้นฉบับเดียว การมีรายงานลอยอยู่ข้าง ๆ คือจุดเริ่มของการ drift แบบเดียวกับ
+ที่ `CLAUDE.md` กับ `AGENTS.md` เคยเจอ ทุกข้อด้านล่างไล่อ่านโค้ดยืนยันแล้วว่าเกิดขึ้นจริง
+ไม่ได้คัดลอกข้อสรุปมาเฉย ๆ
+
+### ยังไม่ได้แก้ เรียงตามลำดับที่ตั้งใจจะทำ
+
+1. ~~**`ConnectDialog` Clear แล้ว Cancel ก็ยังลบ key**~~ — **แก้แล้ว 2026-09-18** ดูหัวข้อถัดไป
+2. **คำขอ refresh หายระหว่าง refresh** `MainWindow.refresh()` `return` ทันทีเมื่อ
+   `_refreshing` เป็นจริง เปลี่ยน range หรือ metric ตอน worker ทำงานอยู่แล้วคำขอหายไปเลย
+   ผลเก่าจึงถูก render ใต้ตัวเลือกใหม่จนกว่า timer รอบถัดไปจะมา ซึ่งนานได้ถึง 30 นาที
+   ต้องเก็บคำขอล่าสุดเป็น pending แล้ว dispatch หลัง `_on_result()` พร้อม request id
+   เพื่อทิ้งผลที่ล้าสมัยแทนที่จะวาด
+3. **ปิดโปรแกรมระหว่าง network request รอไม่พอ** `closeEvent()` รอ 2 วินาที แล้วรอเพิ่ม
+   `api.TIMEOUT_SECONDS + 2` รวม **19 วินาที** แต่ worker เรียก provider เรียงกัน และ
+   งบเวลาจริงคือ Claude 15 + Codex 25 + Gemini 20 = **60 วินาที** ในกรณีเลวร้าย
+   เกินงบแล้ว `super().closeEvent()` เดินต่อขณะ QThread ยังทำงาน ซึ่งทำให้โปรเซส abort
+   ต้องมี cancellation event ที่ provider กับ Codex client ตรวจระหว่างทาง และ deadline รวม
+4. **Gemini ใช้ UTC boundary แต่ UI ใช้วัน local** `day_start` มาจาก
+   `now(utc).replace(hour=0)` ขณะที่ history อ่าน bucket ด้วย `when.astimezone().date()`
+   เวลาไทย UTC midnight คือ 07:00 ทำให้ **Today ตกข้อมูล 00:00–06:59 ทุกวัน**
+   ต้องหา local midnight ก่อนแล้วค่อยแปลงเป็น UTC ให้ Monitoring API
+   และใช้ timezone เดียวกันทั้ง query interval, bucket parsing และ label
+5. **transcript ที่ข้อมูลผิดรูปลบเกจโควตาทั้งแท็บ** `TranscriptStore._ingest()` ใส่
+   message id ลง `_seen_ids` **ก่อน** validate timestamp และก่อน `int(...)` ทุกตัว
+   และจุดที่เรียก `_ingest()` ไม่มี try/except ครอบ ผลจริงเป็นสองจังหวะ:
+   refresh แรก `ValueError` ลอยถึง `worker.py` แล้ว snapshot กลายเป็น `Unexpected error`
+   **เกจโควตาหายไปด้วย** ซึ่งผิดข้อกำหนด "ห้ามทำโควตาหายเมื่อ history ล้มเหลว" ตรง ๆ
+   refresh ถัดไป id ติด seen-set แล้วจึงข้าม record นั้นและกลับมาทำงานได้
+   แต่ **นับ record นั้นไม่ครบตลอดไป** ต้อง validate ให้จบก่อนค่อย dedupe
+   รับเฉพาะ int ที่ไม่ติดลบและไม่ใช่ bool และข้ามเฉพาะ record ที่เสีย
+6. **quota สำเร็จแต่ history ล้ม ถูกรายงานเป็น provider ล้มทั้งตัว** Codex เขียนลง
+   `snapshot.error` ต้องแยกเป็น `history_error` เพื่อให้โควตาที่สดยังนับเป็น refresh สำเร็จ
+   **การแตะ `ProviderSnapshot` คือการแตะสัญญากลางของทุก provider** ต้องไล่ให้ครบทั้ง
+   dashboard, widget, tray และ report
+7. **สี severity บน dashboard ไม่ตรงกับ arc** `QuotaGauge.set_meter()` คำนวณ
+   `severity_for()` ถูกต้องแล้วใช้กับ arc และคำกำกับ แต่ `_restyle_severity()` กลับไปอ่าน
+   `self.meter.severity` ดิบ server ที่ส่ง `normal` ที่ 95% จึงได้ arc แดงกับคำว่า Critical
+   แต่สีตัวอักษรยังเป็นสีปกติ **สีกับคำขัดกันเองผิดกฎ accessibility ของโปรเจกต์นี้**
+8. **version ยังหลุดสามจุด** `README.md` บอก installer 1.2.7, comment ใน
+   `build_ai_installer.ps1` บอก 1.1.0 และ `codex_usage.py` ส่ง `clientInfo` เป็น 1.1.0
+   ตัวหลังสำคัญสุดเพราะเป็นค่าที่ส่งออกนอกเครื่องจริง ให้ `import __version__`
+   แล้วขยาย `tests/test_version.py` ให้คุมทั้งสามจุด
+9. **build script ตรวจแค่ว่า venv มีอยู่ ไม่ได้ตรวจว่ารันได้** ให้ลองรัน
+   `& $python -c "import sys"` ก่อน แล้วแจ้งวิธีสร้างใหม่ถ้าล้ม
+
+### ข้อที่รายงานบอกว่าเสีย แต่ตรวจแล้วไม่เสีย
+
+รายงานระบุว่า `.venv` พังและมี 4 tests error ตรวจเมื่อ 2026-09-18 แล้วพบว่า
+`.venv\Scripts\python.exe` รันได้ปกติ (3.14.3) และชุดทดสอบ **51 กรณีผ่านทั้งหมด**
+อาการ error เกิดจากผู้ตรวจไปใช้ `C:\Python314\python.exe` ซึ่งไม่มี PySide6
+จึง import `log_dialog.py` ไม่ได้ เป็นปัญหาของ environment ที่เลือกใช้ ไม่ใช่ของ repo
+**ใช้ `.venv\Scripts\python.exe` เสมอตามที่หัวข้อทดสอบและ build กำหนดไว้**
+
+### แก้แล้ว 2026-09-18 — ปุ่มในกล่องเชื่อมต่อทุกปุ่มทำตามที่มันบอก
+
+`ConnectDialog._clear_key()` เคยเรียก `set_provider_key(id, "")` ทันทีที่กด ทั้งที่กล่อง
+ยังมีปุ่ม Save กับ Cancel อยู่ อาการจริงหนักกว่าที่รายงานเขียนไว้หนึ่งชั้น เพราะ `_save()`
+เขียนเฉพาะตอนช่องกรอกมีข้อความ ("blank = เก็บของเดิมไว้") ดังนั้น **กด Clear แล้วจะกด
+Save หรือ Cancel ก็ลบทั้งคู่ และไม่มีทางเอากลับ** key ที่ผนึกด้วย DPAPI พิมพ์ใหม่จากความจำ
+ไม่ได้
+
+ตอนนี้ Clear แค่ตั้ง `_clear_requested` กับล้างช่องกรอกและเปลี่ยน placeholder เป็น
+`(cleared when you save)`; `_save()` เท่านั้นที่เขียน settings โดยเรียงลำดับความตั้งใจว่า
+พิมพ์ key ใหม่มา = แทนที่, ช่องว่างและกด Clear ไว้ = ลบ, ช่องว่างเฉย ๆ = ไม่แตะ
+
+ลบ `ProviderSettingsDialog._clear()` ทิ้งด้วย เป็น dead code ตั้งแต่ย้าย credential ไป
+หน้า Connections และมันลบ key ทันทีแบบเดียวกัน การทิ้งไว้คือการเก็บตัวอย่างของรูปแบบที่ผิด
+
+`tests/test_connect_dialog.py` คุมไว้สองชั้น: ชั้นพฤติกรรม 6 กรณี และชั้นสัญญาที่ parse
+ซอร์สด้วย AST ยืนยันว่า **มีแต่ `_save` เท่านั้นที่เรียก `set_provider_key` /
+`set_provider_extra` ได้** ถ้าใครเผลอเขียนจากปุ่มอีก test นี้จะ fail แม้ test พฤติกรรมจะรอด
+ตรวจแล้วว่าทั้งสองชั้น fail จริงเมื่อย้อนโค้ดกลับเป็นของเดิม
+
+เทสต์ตั้ง `AI_USAGE_MONITOR_SETTINGS_SCOPE` เป็น scope ของตัวเองและล้างทิ้งเมื่อจบ
+จึงไม่แตะ key จริงของผู้ใช้ และตั้ง `QT_QPA_PLATFORM=offscreen` เพื่อให้รันได้โดยไม่ต้องมีจอ

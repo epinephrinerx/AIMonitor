@@ -313,14 +313,11 @@ class ProviderSettingsDialog(QDialog):
             self.preview.emit()
         super().reject()
 
-    def _clear(self, provider_id: str) -> None:
-        self.settings.set_provider_key(provider_id, "")
-        row = self._rows.get(provider_id, {})
-        row["existing"] = ""
-        field = row.get("key")
-        if field is not None:
-            field.clear()
-            field.setPlaceholderText("(cleared)")
+    # `_clear` used to live here, from when this dialog still held key fields.
+    # Nothing has called it since credentials moved to the Connections page,
+    # and it deleted the stored key the instant it ran - the same trap that
+    # `ConnectDialog._clear_key` was just fixed for. Removed rather than left
+    # as a working example of the wrong shape.
 
     def _save(self) -> None:
         self._saved = True
