@@ -1,8 +1,10 @@
 """System tray icon.
 
-The icon is drawn, not loaded: it shows the active service's session window as
-a fill level with the percentage written across it, so the number is readable
-without opening anything. Colour follows the same 75/90 thresholds as the
+The icon is drawn, not loaded: it shows the active service's five-hour window
+as a fill level with the percentage written across it, so the number is
+readable without opening anything. Only that window is *drawn* - one tile
+holds one number. The menu behind the icon still lists every window each
+service reports, which is what the quota list is for. Colour follows the same 75/90 thresholds as the
 meters, and the tooltip always names the service - the icon alone could not say
 which one it is showing, and it rotates.
 
@@ -24,6 +26,26 @@ from .providers import Provider, ProviderSnapshot
 from .theme import Theme, qcolor, severity_color, severity_for, severity_word
 
 ROTATE_MS = 2000
+
+# The tray speaks for the short window only - the one that decides whether
+# you can keep working right now. Weekly and per-model windows belong to the
+# dashboard, where there is room to read them.
+#
+# Both providers derive this from the server rather than assuming it: Claude
+# labels its five-hour limit `session`, and Codex computes the subtitle from
+# the window's own duration in minutes. An account whose short window is not
+# five hours is therefore not mislabelled as one.
+FIVE_HOUR_SUBTITLE = "5-hour window"
+CLAUDE_SESSION_KEY = "session"
+
+
+def is_five_hour(meter) -> bool:
+    """Is this the five-hour window, as the service itself reported it?"""
+    if meter.percent is None:
+        return False
+    if (meter.subtitle or "").strip().lower() == FIVE_HOUR_SUBTITLE:
+        return True
+    return meter.key == CLAUDE_SESSION_KEY
 ICON_PX = 64  # drawn large; Windows scales down to whatever the tray asks for
 
 
@@ -46,6 +68,13 @@ class TrayController(QObject):
         self.providers = providers
         self.theme = theme
         self.snapshots: dict[str, ProviderSnapshot] = {}
+        # The last set of meters that actually arrived, per service. A
+        # refresh that fails - a rate limit, an expired token, no network -
+        # must not erase the service from the tray: dropping it stops the
+        # rotation the moment only one service is left, which looks exactly
+        # like a frozen icon. All the meters are kept, not just the one the
+        # icon draws, because the menu lists every window.
+        self._last_good: dict[str, list] = {}
         self._order: list[str] = []
         self._index = 0
 
@@ -107,18 +136,31 @@ class TrayController(QObject):
         self._menu.addAction(quit_action)
 
     def _add_quota_rows(self) -> bool:
-        """One disabled header per signed-in service, then its meters."""
+        """One disabled header per signed-in service, then every window it has.
+
+        Deliberately NOT filtered to the five-hour window. The icon is, because
+        one drawn tile holds one number; the menu is the quota list, and its
+        whole purpose is to show session, weekly and any per-model window at
+        once without opening the dashboard.
+
+        Reads through `_meters`, so a service whose refresh failed keeps its
+        rows - marked stale - instead of vanishing from the menu while its icon
+        is still in the rotation.
+        """
         added = False
         for provider in self.providers:
-            snapshot = self.snapshots.get(provider.id)
-            if snapshot is None or not snapshot.configured or not snapshot.meters:
+            meters, stale = self._meters(provider.id)
+            if not meters:
                 continue
 
-            header = QAction(provider.display_name, self._menu)
+            title = provider.display_name
+            if stale:
+                title += "  (last refresh failed)"
+            header = QAction(title, self._menu)
             header.setEnabled(False)
             self._menu.addAction(header)
 
-            for meter in snapshot.meters:
+            for meter in meters:
                 row = QAction(f"      {self._meter_line(meter)}", self._menu)
                 row.setEnabled(False)
                 self._menu.addAction(row)
@@ -160,10 +202,14 @@ class TrayController(QObject):
 
     def set_snapshots(self, snapshots: dict[str, ProviderSnapshot]) -> None:
         self.snapshots = snapshots
+        for provider in self.providers:
+            snapshot = snapshots.get(provider.id)
+            if snapshot is not None and snapshot.configured and snapshot.meters:
+                self._last_good[provider.id] = list(snapshot.meters)
         order = [
             provider.id
             for provider in self.providers
-            if self._lead(snapshots.get(provider.id)) is not None
+            if self._reading(provider.id)[0] is not None
         ]
         if order != self._order:
             self._order = order
@@ -197,15 +243,31 @@ class TrayController(QObject):
 
     # -- rendering --------------------------------------------------------
 
-    @staticmethod
-    def _lead(snapshot: ProviderSnapshot | None):
-        """The meter the icon speaks for: the session window if there is one."""
-        if snapshot is None or not snapshot.configured:
-            return None
-        for meter in snapshot.meters:
-            if meter.percent is not None:
-                return meter
-        return None
+    def _meters(self, provider_id: str):
+        """Every window for one service, and whether the set is stale.
+
+        This refresh's meters when it returned any, otherwise the last set that
+        arrived. The same rule the rest of the app follows: a failure reports
+        itself without discarding figures that are still the best information
+        available.
+        """
+        snapshot = self.snapshots.get(provider_id)
+        if snapshot is not None and snapshot.configured and snapshot.meters:
+            return list(snapshot.meters), False
+        return list(self._last_good.get(provider_id) or []), True
+
+    def _reading(self, provider_id: str):
+        """The meter the ICON draws: the five-hour window only.
+
+        The menu is not filtered this way - it lists every window the service
+        reports, which is what the quota list is for. Only the drawn glyph is
+        restricted, because one tile fits one number.
+        """
+        meters, stale = self._meters(provider_id)
+        for meter in meters:
+            if is_five_hour(meter):
+                return meter, stale
+        return None, stale
 
     def _advance(self) -> None:
         if len(self._order) <= 1:
@@ -223,7 +285,7 @@ class TrayController(QObject):
         provider_id = self._order[self._index]
         provider = next((p for p in self.providers if p.id == provider_id), None)
         snapshot = self.snapshots.get(provider_id)
-        meter = self._lead(snapshot)
+        meter, stale = self._reading(provider_id)
         if provider is None or meter is None:
             return
 
@@ -241,6 +303,8 @@ class TrayController(QObject):
                 f"resets in {formatting.duration(remaining)}"
                 f" ({formatting.local_time(meter.resets_at)})"
             )
+        if stale:
+            lines.append("last refresh failed — showing the previous reading")
         if len(self._order) > 1:
             lines.append(f"{self._index + 1} of {len(self._order)} services")
         self.icon.setToolTip("\n".join(lines))

@@ -1,4 +1,4 @@
-"""OpenAI provider - platform usage and spend via the Admin Usage/Costs API.
+"""OpenAI provider - Codex quota or platform usage via Admin Usage/Costs API.
 
 Endpoints (all GET, Bearer auth with an **Admin** key, `sk-admin-...`):
 
@@ -7,11 +7,10 @@ Endpoints (all GET, Bearer auth with an **Admin** key, `sk-admin-...`):
 
 What this can and cannot show
 -----------------------------
-These report **API platform** usage for the organization behind the key. They do
-not report ChatGPT Plus/Pro subscription message caps - OpenAI publishes no API
-for those, so this provider reports spend and tokens rather than inventing a
-percentage. Meters therefore carry `percent=None` unless the user sets a monthly
-budget, which is a local target, not a server-enforced limit.
+Admin endpoints report API platform usage, not Codex quota. A Codex ChatGPT
+login uses App Server for real quota percentages and daily total tokens.
+API spend meters carry `percent=None` unless the user sets a monthly budget,
+which is a local target, not a server-enforced limit.
 
 A regular `sk-...` project key is rejected by these endpoints; the key must be
 an Admin key created by an organization owner.
@@ -26,11 +25,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import formatting
+from .. import formatting, codex_usage
 from ..usage_log import DayBucket
-from ..detection import API_KEY, Credential, Source, bind
+from ..detection import OAUTH, EXPIRED, Source, bind, resolve
 from .base import HistoryView, Meter, Provider, ProviderSnapshot, Stat
-from .sources import OPENAI_SOURCES
+from .sources import OPENAI_SOURCES, openai_key
 
 BASE_URL = "https://api.openai.com"
 USAGE_PATH = "/v1/organization/usage/completions"
@@ -45,20 +44,20 @@ MAX_BUCKETS = 180
 class OpenAIProvider(Provider):
     id = "openai"
     display_name = "OpenAI"
-    key_label = "Admin API key"
+    key_label = "Admin API key (optional; API spend)"
     key_placeholder = "sk-admin-…"
     extra_label = "Monthly budget (USD, optional)"
     extra_placeholder = "e.g. 50 — a local target, not an OpenAI limit"
-    tagline = "Codex / API platform spend"
+    tagline = "Codex quota · optional API platform spend"
     setup_hint = (
-        "Your <b>Codex CLI</b> login is detected automatically and identifies "
-        "the account, but a ChatGPT sign-in cannot read usage.<br><br>"
-        "For spend and token figures, add an organization <b>Admin</b> key "
-        "(Settings → Organization → Admin keys) from an owner account with the "
-        "Usage Dashboard permission. A regular sk-… project key will not "
-        "work.<br><br>"
-        "This reports <b>API platform</b> usage. ChatGPT Plus/Pro message "
-        "limits are not available from any public API."
+        "Sign in to <b>Codex with ChatGPT</b> on this machine to see Codex "
+        "quota percentages, reset times and available daily token totals. "
+        "Requires Codex CLI or the Codex desktop app. The existing auth.json "
+        "is read-only; open Codex to renew an expired login.<br><br>"
+        "A Codex ChatGPT login takes priority over saved or environment keys. "
+        "Your existing keys are kept. When no Codex ChatGPT login is found, "
+        "an optional organization <b>Admin key</b> provides API platform spend. "
+        "Regular project keys cannot read API spend."
     )
 
     def __init__(self) -> None:
@@ -81,9 +80,7 @@ class OpenAIProvider(Provider):
             OPENAI_SOURCES,
             "manual",
             (
-                lambda: Credential(
-                    kind=API_KEY, value=saved, account="saved in this app"
-                )
+                lambda: openai_key(saved, "saved in this app")
             )
             if saved
             else (lambda: None),
@@ -91,22 +88,32 @@ class OpenAIProvider(Provider):
 
     def is_configured(self) -> bool:
         """Configured means we can actually read usage, not merely signed in."""
-        if self._key:
-            return True
         detected = self.detect()
         return detected.usable and detected.credential is not None
 
+    def detect(self):
+        # Existing installations often already have an Admin key. It must not
+        # silently switch a quota monitor back to the API billing dashboard.
+        # Keep expired Codex logins selected too, with an actionable error,
+        # instead of changing the meaning of the displayed figures on expiry.
+        sources = self.sources()
+        codex = resolve(self.id, [s for s in sources if s.id == "codex_cli"])
+        if codex.credential is not None and codex.credential.kind == OAUTH:
+            return codex
+        return resolve(self.id, sources)
+
     def _resolved_key(self) -> tuple[str, str]:
         """(key, where-it-came-from). Empty key means no usage-capable login."""
-        if self._key:
-            return self._key, "saved in this app"
         detected = self.detect()
-        if detected.usable and detected.credential and detected.credential.value:
+        if (detected.usable and detected.credential
+                and detected.credential.kind != OAUTH and detected.credential.value):
             return detected.credential.value, detected.source_label
         return "", ""
 
     def fetch(self, days: int, metric: str, want_history: bool) -> ProviderSnapshot:
         detected = self.detect()
+        if detected.credential and detected.credential.kind == OAUTH:
+            return self._fetch_codex(detected, days, metric, want_history)
         key, origin = self._resolved_key()
         snapshot = ProviderSnapshot(
             provider_id=self.id,
@@ -116,8 +123,6 @@ class OpenAIProvider(Provider):
             value_note="Actual API spend billed by OpenAI.",
         )
         if not key:
-            # A Codex ChatGPT login proves identity but cannot read usage; say
-            # so plainly rather than reporting a failure.
             if detected.state == "partial":
                 snapshot.account = detected.account
                 snapshot.setup_hint = detected.hint or self.setup_hint
@@ -196,6 +201,37 @@ class OpenAIProvider(Provider):
                 ),
                 Stat("Requests", formatting.compact(totals["requests"])),
             ]
+        return snapshot
+
+    def _fetch_codex(self, detected, days: int, metric: str, want_history: bool) -> ProviderSnapshot:
+        snapshot = ProviderSnapshot(
+            provider_id=self.id, configured=detected.usable or detected.state == EXPIRED,
+            detection=detected, account=detected.account,
+            setup_hint=detected.hint or self.setup_hint,
+            value_note="Codex quota reported by OpenAI. Daily history contains total tokens "
+            "only; output tokens, model/project breakdowns and API spend are unavailable.",
+        )
+        if not snapshot.configured:
+            return snapshot
+        try:
+            limits, usage, history_error = codex_usage.fetch(
+                detected.credential, want_history, self.cancel
+            )
+            snapshot.meters = codex_usage.meters(limits)
+            snapshot.fetched_at = dt.datetime.now(dt.timezone.utc)
+            snapshot.account = f"{detected.account} · Codex" if detected.account else "Codex (ChatGPT login)"
+            # A history failure is not a provider failure. The quota windows
+            # above came from the server on this same call; reporting them as
+            # broken because the daily totals were unavailable took working
+            # gauges off the screen.
+            snapshot.history_error = history_error
+            if not snapshot.meters:
+                snapshot.error = "OpenAI returned no percentage quota windows for this account."
+            if usage is not None:
+                snapshot.history, snapshot.stats = codex_usage.history(usage, days, metric)
+        except codex_usage.CodexError as exc:
+            snapshot.error = str(exc)
+            snapshot.unauthorized = exc.unauthorized
         return snapshot
 
     # -- endpoints --------------------------------------------------------

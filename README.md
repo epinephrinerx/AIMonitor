@@ -16,6 +16,8 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Services and what each can report](#services-and-what-each-can-report)
 - [How usage is counted](#how-usage-is-counted) — read this if the numbers surprise you
 - [Window modes](#window-modes)
+- [Menus](#menus)
+- [Usage log and reports](#usage-log-and-reports)
 - [System tray](#system-tray)
 - [Settings](#settings)
 - [Resource use](#resource-use)
@@ -23,6 +25,8 @@ lives in the system tray, showing your session level as a drawn icon.
 - [Credential handling](#credential-handling)
 - [Building](#building)
 - [Architecture](#architecture)
+- [Licence](#licence)
+- [Working with Claude Code](#working-with-claude-code)
 
 ---
 
@@ -30,7 +34,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ### Windows
 
-Run **`AIUsageMonitor-Setup-1.1.0.exe`**.
+Run **`AIUsageMonitor-Setup-1.3.1.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -47,8 +51,8 @@ settings, including any stored API keys. A *silent* uninstall always keeps them.
 
 ### Portable alternative
 
-`AIUsageMonitor.exe` is a single 46 MB file that needs no install. It is slower
-to start — a one-file build unpacks its whole payload into `%TEMP%` on every
+`AIUsageMonitor-1.3.1-portable.exe` is a single 47 MB file that needs no
+install. It is slower to start — a one-file build unpacks its whole payload into `%TEMP%` on every
 launch, measured at **1.40 s** against **0.63 s** for the installed build, and
 it leaves `_MEI*` folders behind. Use it for a USB stick; otherwise prefer the
 installer.
@@ -61,7 +65,7 @@ code-signing certificate.
 
 ### macOS
 
-Open **`AIUsageMonitor-1.1.0-<arch>.dmg`** and drag the app to Applications.
+Open **`AIUsageMonitor-1.3.1-<arch>.dmg`** and drag the app to Applications.
 Requires macOS 13 or newer, which is what the PySide6 wheels are built against.
 
 The build is ad-hoc signed rather than notarized. That is enough for the Mac
@@ -92,19 +96,70 @@ found for each.
 | Service | Detected from | What it reports |
 |---|---|---|
 | **Claude** | Claude Code login | **True quota.** Session (5-hour), weekly, and per-model weekly windows, with real percentages and reset times. Plus local history: tokens per day, by model, by project. |
-| **OpenAI** | Codex CLI login · `OPENAI_API_KEY` · Admin key saved here | **API platform spend only.** Month-to-date and today's cost, tokens by model. Needs an Admin key (`sk-admin-…`), not a project key. |
+| **OpenAI** | Codex ChatGPT login · `OPENAI_ADMIN_KEY` / `OPENAI_API_KEY` · Admin key saved here | **Codex quota:** server-reported percentages and reset times, plus available daily token totals. Without a Codex ChatGPT login, an optional Admin key (`sk-admin-…`) provides API platform spend and tokens by model. |
 | **Gemini** | Gemini CLI · `GOOGLE_APPLICATION_CREDENTIALS` · gcloud ADC · service account | **Request counts only.** From Cloud Monitoring, which is OAuth-only. Needs Monitoring Viewer on the project. |
 
-### What no provider can show
+### OpenAI: Codex quota and API spend
 
-There is **no public API** for ChatGPT Plus/Pro or Gemini Advanced
-*subscription* message limits. Only Claude exposes a real quota endpoint, which
-is why only Claude gets true percentage gauges. Services with no denominator
-show their figure plainly rather than inventing a percentage.
+Sign in to Codex with ChatGPT, then refresh the OpenAI tab. The monitor reads
+`auth.json` from `CODEX_HOME` (default `~/.codex`) and uses the installed Codex
+executable's [App Server protocol](https://learn.chatgpt.com/docs/app-server)
+to read `account/rateLimits/read`. Both Claude and Codex therefore have real
+percentage gauges in the dashboard, widget and tray. Window durations and reset
+times come from the server, including additional limit groups when returned.
+
+`account/usage/read` supplies available daily **total** tokens. Missing history
+does not discard quota. This data does not provide output-token, model/project,
+or dollar breakdowns; select **Total tokens** to see the daily chart. Missing
+days are not filled with invented zeroes. Codex limits are not a promise of
+visibility into every ChatGPT feature's message limits.
+
+A Codex ChatGPT login takes priority, including when an older installation has
+saved Admin keys. No settings reset or key deletion is needed. Expired Codex
+logins show a renewal message instead of silently switching to API spend.
+Without a Codex ChatGPT login, the app tries the saved Admin key, environment
+key, then a CLI API key. Ordinary project keys are marked Limited. API mode
+retains its separate monthly spend/budget and history views.
+
+Codex CLI or the Codex desktop app must be installed separately. The monitor
+finds `codex.exe` on PATH or in the desktop app's per-user installation. It starts
+a hidden App Server only during refresh, using an isolated temporary home and
+the experimental externally supplied token login. Access tokens travel through
+stdin, not command arguments; refresh tokens and the user's Codex configuration
+are never copied. Token refresh requests are refused: open Codex to renew the
+original login. This experimental integration may need updates when Codex changes.
+
+**What still has no public API.** Codex quota covers the Codex surface, not
+every ChatGPT feature's message limits, and there is no public endpoint at all
+for Gemini Advanced *subscription* limits. Gemini therefore has no denominator
+and shows its request count plainly rather than inventing a percentage.
 
 Consumer-account login was deliberately not built. It would mean storing your
 Google or OpenAI password, or scraping session cookies from undocumented
 endpoints that break constantly and violate those services' terms.
+
+### OpenAI shows no data: do not reset settings
+
+The 2026-09-14 fix makes Codex ChatGPT login take priority over existing Admin
+keys. An earlier Codex integration build still selected saved Admin keys first,
+so existing installations could stay in API spend mode instead of showing quota.
+The fix preserves keys and settings; no Registry reset is needed.
+
+To diagnose an empty OpenAI tab:
+
+1. Check **Connections** for the selected source. With a Codex ChatGPT login,
+   the fixed build should select **Codex CLI login (ChatGPT)**.
+2. Check the running executable path. Exit the old copy from the tray before
+   opening another build: the single-instance guard can bring an older copy to
+   the front instead. Closing the window alone normally only hides it.
+3. Open the OpenAI tab and read its error banner. If the token is expired, open
+   Codex to renew the login; then refresh the monitor.
+4. Select **Total tokens** for the daily chart. History availability is separate
+   from quota; unavailable history should not remove valid quota gauges.
+
+The build verified in the live GUI on 2026-09-14 is
+`dist/codex-first/AIUsageMonitor.exe`. The earlier `dist/openai-quota` build and
+the previously installed Start Menu shortcut were not updated in that repair.
 
 ---
 
@@ -185,7 +240,7 @@ formula is, the meters reflect it.
 
 | | Dashboard | Widget |
 |---|---|---|
-| Size | any, from 300×220 | ≤ 300 × 300 |
+| Size | any, from 300×220 | 150×96 to 300×300, opens at 230×175 |
 | Frame | normal window | frameless, draggable anywhere on its surface |
 | Always on top | no | optional (default on) |
 | Transparency | opaque | adjustable, default 92% |
@@ -195,6 +250,26 @@ formula is, the meters reflect it.
 **Switching:** drag the window below 380 px on either edge and it collapses.
 Double-click the widget, or use its right-click menu, to expand again. `Ctrl+W`
 toggles. Each mode remembers its own position and size.
+
+**Resizing the widget.** A frameless window has no border to grab, so the
+widget carves one out of its own edge: the outer 7 px resize, the rest still
+drags the window, and the cursor says which you are about to get. The drag is
+handed to Windows itself, so snapping and the 150×96–300×300 bounds come for
+free. The row degrades as it shrinks rather than squashing — meters that
+cannot reach a legible size are dropped, the percentage moves out of the ring
+into the caption below a 46 px arc, and the "updated" line is the first thing
+sacrificed when the content reaches the bottom edge.
+
+**Rotation.** The widget cycles through every configured service every four
+seconds — slower than the tray's two, because the tray shows one number in
+one glyph while the widget shows a row of meters with captions and a reset
+line, and two seconds was not long enough to finish reading one service
+before it was replaced. Services that returned no data are skipped, so an
+unconfigured Gemini never takes a turn. Picking one service
+from the right-click **Show** menu pins it and stops the rotation; **All
+services (rotate)** starts it again. Pinning also restores the single-service
+fetch — a rotating widget has to ask every service for its quota, while a
+pinned one asks only the service you are looking at.
 
 The widget's right-click menu carries always-on-top, an **opacity slider** with a
 live % readout, which service to show, refresh, expand and quit.
@@ -211,10 +286,19 @@ two people signed in to the same machine each get their own copy.
 ### Meters
 
 Both modes use the same meter language: a 270° arc, filled to the level, with
-the percentage in the middle. Colour follows local thresholds — **yellow from
-75%, red from 90%** — applied on top of whatever severity the server reports,
-taking whichever is worse. A ⚠ glyph rides along past the threshold so the state
-never rests on colour alone.
+the percentage in the middle, on a neutral grey track.
+
+Colour is a **traffic light**: green while there is room, **yellow from 75%**,
+**red from 90%**, with the server's own "serious" sitting between the last
+two. Local thresholds are applied on top of whatever severity the server
+reports, taking whichever is worse — so a service calling 95% "normal" still
+goes red. A ⚠ glyph and a written word (Normal / High / Critical) ride along
+with it, so the state never rests on colour alone. That pairing matters more
+than usual here: red and green are the pair most often confused.
+
+The dashboard, the widget and the tray icon all read from the same rule. They
+did not always — the dashboard used to take the server's word without applying
+the local thresholds, which only showed when a healthy meter turned green.
 
 Reset always shows **both** the countdown and the wall-clock time
 (`resets in 1h 43m · 18:32`): one answers how long you have, the other whether
@@ -222,7 +306,7 @@ you can go to lunch first.
 
 The widget degrades rather than squashing — meters that cannot reach a legible
 size are dropped, and below a 46 px arc the percentage moves out to the caption
-instead of overprinting the ring. At the 180×120 floor, one arc survives.
+instead of overprinting the ring. At the 150×96 floor, one arc survives.
 
 ### Displays and resolution
 
@@ -238,16 +322,114 @@ signals.
 
 ---
 
+## Menus
+
+The window carries a menu bar. Everything in it is a command or a preference;
+the header row below it keeps the three controls that change what the figures
+mean — metric, range, refresh interval — plus the two buttons pressed often
+enough that a menu would be in the way: **Widget** and **Refresh**. Both are in
+the menus as well, which is where their shortcuts are declared.
+
+| Menu | Entry | What it does |
+|---|---|---|
+| **File** | Refresh · `F5` | Fetches every enabled service now. |
+| | Sign-in… | Opens the Connections page. |
+| | Save to Log… · `Ctrl+L` | Opens the [usage log](#usage-log-and-reports). |
+| | Print Report… · `Ctrl+P` | Print preview of the same document. |
+| | Exit · `Ctrl+Q` | Quits for real, past minimize-to-tray. |
+| **Settings** | Start on start up | The `Run` entry, toggled in place. |
+| | Themes | Follow Windows / Light / Dark. |
+| | Widget mode · `Ctrl+W` | Collapses to the desk widget, and back. |
+| | Settings… | The full preferences dialog. |
+| **About** | Version… | This build, and a check against GitHub releases. |
+| | Readme · `F1` | This document, inside the app. |
+| | License Agreement | GPL-3.0, which the licence requires be showable. |
+| | Third-party notices | The redistributed components' notices. |
+| | About the developer | Who wrote it, and how to reach them. |
+
+Widget mode hides the menu bar — there is no room for it in 230 × 175 — so
+every shortcut above is bound to the window as well and keeps working while
+the bar is hidden. `Ctrl+W` is how you get back out.
+
+### Checking for updates
+
+**About > Version** asks GitHub for the newest release of this project. It is
+one unauthenticated `GET`; nothing is downloaded, nothing is installed, and no
+usage data leaves the machine. A repository with tags but no published release
+falls back to the highest version tag. If GitHub will not show the repository
+to an anonymous request — a **private** repository, for instance — the dialog
+says so rather than reporting "up to date" from a check that saw nothing.
+
+The version is defined once, in `ai_usage_monitor/__init__.py`.
+`version_info.txt` and `installer\AIUsageMonitor.iss` carry the same number for
+the Windows file-version resource and the installer, and `tests\test_version.py`
+fails if the three ever disagree.
+
+---
+
+## Usage log and reports
+
+**File > Save to Log…** opens the log on screen before it is anywhere else:
+per service, who is signed in and on what plan, then one row per day.
+
+```
+AI Usage Monitor — usage log
+Generated 2026-09-14 20:29  ·  last 14 days  ·  Total tokens
+
+Claude
+Apichart Chantanis — Max plan · max 5x  ·  Claude Code login  ·  Connected
+  2026-09-11 (Fri)        110,014,283
+  2026-09-12 (Sat)         13,461,480
+  2026-09-13 (Sun)                  0
+  2026-09-14 (Mon)        120,534,844
+  Total (6 active of 14 days)   418,026,236
+```
+
+Three things make it trustworthy rather than merely pretty:
+
+- **It is a record of what was on screen.** The log is folded from the
+  snapshots the dashboard already holds and never fetches anything of its own,
+  so the window you read, the file you save and the page you print cannot
+  disagree about the numbers.
+- **It follows the metric you are looking at.** `Total tokens` is the default
+  and the usual case; a log taken while the window shows `Equivalent value`
+  says so in its heading instead of labelling dollars as tokens.
+- **Nothing is invented.** A service that reports no daily history gets a
+  section saying so, not a column of zeroes, and a service that failed keeps
+  its section with the reason in it rather than vanishing from the log.
+
+Leave the window open and it follows the dashboard's refreshes.
+
+**Save as…** writes `.csv` (one flat row per day, for a spreadsheet), `.md` or
+`.html`. **Print…** opens a print preview, always in the light palette — a
+dark-themed window still prints dark ink on white paper.
+
+**File > Print Report…** is the same document, straight to the preview.
+
+---
+
 ## System tray
 
 The tray icon is **drawn, not loaded**: a tile filled to the active service's
-session level with the percentage across it, coloured by the same 75/90 rule. The
-number is painted twice — ink above the fill line, white below — because the fill
-line usually cuts through the digits.
+**five-hour window** with the percentage across it, coloured by the same 75/90
+traffic light. The number is painted twice — ink above the fill line, white
+below — because the fill line usually cuts through the digits.
 
-With several services connected it **rotates every 2 seconds**, over only those
-that have a percentage to show, and holds still when there is just one. The
-tooltip names the service, since a rotating icon cannot.
+Only the five-hour window is *drawn*, because one tile holds one number, and
+the short window is the one that decides whether you can keep working now.
+Which window that is comes from the service, not from an assumption: Claude
+labels its five-hour limit, and Codex reports each window's duration in
+minutes. The menu below is **not** filtered this way — it lists every window.
+
+With several services connected it **rotates every 2 seconds**, and holds still
+when there is just one. The tooltip names the service, since a rotating icon
+cannot.
+
+A service whose refresh fails — rate limited, token expired, no network — keeps
+its place in the rotation showing the last reading that arrived, and both the
+tooltip and its menu header say the refresh failed. Dropping it instead used to
+stop the rotation outright the moment only one service was left, which is
+indistinguishable from a frozen icon.
 
 - **Double-click** restores the full window.
 - **Right-click** opens the menu:
@@ -279,18 +461,39 @@ time the menu opens so the countdowns are live rather than frozen at app start.
 | Theme | **Follow Windows** | Light / Dark / Follow. Re-checked every 10 s while set to Follow. |
 | Default window size | **1120 × 820** | Compact / Standard / Wide / Remember last size. Seeds the size when nothing is remembered, and is the target after a display change — a size you dragged to wins over it. Changing the setting applies immediately. |
 | Refresh interval | **3 minutes** | 30 s · 1 · 3 · 5 · 10 · 30 min · manual. `F5` forces one. |
-| Widget opacity | **92%** | Slider, 25–100%. |
+| Widget opacity | **92%** | Slider, 25–100%, in 5% steps. |
 | Always on top | **On** | Widget mode only. |
 | Chart range | **14 days** | 7 / 14 / 30 / 90 days. |
 | Chart metric | **Total tokens** | Total tokens · output tokens · equivalent value. |
 
 Settings live in the registry under `HKCU\Software\AIUsageMonitor`.
 
+### Appearance settings preview live
+
+Theme, opacity, always-on-top and the default window size are applied to the
+real window the moment you change them — judging any of them from a combo box
+label is guesswork. **Cancel** puts back every value the dialog found on the
+way in, so a live preview is never a decision you are stuck with; **Save** is
+what writes to the registry.
+
+Opacity only takes effect on the window itself in widget mode, so the slider
+carries a swatch that fades with it. That is the preview while the dashboard
+is on screen.
+
+Start-with-Windows is the exception: it writes to the `Run` key, so it is
+applied on **Save** rather than on every click. The same checkbox in
+**Settings > Start on start up** applies immediately, which is what a menu
+checkmark is expected to do.
+
 ---
 
 ## Resource use
 
 Measured on the packaged executable, not estimated.
+
+These measurements predate the Codex App Server integration. OpenAI quota
+refresh temporarily starts a separate Codex process, which adds memory and
+startup overhead until the request finishes; it is closed after each refresh.
 
 | State | Memory | 1-second timer |
 |---|---|---|
@@ -327,6 +530,10 @@ Three things do the work:
 - **Expired Claude token.** The app never refreshes it — Claude Code owns that
   cycle, and a second process writing that file can invalidate your login. If it
   expires the app says so and asks you to start Claude Code.
+- **Codex login and runtime.** Requires a file-backed ChatGPT login and an
+  installed Codex executable. Keyring-only logins are not detected. Expired or
+  rejected tokens require opening Codex again. A timeout or unavailable token
+  history is shown as an error rather than being presented as zero usage.
 
 ---
 
@@ -385,10 +592,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m ai_usage_monitor
 ```
 
-To change the version, edit `AppVersion` in `installer\AIUsageMonitor.iss` and
-`version_info.txt`. The `AppId` GUID must stay fixed: it is what makes an upgrade
-replace the existing install instead of stacking a second entry in Apps &
-features.
+The version lives in `ai_usage_monitor/__init__.py`. `version_info.txt` and
+`installer\AIUsageMonitor.iss` carry the same number for the Windows
+file-version resource and the installer, and `tests	est_version.py` fails if
+any of them - or this readme - disagrees. The `AppId` GUID must stay fixed: it
+is what makes an upgrade replace the existing install instead of stacking a
+second entry in Apps & features.
 
 ### macOS
 
@@ -415,8 +624,8 @@ universal2 build that also runs on Intel, use a universal2 interpreter (the
 python.org installer is one) and set `target_arch="universal2"` in
 `AIUsageMonitor-mac.spec`.
 
-To change the version, edit `APP_VERSION` in both `build_mac.sh` and
-`AIUsageMonitor-mac.spec`.
+The version comes from `ai_usage_monitor/__init__.py` like everywhere else —
+both the spec and the build script read it, so there is nothing to bump here.
 
 ---
 
@@ -427,10 +636,13 @@ ai_usage_monitor/
   providers/
     base.py              the Provider contract: Meter / Stat / ProviderSnapshot
     claude_provider.py   OAuth quota + local transcript history
-    openai_provider.py   Admin Usage & Costs API
+    openai_provider.py   Codex quota/history or Admin Usage & Costs API
     gemini_provider.py   Cloud Monitoring via service-account JWT
     sources.py           where each service's login can live
+  app.py                 QApplication setup, then the single-instance gate
+  single_instance.py     one running copy per user, via a named local socket
   detection.py           finds an existing sign-in, read-only
+  codex_usage.py         isolated Codex App Server client and quota/history mapping
   usage_log.py           incremental, aggregate-on-ingest transcript parsing
   api.py                 Claude OAuth usage/profile endpoints
   credentials.py         read-only access to ~/.claude/.credentials.json
@@ -438,9 +650,11 @@ ai_usage_monitor/
   startup.py             the start-with-Windows registry entry
   memory.py              working-set trim and measurement
   pricing.py             per-token list prices for equivalent-value figures
+  formatting.py          token counts, durations and reset times as text
   tray.py                the drawn tray icon, rotation and menu
   worker.py              background refresh across providers
   settings.py            typed QSettings wrapper
+  theme.py               palettes, severity thresholds, Windows theme probe
   main_window.py         tabs, mode switching, widget chrome, display handling
   dashboard.py           one provider's full page
   connections_page.py    the landing page: every service, detected the same way
@@ -455,14 +669,53 @@ Adding a service means writing one `Provider` subclass and adding it to
 `providers/__init__.py`; the tabs, connection cards and refresh loop are all
 driven off that list.
 
+Run the OpenAI detection, protocol, quota/history and API regression tests with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
 ### Notes
 
 - Charts avoid a second y-axis, assign categorical hues in fixed order, and fold
   past the eighth series into "Other". Axis maxima are chosen by rounding the
   *step*, so ticks land on round numbers.
 - Dollar figures for Claude are labelled *equivalent API value* — a Max or Pro
-  subscription is not billed per token. OpenAI figures are real spend.
+  subscription is not billed per token. OpenAI dollar figures in Admin API mode
+  are real spend; Codex quota mode does not report dollar values.
 - Cache pricing follows the published multipliers: a 5-minute cache write costs
   1.25× the input rate, a 1-hour write 2×, and a cache read 0.1×.
 - A failure in one service never discards another's result; each is fetched and
   reported independently, with its own error banner.
+
+## Licence
+
+**GNU General Public License v3.0** — see [LICENSE](LICENSE).
+
+This program comes with **ABSOLUTELY NO WARRANTY**. It is free software, and
+you are welcome to redistribute it under the conditions in that file.
+
+GPL-3.0 is a deliberate fit rather than a default. Qt for Python is offered
+under a choice of LGPL-3.0, GPL-2.0, GPL-3.0 or a commercial licence, and the
+packaged application redistributes sixteen Qt libraries. Taking Qt under its
+**GPL-3.0** option makes the whole distributed work consistently GPL-3.0, with
+no LGPL relinking provision to rely on. A permissive licence for this code
+would have been possible, but every binary release would then have had to
+satisfy the LGPL separately.
+
+PyInstaller is GPL-2.0-or-later, but its licence carries an explicit exception
+for the bootloader it compiles into the executable, so it places no condition
+on this application.
+
+Every redistributed component, its licence and where to get its source is
+listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Both files ship
+beside the installed executable.
+
+## Working with Claude Code
+
+Read [GUIDELINES.md](https://github.com/epinephrinerx/AIMonitor/blob/main/GUIDELINES.md)
+before changing the project. `CLAUDE.md` and `AGENTS.md` are pointers to it,
+so that Claude Code and Codex cannot end up reading two different documents. It records the active package, Codex-first
+detection requirements, credential handling, the 2026-09-14 fix and
+verification results, and commands for testing and building. Keep both
+documents aligned with the implementation when behavior changes.

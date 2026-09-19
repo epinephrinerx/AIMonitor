@@ -31,15 +31,24 @@ EXCLUDED_QT = [
 EXCLUDED_STDLIB = ["tkinter", "unittest", "pydoc_data", "test", "distutils"]
 
 a = Analysis(
-    # Must be the ai_usage_monitor entry point. `run_app.py` imports the older
-    # claude_monitor package, so pointing here at that file built the wrong app
-    # under this name.
+    # The ai_usage_monitor entry point. A second entry point once existed for a
+    # retired predecessor and was briefly named here by mistake, which built the
+    # wrong application under this name; both are gone now.
     ["run_ai_monitor.py"],
     pathex=[],
     binaries=[],
     # The README ships with the app: the in-app Readme window reads this exact
     # file, so there is never a second copy of the text to drift.
-    datas=[("assets/icon.ico", "assets"), ("README.md", ".")],
+    # LICENSE and the third-party notices travel with the binary: GPL-3.0
+    # requires the licence to be conveyed along with the program, and the
+    # Apache-2.0 and BSD-2-Clause components require their notices to be
+    # reproduced in binary distributions.
+    datas=[
+        ("assets/icon.ico", "assets"),
+        ("README.md", "."),
+        ("LICENSE", "."),
+        ("THIRD-PARTY-NOTICES.md", "."),
+    ],
     # `rsa` is imported lazily inside the Gemini provider (only needed when a
     # service account is configured), so name it explicitly.
     hiddenimports=["rsa", "pyasn1"],

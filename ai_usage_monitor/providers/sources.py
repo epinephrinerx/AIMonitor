@@ -11,6 +11,7 @@ beats an environment variable, which beats a CLI's own login.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 from ..detection import (
     API_KEY,
@@ -26,7 +27,7 @@ from ..detection import (
     read_json,
 )
 
-# Anthropic honours CLAUDE_CONFIG_DIR; the others have no equivalent.
+# Honour each CLI's configuration directory without changing its files.
 from .. import credentials as claude_credentials
 
 
@@ -69,33 +70,60 @@ def _openai_env() -> Credential | None:
     value, name = env_first("OPENAI_ADMIN_KEY", "OPENAI_API_KEY")
     if not value:
         return None
-    return Credential(kind=API_KEY, value=value, account=f"from ${name}")
+    return openai_key(value, f"from ${name}")
+
+
+def openai_key(value: str, account: str = "") -> Credential:
+    return Credential(
+        kind=API_KEY, value=value, account=account,
+        usage_capable=value.startswith("sk-admin-"),
+        limited_reason="API spend requires an organization Admin key (sk-admin-…). "
+        "Sign in to Codex with ChatGPT to monitor Codex quota instead.",
+    )
+
+
+def codex_home() -> Path:
+    value = os.environ.get("CODEX_HOME", "").strip()
+    return Path(value).expanduser() if value else home() / ".codex"
 
 
 def _codex_login() -> Credential | None:
     """Codex CLI's login (`~/.codex/auth.json`).
 
-    Codex can be signed in two ways. `auth_mode: "api_key"` stores a usable
-    key. `auth_mode: "chatgpt"` stores ChatGPT OAuth tokens, which prove who
-    you are but are not accepted by the Usage/Costs endpoints - that is why
-    this source is marked not usage-capable.
+    ChatGPT OAuth is used only for Codex quota via App Server. Admin keys
+    are used only for the separate organization Usage/Costs endpoints.
     """
-    data = read_json(home() / ".codex" / "auth.json")
+    data = read_json(codex_home() / "auth.json")
     if not data:
         return None
 
     tokens = data.get("tokens") or {}
-    account = account_from_claims(jwt_claims(tokens.get("id_token", "")))
+    if not isinstance(tokens, dict):
+        return None
+    claims = jwt_claims(tokens.get("id_token", ""))
+    claims = claims if isinstance(claims, dict) else {}
+    account = account_from_claims(claims)
     if not account:
         account = tokens.get("account_id", "") or ""
 
     key = data.get("OPENAI_API_KEY")
     if isinstance(key, str) and key.startswith("sk-"):
-        return Credential(kind=API_KEY, value=key, account=account)
+        return openai_key(key, account)
 
-    if tokens.get("access_token"):
-        # Identity only - deliberately carries no value for the usage client.
-        return Credential(kind=OAUTH, value="", account=account)
+    token = tokens.get("access_token")
+    if isinstance(token, str) and token:
+        access = jwt_claims(token)
+        access = access if isinstance(access, dict) else {}
+        auth = access.get("https://api.openai.com/auth") or {}
+        auth = auth if isinstance(auth, dict) else {}
+        account_id = tokens.get("account_id") or auth.get("chatgpt_account_id") or ""
+        account_id = account_id if isinstance(account_id, str) else ""
+        return Credential(
+            kind=OAUTH, value=token, account=account,
+            account_id=account_id, expires_at=epoch(access.get("exp")),
+            usage_capable=bool(account_id),
+            limited_reason="Codex login has no account ID. Sign in to Codex again.",
+        )
     return None
 
 
@@ -106,12 +134,6 @@ OPENAI_SOURCES = [
         id="codex_cli",
         label="Codex CLI login (ChatGPT)",
         probe=_codex_login,
-        usage_capable=False,
-        limited_reason=(
-            "Signed in to Codex with a ChatGPT account. OpenAI publishes no "
-            "usage API for ChatGPT subscriptions, so spend and token figures "
-            "need an organization Admin key (sk-admin-…)."
-        ),
         refresh_hint="Run `codex` and sign in again.",
     ),
 ]

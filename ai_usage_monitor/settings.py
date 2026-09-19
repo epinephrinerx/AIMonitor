@@ -32,7 +32,22 @@ INTERVAL_OPTIONS = [
 
 RANGE_OPTIONS = [("7 days", 7), ("14 days", 14), ("30 days", 30), ("90 days", 90)]
 
+# Widget opacity, in whole percent. Below about 25% the meters stop being
+# readable against a busy desktop, so that is the floor the UI offers and the
+# floor `Settings.opacity` clamps to. Both sliders - the one in Settings and
+# the one in the widget's context menu - work in these units.
+OPACITY_MIN = 25
+OPACITY_MAX = 100
+OPACITY_STEP = 5
+DEFAULT_OPACITY = 92
+
 WIDGET_MAX_EDGE = 300  # the widget must fit inside 300x300
+# The floor the user can drag down to. The meter row degrades on the way
+# down - arcs that cannot reach a legible size are dropped, and the
+# percentage moves out of the ring into the caption - so this is about the
+# smallest that still reads at a glance.
+WIDGET_MIN_W = 150
+WIDGET_MIN_H = 96
 WIDGET_TRIGGER_EDGE = 380  # shrinking past this switches modes
 
 # A sane dashboard size: used to validate stored geometry and as the floor when
@@ -128,7 +143,8 @@ class Settings:
 
     @property
     def opacity(self) -> float:
-        return min(1.0, max(0.25, self._float("widget/opacity", 0.92)))
+        stored = self._float("widget/opacity", DEFAULT_OPACITY / 100)
+        return min(OPACITY_MAX / 100, max(OPACITY_MIN / 100, stored))
 
     @opacity.setter
     def opacity(self, value: float) -> None:
@@ -141,6 +157,20 @@ class Settings:
     @always_on_top.setter
     def always_on_top(self, value: bool) -> None:
         self._q.setValue("widget/alwaysOnTop", bool(value))
+
+    @property
+    def widget_rotate(self) -> bool:
+        """Cycle the widget through every service, the way the tray does.
+
+        On by default: a widget pinned to one service looked broken next to
+        a tray icon that was visibly rotating. Pinning one service from the
+        Show menu turns this off and restores the single-provider fetch.
+        """
+        return self._bool("widget/rotate", True)
+
+    @widget_rotate.setter
+    def widget_rotate(self, value: bool) -> None:
+        self._q.setValue("widget/rotate", bool(value))
 
     # -- refresh ---------------------------------------------------------
 

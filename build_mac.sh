@@ -16,7 +16,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="AI Usage Monitor"
-APP_VERSION="1.1.0"
+# One source for the version, same as the spec and the Windows build. Read with
+# sed rather than python because this runs before the venv is known to exist.
+APP_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' ai_usage_monitor/__init__.py)"
+[[ -n "$APP_VERSION" ]] || { echo "cannot read __version__ from ai_usage_monitor/__init__.py" >&2; exit 1; }
 ARCH="$(uname -m)"
 VENV=".venv"
 

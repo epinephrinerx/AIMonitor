@@ -46,22 +46,11 @@ STATUS = {
     "critical": "#d03b3b",
 }
 
-# Blue sequential ramp, used for meter tracks (a lighter step of the fill's ramp).
-_BLUE_RAMP = {
-    100: "#cde2fb",
-    150: "#b7d3f6",
-    200: "#9ec5f4",
-    250: "#86b6ef",
-    300: "#6da7ec",
-    350: "#5598e7",
-    400: "#3987e5",
-    450: "#2a78d6",
-    500: "#256abf",
-    550: "#1c5cab",
-    600: "#184f95",
-    650: "#104281",
-    700: "#0d366b",
-}
+# Neutral meter tracks. The fill is now a traffic light - green, yellow, red -
+# and a blue track behind it put a fourth hue in a three-state signal. Grey
+# says "unfilled" without competing for meaning.
+TRACK_LIGHT = "#dcdbd4"
+TRACK_DARK = "#3a3a37"
 
 
 @dataclass(frozen=True)
@@ -104,7 +93,7 @@ LIGHT = Theme(
     grid="#e1e0d9",
     baseline="#c3c2b7",
     border="rgba(11,11,11,0.10)",
-    track=_BLUE_RAMP[150],
+    track=TRACK_LIGHT,
     accent="#2a78d6",
     categorical=_CATEGORICAL_LIGHT,
 )
@@ -119,7 +108,7 @@ DARK = Theme(
     grid="#2c2c2a",
     baseline="#383835",
     border="rgba(255,255,255,0.10)",
-    track=_BLUE_RAMP[650],
+    track=TRACK_DARK,
     accent="#3987e5",
     categorical=_CATEGORICAL_DARK,
 )
@@ -215,15 +204,18 @@ def severity_word(severity: str) -> tuple[str, str]:
 
 
 def severity_color(theme: Theme, severity: str) -> str:
-    """Meter fill for a quota severity.
+    """Meter fill for a quota severity: a traffic light.
 
-    Below the warning threshold the meter wears the accent hue; past it the
-    reserved status colours take over. Every caller pairs this with a visible
-    severity word so colour never carries the state on its own.
+    Green while there is room, yellow from 75%, red from 90%, with the server's
+    "serious" sitting between the last two. The accent hue used to stand in for
+    green, which made a healthy meter look like a brand colour rather than a
+    reading. Every caller pairs this with a visible severity word and a glyph,
+    so colour never carries the state on its own - which matters here, because
+    red and green are the pair most often confused.
     """
     if severity in ("warning", "serious", "critical"):
         return STATUS[severity]
-    return theme.accent
+    return STATUS["good"]
 
 
 def qcolor(value: str, alpha: float | None = None) -> QColor:

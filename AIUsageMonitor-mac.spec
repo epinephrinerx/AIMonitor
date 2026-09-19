@@ -12,8 +12,28 @@ than a QWidgets dashboard needs, and PyInstaller's hook collects most of it by
 default.
 """
 
+import ast
+from pathlib import Path
+
+
+def _version() -> str:
+    """Read `__version__` without importing the package.
+
+    The project rule is that the version has one source and no file carries a
+    literal copy. Parsing rather than importing keeps that true here without
+    dragging PySide6 into the spec just to read four characters.
+    """
+    source = Path(SPECPATH, "ai_usage_monitor", "__init__.py").read_text("utf-8")
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(
+            getattr(t, "id", "") == "__version__" for t in node.targets
+        ):
+            return node.value.value
+    raise SystemExit("ai_usage_monitor/__init__.py has no __version__")
+
+
 APP_NAME = "AI Usage Monitor"
-APP_VERSION = "1.1.0"
+APP_VERSION = _version()
 BUNDLE_ID = "net.apichart.aiusagemonitor"
 
 block_cipher = None
@@ -48,10 +68,16 @@ a = Analysis(
     # file, so there is never a second copy of the text to drift. The PNG is
     # the runtime window icon; the .icns below is the Dock tile, which macOS
     # reads from the bundle rather than from the running process.
+    # LICENSE and the third-party notices travel with the binary: GPL-3.0
+    # requires the licence to be conveyed along with the program, and the
+    # Apache-2.0 and BSD-2-Clause components require their notices to be
+    # reproduced in binary distributions.
     datas=[
         ("assets/icon.png", "assets"),
         ("assets/icon.ico", "assets"),
         ("README.md", "."),
+        ("LICENSE", "."),
+        ("THIRD-PARTY-NOTICES.md", "."),
     ],
     # `rsa` is imported lazily inside the Gemini provider (only needed when a
     # service account is configured), so name it explicitly.

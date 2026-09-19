@@ -63,6 +63,9 @@ class ConnectDialog(QDialog):
         self.theme = theme
         self._key_field: QLineEdit | None = None
         self._extra_field: QLineEdit | None = None
+        # Clear only arms the removal. Nothing in this dialog writes to
+        # settings before Save, so Cancel really does cancel.
+        self._clear_requested = False
 
         self.setWindowTitle(
             f"Connect {provider.display_name}"
@@ -208,25 +211,38 @@ class ConnectDialog(QDialog):
             self._key_field.setText(path)
 
     def _clear_key(self) -> None:
-        self.settings.set_provider_key(self.provider.id, "")
+        """Arm the removal; Save is what carries it out.
+
+        This used to delete the stored key the moment the button was pressed,
+        while the dialog still showed Save and Cancel. Cancel then took back
+        nothing: the key was already gone from settings, and because a blank
+        field means "leave the stored key alone", Save could not put it back
+        either. A key sealed with DPAPI cannot be recovered by retyping it
+        from memory, so every button in this dialog now means what it says.
+        """
+        self._clear_requested = True
         if self._key_field is not None:
             self._key_field.clear()
-            self._key_field.setPlaceholderText("(cleared)")
+            self._key_field.setPlaceholderText("(cleared when you save)")
 
     def _save(self) -> None:
         if self._key_field is not None:
             typed = self._key_field.text().strip().strip('"')
-            if typed:
-                # Blank means "leave the stored key alone".
-                try:
+            try:
+                if typed:
+                    # A key typed after Clear replaces the old one rather than
+                    # clearing it - the last thing you did is what you meant.
                     self.settings.set_provider_key(self.provider.id, typed)
-                except secrets.SecretsUnavailable as exc:
-                    # The keystore can refuse - a cancelled Keychain prompt is
-                    # the common one. Say so and keep the dialog open with the
-                    # key still typed in, rather than reporting a save that
-                    # did not happen.
-                    QMessageBox.warning(self, "Key not saved", str(exc))
-                    return
+                elif self._clear_requested:
+                    self.settings.set_provider_key(self.provider.id, "")
+                # Otherwise blank means "leave the stored key alone".
+            except secrets.SecretsUnavailable as exc:
+                # The keystore can refuse - a cancelled Keychain prompt is the
+                # common one. Say so and keep the dialog open with the key
+                # still typed in, rather than reporting a save that did not
+                # happen.
+                QMessageBox.warning(self, "Key not saved", str(exc))
+                return
         if self._extra_field is not None:
             self.settings.set_provider_extra(
                 self.provider.id, self._extra_field.text().strip()

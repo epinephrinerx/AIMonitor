@@ -57,10 +57,13 @@ class Credential:
     """One usable credential plus where it came from."""
 
     kind: str
-    value: str = ""            # token, key, or a path for service accounts
+    value: str = field(default="", repr=False)  # never include secrets in repr
     account: str = ""
     expires_at: dt.datetime | None = None
     project: str = ""
+    account_id: str = ""
+    usage_capable: bool = True
+    limited_reason: str = ""
 
     @property
     def expired(self) -> bool:
@@ -105,6 +108,27 @@ class Detection:
         return self.state == CONNECTED
 
 
+def adopt(detections: dict, snapshots: dict) -> dict:
+    """Fold the detection each fetch produced back into the page's map.
+
+    Every provider re-detects on its way to fetching and reports what it found
+    on the snapshot, so a refresh already knows whether a login has expired or
+    been renewed. Merging that back here is what keeps the connections page as
+    fresh as the figures; without it a card stays on whatever it said when the
+    page was last opened by hand, and quietly goes on claiming "Connected"
+    after the token behind it has expired.
+
+    Snapshots that carry no detection - a provider that failed before it got
+    that far - leave the previous entry alone rather than blanking a card.
+    Mutates and returns `detections` so the caller keeps one map.
+    """
+    for provider_id, snapshot in snapshots.items():
+        found = getattr(snapshot, "detection", None)
+        if found is not None:
+            detections[provider_id] = found
+    return detections
+
+
 def bind(sources: list[Source], source_id: str,
          probe: Callable[[], Credential | None]) -> list[Source]:
     """Return `sources` with one entry's probe swapped.
@@ -147,9 +171,9 @@ def resolve(provider_id: str, sources: list[Source]) -> Detection:
         if credential.expired:
             detection.state = EXPIRED
             detection.hint = source.refresh_hint or "Sign in again to refresh."
-        elif not source.usage_capable:
+        elif not source.usage_capable or not credential.usage_capable:
             detection.state = PARTIAL
-            detection.hint = source.limited_reason
+            detection.hint = credential.limited_reason or source.limited_reason
         else:
             detection.state = CONNECTED
 

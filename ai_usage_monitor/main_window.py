@@ -13,6 +13,12 @@ window position you chose for either.
 
 Widget mode also refreshes less work, not just less pixels: `want_history` goes
 false, so no transcripts are parsed and no chart data is retained.
+
+Commands live in the menu bar (File / Settings / About); the header row keeps
+the controls that change what the figures mean - metric, range, interval -
+plus the two buttons pressed often enough that a menu would be in the way,
+Widget and Refresh. Widget mode hides the bar, so every menu action is added
+to the window as well and its shortcut keeps working while the bar is hidden.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import datetime as dt
 import hashlib
 
 from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -38,21 +44,36 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import api, formatting, memory, startup, theme as theming
+from . import (
+    detection,
+    formatting,
+    memory,
+    report as reporting,
+    startup,
+    theme as theming,
+)
+from .about_dialog import DeveloperDialog, VersionDialog
 from .connect_dialog import ConnectDialog
 from .connections_page import ConnectionsPage
 from .dashboard import ProviderPage
+from .log_dialog import UsageLogDialog, print_preview
 from .providers import build_all
-from .readme_dialog import ReadmeDialog
+from .readme_dialog import LicenceDialog, NoticesDialog, ReadmeDialog
 from .settings import (
     DASHBOARD_DRAG_MIN_H,
     DASHBOARD_DRAG_MIN_W,
     DASHBOARD_MIN_H,
     DASHBOARD_MIN_W,
     INTERVAL_OPTIONS,
+    OPACITY_MAX,
+    OPACITY_MIN,
+    OPACITY_STEP,
     RANGE_OPTIONS,
     Settings,
+    THEME_OPTIONS,
     WIDGET_MAX_EDGE,
+    WIDGET_MIN_H,
+    WIDGET_MIN_W,
     WIDGET_TRIGGER_EDGE,
 )
 from .settings_dialog import ProviderSettingsDialog
@@ -67,8 +88,27 @@ WIDGET = "widget"
 CONNECTIONS = "connections"
 
 
+# Slower than the tray's two seconds, deliberately. The tray shows one
+# number in one glyph, so a quick cycle reads fine; the widget shows a row
+# of meters with captions and a reset line, and swapping all of that every
+# two seconds gave the eye no time to finish reading a service before it
+# was replaced.
+WIDGET_ROTATE_MS = 4000
+
+# How long shutdown waits for the worker after asking it to give up. The wait
+# is short because cancellation is what does the work: the thread normally
+# stops between providers within a poll interval. This is only the allowance
+# for a socket read that is already in flight.
+SHUTDOWN_GRACE_MS = 3000
+
+# A worker thread that outlasted its grace period. Module level so the QThread
+# object survives the window that owned it: deleting a running QThread aborts
+# the process, and at this point the app is a moment from exiting anyway.
+_ABANDONED_THREADS: list[QThread] = []
+
+
 class MainWindow(QMainWindow):
-    request_refresh = Signal(int, str, bool, str)
+    request_refresh = Signal(int, str, bool, str, int)
     push_credentials = Signal(str, str, str)
     push_enabled = Signal(str, bool)
 
@@ -81,6 +121,11 @@ class MainWindow(QMainWindow):
         self.last_result: RefreshResult | None = None
         self.last_success: dt.datetime | None = None
         self._refreshing = False
+        # A refresh asked for while one is already running. Only the newest
+        # matters, so it is replaced rather than queued: changing the range
+        # twice in a row should fetch the second range, not both in turn.
+        self._pending_refresh: tuple | None = None
+        self._request_id = 0
         self._theme_check = 0
         self._switching = False
         self._working_set = 0.0
@@ -90,6 +135,9 @@ class MainWindow(QMainWindow):
         self._last_available = None
         self._window_size_seen = settings.window_size
         self._detections: dict[str, object] = {}
+        # The usage log is modeless so the dashboard can keep refreshing
+        # behind it; one at a time, kept current rather than reopened.
+        self._log_dialog: UsageLogDialog | None = None
 
         # Providers are mirrored here purely for display metadata; the worker
         # owns the instances that actually do the fetching.
@@ -113,8 +161,8 @@ class MainWindow(QMainWindow):
         self._restore_geometry(DASHBOARD, self._default_window_size())
 
         # Settle start-with-Windows against the registry. After the first
-        # launch the registry wins, so turning the entry off in Windows'
-        # Startup Apps page sticks instead of being re-added here.
+        # launch the OS entry wins, so turning it off in Windows' Startup Apps
+        # page - or macOS' Login Items - sticks instead of being re-added here.
         effective = startup.reconcile(
             self.settings.start_at_login,
             first_run=self.settings.mark_once("startupApplied"),
@@ -155,15 +203,13 @@ class MainWindow(QMainWindow):
         self._fit_timer.timeout.connect(self._fit_to_screen)
         self._watch_screens()
 
-        QShortcut(QKeySequence("F5"), self, activated=self.refresh)
-        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.toggle_mode)
-        QShortcut(QKeySequence("F1"), self, activated=self.open_readme)
-
+        self._sync_menus()
         QTimer.singleShot(0, self.refresh)
 
     # -- construction -----------------------------------------------------
 
     def _build_ui(self) -> None:
+        self._build_menus()
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
@@ -206,6 +252,14 @@ class MainWindow(QMainWindow):
         self.compact = CompactView(self.theme)
         self.compact.expand_requested.connect(self.enter_dashboard_mode)
         self.compact.menu_requested.connect(self._show_widget_menu)
+        # Widget rotation: the tray has always cycled services every two
+        # seconds, so a widget frozen on one service read as broken beside
+        # it. Pinning a service from the Show menu stops the timer.
+        self._widget_pinned: str | None = None
+        self._rotate_index = 0
+        self._rotate_widget = QTimer(self)
+        self._rotate_widget.setInterval(WIDGET_ROTATE_MS)
+        self._rotate_widget.timeout.connect(self._advance_widget)
         self.stack.addWidget(self.compact)
 
         active = self.settings.active_provider
@@ -250,30 +304,12 @@ class MainWindow(QMainWindow):
         self.interval_combo.currentIndexChanged.connect(self._apply_interval)
         row.addWidget(self.interval_combo)
 
-        self.theme_button = QPushButton()
-        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_button.clicked.connect(self._cycle_theme)
-        row.addWidget(self.theme_button)
-
-        self.connections_button = QPushButton("Connections")
-        self.connections_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.connections_button.setToolTip("Manage sign-ins for all AI services")
-        self.connections_button.clicked.connect(self.enter_connections_mode)
-        row.addWidget(self.connections_button)
-
-        self.settings_button = QPushButton("Settings…")
-        self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_button.clicked.connect(lambda: self.open_settings(""))
-        row.addWidget(self.settings_button)
-
-        self.readme_button = QPushButton("Readme")
-        self.readme_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.readme_button.setToolTip(
-            "What every figure means, including how the quota counts tokens (F1)"
-        )
-        self.readme_button.clicked.connect(self.open_readme)
-        row.addWidget(self.readme_button)
-
+        # Connections, Settings, Readme and the theme cycle used to sit here as
+        # well. They are commands you reach for occasionally, and they now live
+        # in the menu bar. Widget and Refresh stayed: collapsing to the desk
+        # widget is the gesture this app is used through all day, and burying a
+        # daily action two clicks deep to tidy a toolbar is a bad trade. Both
+        # are in the menus too, which is where their shortcuts are declared.
         self.widget_button = QPushButton("Widget")
         self.widget_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.widget_button.setToolTip("Collapse to the desk widget (Ctrl+W)")
@@ -287,7 +323,173 @@ class MainWindow(QMainWindow):
         row.addWidget(self.refresh_button)
         return header
 
+    # -- menu bar ---------------------------------------------------------
+
+    def _build_menus(self) -> None:
+        """File / Settings / About, per the Windows convention.
+
+        Every entry here is a command or a preference. The header row keeps
+        the three controls that change what the numbers below it mean - metric,
+        range and interval - plus the two buttons used often enough that a menu
+        would be in the way: Widget and Refresh.
+        """
+        bar = self.menuBar()
+        bar.setNativeMenuBar(False)
+
+        file_menu = bar.addMenu("&File")
+        self._add_action(
+            file_menu, "&Refresh", self.refresh, "F5",
+            "Fetch every enabled service now",
+        )
+        self._add_action(
+            file_menu, "&Sign-in…", self.enter_connections_mode, None,
+            "Manage sign-ins for all AI services",
+        )
+        file_menu.addSeparator()
+        self._add_action(
+            file_menu, "Save to &Log…", self.open_usage_log, "Ctrl+L",
+            "Read the per-day usage log, then save or print it",
+        )
+        self._add_action(
+            file_menu, "&Print Report…", self.print_report, "Ctrl+P",
+            "Print the usage log",
+        )
+        file_menu.addSeparator()
+        self._add_action(file_menu, "E&xit", self.quit_app, "Ctrl+Q")
+
+        settings_menu = bar.addMenu("&Settings")
+        self.startup_action = QAction(startup.describe(), self)
+        self.startup_action.setCheckable(True)
+        self.startup_action.setChecked(self.settings.start_at_login)
+        self.startup_action.toggled.connect(self._set_start_at_login)
+        settings_menu.addAction(self.startup_action)
+
+        theme_menu = settings_menu.addMenu("Themes")
+        self.theme_group = QActionGroup(self)
+        self.theme_group.setExclusive(True)
+        self.theme_actions: dict[str, QAction] = {}
+        for label, value in THEME_OPTIONS:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(value == self.theme_name)
+            action.triggered.connect(lambda _=False, v=value: self._set_theme(v))
+            self.theme_group.addAction(action)
+            theme_menu.addAction(action)
+            self.theme_actions[value] = action
+
+        self.widget_action = QAction("Widget mode", self)
+        self.widget_action.setCheckable(True)
+        self.widget_action.setShortcut(QKeySequence("Ctrl+W"))
+        self.widget_action.setToolTip("Collapse to the desk widget")
+        self.widget_action.triggered.connect(self._toggle_widget_action)
+        settings_menu.addAction(self.widget_action)
+        # Ctrl+W is the way back out of the widget, where the menu is hidden.
+        self.addAction(self.widget_action)
+
+        settings_menu.addSeparator()
+        self._add_action(
+            settings_menu, "&Settings…", lambda: self.open_settings(""), None,
+            "Services, appearance and startup",
+        )
+
+        about_menu = bar.addMenu("&About")
+        self._add_action(
+            about_menu, "&Version…", self.open_version, None,
+            "Which build this is, and whether a newer one has been released",
+        )
+        self._add_action(
+            about_menu, "&Readme", self.open_readme, "F1",
+            "What every figure means, including how the quota counts tokens",
+        )
+        self._add_action(
+            about_menu, "&License Agreement", self.open_licence, None,
+            "GPL-3.0-or-later, the licence this program is given to you under",
+        )
+        self._add_action(about_menu, "Third-party &notices", self.open_notices)
+        about_menu.addSeparator()
+        self._add_action(about_menu, "About the &developer", self.open_developer)
+
+    def _add_action(
+        self,
+        menu: QMenu,
+        text: str,
+        slot,
+        shortcut: str | None = None,
+        tip: str = "",
+    ) -> QAction:
+        action = QAction(text, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        if tip:
+            action.setToolTip(tip)
+            action.setStatusTip(tip)
+        action.triggered.connect(lambda _=False: slot())
+        menu.addAction(action)
+        # Also a window action, so its shortcut still fires in widget mode,
+        # where the menu bar is hidden and a menu-only shortcut goes dead.
+        self.addAction(action)
+        return action
+
+    def _sync_menus(self) -> None:
+        """Keep the menu's checkmarks honest about the live state.
+
+        The same preferences are reachable from the Settings dialog, the tray
+        and a drag on the window edge, so the menu has to be told rather than
+        assumed to be the only writer.
+        """
+        if not hasattr(self, "startup_action"):
+            return
+        self.startup_action.blockSignals(True)
+        self.startup_action.setChecked(self.settings.start_at_login)
+        self.startup_action.blockSignals(False)
+
+        action = self.theme_actions.get(self.theme_name)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
+
+        self.widget_action.blockSignals(True)
+        self.widget_action.setChecked(self.mode == WIDGET)
+        self.widget_action.blockSignals(False)
+
+    def _toggle_widget_action(self, checked: bool) -> None:
+        if checked:
+            self.enter_widget_mode()
+        else:
+            self.enter_dashboard_mode()
+        self._sync_menus()
+
+    def _set_start_at_login(self, enabled: bool) -> None:
+        self.settings.start_at_login = enabled
+        startup.apply(enabled)
+
+    def _set_theme(self, name: str) -> None:
+        self.theme_name = name
+        self.settings.theme = name
+        self._apply_theme(theming.resolve(name))
+
     # -- worker -----------------------------------------------------------
+
+    def _release_worker(self) -> None:
+        """Stop the refresh thread without ever destroying it while it runs.
+
+        The old shutdown waited two seconds, then waited out Claude's socket
+        timeout. That was never the right budget: providers are fetched one
+        after another, so the real worst case was the sum of all of them -
+        about a minute against the nineteen seconds allowed. Past that the
+        window went on to be destroyed, taking its child QThread with it, and
+        deleting a running QThread aborts the process.
+
+        So: ask the worker to give up, wait a short grace, and if it is still
+        inside a socket read, let it go. The thread is detached from the
+        window and parked where it will outlive this teardown, rather than
+        being deleted underneath itself. Process exit reclaims it.
+        """
+        self.worker.cancel()
+        self.thread.quit()
+        if self.thread.wait(SHUTDOWN_GRACE_MS):
+            return
+        self.thread.setParent(None)
+        _ABANDONED_THREADS.append(self.thread)
 
     def _start_worker(self) -> None:
         self.thread = QThread(self)
@@ -347,19 +549,38 @@ class MainWindow(QMainWindow):
         self.mode = CONNECTIONS
         self.redetect()
         self.stack.setCurrentWidget(self.connections)
+        self._sync_menus()
 
     def refresh(self) -> None:
+        """Fetch with the view's current settings, or queue it if one is running.
+
+        A request made while the worker is busy used to be dropped on the
+        floor. Changing the range or the metric calls straight through to
+        here, so the new choice was simply lost and the window kept the old
+        figures until the interval timer came round - up to half an hour.
+        """
+        want_history = self.mode != WIDGET
+        # Widget mode normally fetches only the service on screen. While the
+        # widget is rotating it shows all of them, so all of them have to be
+        # fetched - history stays off either way, which is the expensive part.
+        only = ""
+        if self.mode == WIDGET and not self._rotate_widget.isActive():
+            only = self._widget_provider_id()
+        request = (self._days(), self._metric(), want_history, only)
+
         if self._refreshing:
+            # Replaced, not queued: only the latest view matters.
+            self._pending_refresh = request
             return
+        self._dispatch(request)
+
+    def _dispatch(self, request: tuple) -> None:
+        self._pending_refresh = None
         self._refreshing = True
+        self._request_id += 1
         self.refresh_button.setEnabled(False)
         self.refresh_button.setText("Refreshing…")
-        want_history = self.mode != WIDGET
-        # Widget mode only ever shows the active provider, so fetch just that one.
-        only = self._active_provider_id() if self.mode == WIDGET else ""
-        self.request_refresh.emit(
-            self._days(), self._metric(), want_history, only
-        )
+        self.request_refresh.emit(*request, self._request_id)
 
     def _on_result(self, result: RefreshResult) -> None:
         self._refreshing = False
@@ -370,11 +591,20 @@ class MainWindow(QMainWindow):
         if any(snap.ok for snap in result.snapshots.values()):
             self.last_success = result.finished_at
 
+        self._sync_widget_rotation()
         show_history = self.mode != WIDGET
         for provider_id, snapshot in result.snapshots.items():
             page = self.pages.get(provider_id)
             if page is not None:
                 page.render(snapshot, show_history)
+
+        # Every provider re-detects its sign-in on the way to fetching, so the
+        # connections page can be as fresh as the figures instead of frozen at
+        # whatever was true when it was last opened by hand.
+        detection.adopt(self._detections, result.snapshots)
+        self.connections.set_detections(self._detections)
+        if self._log_dialog is not None:
+            self._log_dialog.set_report(self._build_report())
 
         active = self._active_provider_id()
         snapshot = result.snapshots.get(active)
@@ -396,6 +626,11 @@ class MainWindow(QMainWindow):
             self.tray.set_snapshots(result.snapshots)
         self._tick()
 
+        # Anything asked for while this one was in flight goes now, rather
+        # than waiting for the interval timer.
+        if self._pending_refresh is not None:
+            self._dispatch(self._pending_refresh)
+
     def _update_tab_labels(self, result: RefreshResult) -> None:
         """Put the headline number on the tab, so it reads at a glance."""
         for index, provider in enumerate(self.providers):
@@ -410,6 +645,49 @@ class MainWindow(QMainWindow):
             self.tabs.setTabText(index, label)
 
     # -- mode switching ---------------------------------------------------
+
+    def _widget_provider_id(self) -> str:
+        """Which service the widget shows: the pinned one, or the rotation."""
+        if self._widget_pinned:
+            return self._widget_pinned
+        if not self.settings.widget_rotate:
+            return self._active_provider_id()
+        showable = self._rotatable_ids()
+        if not showable:
+            return self._active_provider_id()
+        self._rotate_index %= len(showable)
+        return showable[self._rotate_index]
+
+    def _rotatable_ids(self) -> list[str]:
+        """Services worth cycling through: the ones that returned data."""
+        if self.last_result is None:
+            return [p.id for p in self.providers]
+        ids = [
+            p.id for p in self.providers
+            if (snap := self.last_result.snapshots.get(p.id)) is not None
+            and snap.configured
+        ]
+        return ids or [p.id for p in self.providers]
+
+    def _advance_widget(self) -> None:
+        showable = self._rotatable_ids()
+        if len(showable) < 2:
+            return
+        self._rotate_index = (self._rotate_index + 1) % len(showable)
+        self._render_compact()
+
+    def _sync_widget_rotation(self) -> None:
+        """Run the timer only while the widget is up and unpinned."""
+        rotate = (
+            self.mode == WIDGET
+            and self.settings.widget_rotate
+            and self._widget_pinned is None
+            and len(self._rotatable_ids()) > 1
+        )
+        if rotate and not self._rotate_widget.isActive():
+            self._rotate_widget.start()
+        elif not rotate and self._rotate_widget.isActive():
+            self._rotate_widget.stop()
 
     def _active_provider_id(self) -> str:
         index = self.tabs.currentIndex()
@@ -434,6 +712,9 @@ class MainWindow(QMainWindow):
 
         self.mode = WIDGET
         self.stack.setCurrentWidget(self.compact)
+        # A frameless 230x175 widget has no room for a menu bar, and one drawn
+        # across the top would eat a third of it.
+        self.menuBar().setVisible(False)
         # Charts hold the largest arrays on the page; let them go.
         for page in self.pages.values():
             page.release_charts()
@@ -443,16 +724,22 @@ class MainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setWindowOpacity(self.settings.opacity)
-        self.setMinimumSize(180, 120)
+        self.setMinimumSize(WIDGET_MIN_W, WIDGET_MIN_H)
         self.setMaximumSize(WIDGET_MAX_EDGE, WIDGET_MAX_EDGE)
         # Geometry is applied after show(): changing window flags re-creates the
         # native window, and a geometry set before that is discarded.
         self.show()
-        self._restore_geometry(WIDGET, QSize(260, 230))
+        self._sync_widget_rotation()
+        # The smallest size that still fits all three meters with their reset
+        # line - 260x230 left dead space under the content and read as
+        # oversized for a desk widget. Only new installs see this; a saved
+        # widget geometry still wins.
+        self._restore_geometry(WIDGET, QSize(230, 175))
         memory.trim_working_set()
         self._switching = False
         self._fit_to_screen()
         self._render_compact()
+        self._sync_menus()
         self.refresh()
 
     @staticmethod
@@ -473,6 +760,7 @@ class MainWindow(QMainWindow):
             # No window chrome change needed - just swap the page.
             self.mode = DASHBOARD
             self.stack.setCurrentWidget(self.dashboard_page)
+            self._sync_menus()
             self.refresh()
             return
         self._switching = True
@@ -480,8 +768,10 @@ class MainWindow(QMainWindow):
 
         self.mode = DASHBOARD
         self.stack.setCurrentWidget(self.dashboard_page)
+        self.menuBar().setVisible(True)
         self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowOpacity(1.0)
+        self._rotate_widget.stop()
         self.setMaximumSize(16777215, 16777215)
         self.setMinimumSize(DASHBOARD_DRAG_MIN_W, DASHBOARD_DRAG_MIN_H)
         self.show()
@@ -492,6 +782,7 @@ class MainWindow(QMainWindow):
         # (a taskbar that changed size, a scale-factor change), and nothing
         # would otherwise notice until the geometry happened to change again.
         self._fit_to_screen()
+        self._sync_menus()
         self.refresh()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
@@ -523,11 +814,21 @@ class MainWindow(QMainWindow):
             provider_menu = menu.addMenu("Show")
             group = QActionGroup(provider_menu)
             group.setExclusive(True)
-            active = self._active_provider_id()
+
+            rotating = self.settings.widget_rotate and self._widget_pinned is None
+            every = QAction("All services (rotate)", provider_menu)
+            every.setCheckable(True)
+            every.setChecked(rotating)
+            every.triggered.connect(self._rotate_all_providers)
+            group.addAction(every)
+            provider_menu.addAction(every)
+            provider_menu.addSeparator()
+
+            showing = self._widget_provider_id()
             for index, provider in enumerate(self.providers):
                 action = QAction(provider.display_name, provider_menu)
                 action.setCheckable(True)
-                action.setChecked(provider.id == active)
+                action.setChecked(not rotating and provider.id == showing)
                 action.triggered.connect(
                     lambda _checked=False, i=index: self._select_provider(i)
                 )
@@ -566,9 +867,9 @@ class MainWindow(QMainWindow):
         row.addWidget(caption)
 
         slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(25, 100)  # below ~25% the widget is unreadable
-        slider.setSingleStep(5)
-        slider.setPageStep(10)
+        slider.setRange(OPACITY_MIN, OPACITY_MAX)
+        slider.setSingleStep(OPACITY_STEP)
+        slider.setPageStep(OPACITY_STEP * 2)
         slider.setValue(int(round(self.settings.opacity * 100)))
         slider.setMinimumWidth(140)
         row.addWidget(slider, 1)
@@ -591,6 +892,19 @@ class MainWindow(QMainWindow):
 
     def _select_provider(self, index: int) -> None:
         self.tabs.setCurrentIndex(index)
+        if self.mode == WIDGET:
+            # An explicit choice pins the widget: rotating away from what the
+            # user just asked for would undo the click a second later.
+            self._widget_pinned = self.providers[index].id
+            self.settings.widget_rotate = False
+            self._sync_widget_rotation()
+        self._render_compact()
+        self.refresh()
+
+    def _rotate_all_providers(self) -> None:
+        self._widget_pinned = None
+        self.settings.widget_rotate = True
+        self._sync_widget_rotation()
         self._render_compact()
         self.refresh()
 
@@ -612,7 +926,7 @@ class MainWindow(QMainWindow):
             self.setWindowOpacity(value)
 
     def _render_compact(self) -> None:
-        provider_id = self._active_provider_id()
+        provider_id = self._widget_provider_id()
         snapshot = (
             self.last_result.snapshots.get(provider_id) if self.last_result else None
         )
@@ -694,6 +1008,15 @@ class MainWindow(QMainWindow):
             # This is the drag that collapsed the window, not a dashboard size
             # anyone wants back. Storing it would reopen the app squeezed.
             return
+        if mode == WIDGET and (
+            rect.width() > WIDGET_MAX_EDGE or rect.height() > WIDGET_MAX_EDGE
+        ):
+            # The mirror of the guard above. Saving here during a mode change,
+            # before the window has been resized into widget bounds, stored a
+            # full dashboard rect under the widget key - one machine had
+            # "0 0 1920 1032" - which then reopened the widget clamped to its
+            # 300x300 maximum instead of the intended default.
+            return
         self.settings.save_geometry(
             mode,
             [rect.x(), rect.y(), rect.width(), rect.height()],
@@ -724,6 +1047,15 @@ class MainWindow(QMainWindow):
             and mode == DASHBOARD
             and (rect[2] < WIDGET_TRIGGER_EDGE or rect[3] < WIDGET_TRIGGER_EDGE)
         ):
+            rect = None
+
+        if (
+            rect
+            and mode == WIDGET
+            and (rect[2] > WIDGET_MAX_EDGE or rect[3] > WIDGET_MAX_EDGE)
+        ):
+            # Written by an older build before the save guard existed. Falling
+            # back repairs it: the next save stores a sane rect.
             rect = None
 
         if rect and rect[2] > 0 and rect[3] > 0 and self._on_a_screen(rect):
@@ -949,24 +1281,77 @@ class MainWindow(QMainWindow):
     def open_readme(self) -> None:
         """Show the shipped README. One copy, read from disk, never duplicated
         into the source as a second version that can drift."""
-        dialog = ReadmeDialog(self.theme, self)
-        dialog.exec()
+        ReadmeDialog(self.theme, self).exec()
+
+    def open_licence(self) -> None:
+        LicenceDialog(self.theme, self).exec()
+
+    def open_notices(self) -> None:
+        NoticesDialog(self.theme, self).exec()
+
+    def open_version(self) -> None:
+        VersionDialog(self.theme, self).exec()
+
+    def open_developer(self) -> None:
+        DeveloperDialog(self.theme, self).exec()
+
+    # -- usage log --------------------------------------------------------
+
+    def _build_report(self) -> reporting.Report:
+        """The log of what is on screen right now, per service and per day.
+
+        The range and metric come from the result, not from the combo boxes.
+        They are usually the same, but a refresh is in flight for a moment
+        after either one changes, and heading 30 days of tokens over 14 days
+        of dollars is exactly the kind of thing a saved log gets quoted on.
+        """
+        result = self.last_result
+        snapshots = result.snapshots if result else {}
+        days = result.days if result and result.days else self._days()
+        metric = result.metric if result and result.metric else self._metric()
+        return reporting.build(
+            self.providers, snapshots, self._detections, days, metric
+        )
+
+    def open_usage_log(self) -> None:
+        """Read the log first; saving and printing are buttons inside it."""
+        if self._log_dialog is not None:
+            self._log_dialog.raise_()
+            self._log_dialog.activateWindow()
+            return
+        dialog = UsageLogDialog(self._build_report(), self.theme, self)
+        self._log_dialog = dialog
+        dialog.finished.connect(self._on_log_closed)
+        dialog.show()
+
+    def _on_log_closed(self) -> None:
+        self._log_dialog = None
+
+    def print_report(self) -> None:
+        """File > Print Report: the same document, straight to the preview."""
+        print_preview(self._build_report(), self)
+
+    # -- settings ---------------------------------------------------------
 
     def open_settings(self, focus_provider: str = "") -> None:
         dialog = ProviderSettingsDialog(
             self.providers, self.settings, self.theme, focus_provider, self
         )
         dialog.changed.connect(self._on_settings_changed)
+        dialog.preview.connect(self._apply_appearance)
         dialog.exec()
 
-    def _on_settings_changed(self) -> None:
-        self._push_all_credentials()
+    def _apply_appearance(self) -> None:
+        """Re-read the appearance settings and show them, without refetching.
+
+        The preview signal fires on every drag of the opacity slider, so this
+        path must not touch the network, the providers or the worker - it is
+        only what the window looks like.
+        """
         if self.theme_name != self.settings.theme:
             self.theme_name = self.settings.theme
             self._apply_theme(theming.resolve(self.theme_name))
 
-        # Picking a new default size is an instruction, not a preference for
-        # some later launch - apply it to the window in front of the user.
         size = self.settings.window_size
         if size != self._window_size_seen:
             self._window_size_seen = size
@@ -976,22 +1361,17 @@ class MainWindow(QMainWindow):
         if self.mode == WIDGET:
             self.setWindowOpacity(self.settings.opacity)
             self._set_always_on_top(self.settings.always_on_top)
-        self.refresh()
 
-    def _cycle_theme(self) -> None:
-        order = ["system", "light", "dark"]
-        self.theme_name = order[(order.index(self.theme_name) + 1) % len(order)]
-        self.settings.theme = self.theme_name
-        self._apply_theme(theming.resolve(self.theme_name))
+    def _on_settings_changed(self) -> None:
+        self._push_all_credentials()
+        self._apply_appearance()
+        self._sync_menus()
+        self.refresh()
 
     def _apply_theme(self, theme: Theme) -> None:
         self.theme = theme
         QApplication.instance().setPalette(theming.build_qpalette(theme))
-        self.theme_button.setText(
-            {"system": "Theme: System", "light": "Theme: Light", "dark": "Theme: Dark"}[
-                self.theme_name
-            ]
-        )
+        self._sync_menus()
         self.setStyleSheet(self._stylesheet(theme))
         self.title_label.setStyleSheet(
             f"color: {theme.ink}; font-size: 17px; font-weight: 600;"
@@ -1004,6 +1384,8 @@ class MainWindow(QMainWindow):
             page.apply_theme(theme)
         self.connections.apply_theme(theme)
         self.compact.apply_theme(theme)
+        if self._log_dialog is not None:
+            self._log_dialog.apply_theme(theme)
         if getattr(self, "tray", None) is not None:
             self.tray.apply_theme(theme)
 
@@ -1071,6 +1453,16 @@ class MainWindow(QMainWindow):
             font-weight: 600;
         }}
         QGroupBox::title {{ left: 10px; padding: 0 4px; }}
+        QMenuBar {{
+            background-color: {theme.surface};
+            color: {theme.ink};
+            border-bottom: 1px solid {ring};
+            padding: 2px 6px;
+            font-size: 12px;
+        }}
+        QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; background: transparent; }}
+        QMenuBar::item:selected {{ background-color: {theme.plane}; }}
+        QMenuBar::item:pressed {{ background-color: {theme.accent}; color: #ffffff; }}
         QMenu {{
             background-color: {theme.surface};
             border: 1px solid {ring};
@@ -1078,6 +1470,7 @@ class MainWindow(QMainWindow):
         }}
         QMenu::item {{ padding: 5px 22px 5px 12px; border-radius: 4px; }}
         QMenu::item:selected {{ background-color: {theme.accent}; color: #ffffff; }}
+        QMenu::separator {{ height: 1px; background: {ring}; margin: 4px 8px; }}
         QSlider::groove:horizontal {{
             height: 4px; background: {theme.track}; border-radius: 2px;
         }}
@@ -1137,11 +1530,7 @@ class MainWindow(QMainWindow):
         if self.tray is not None:
             self.tray.hide()
         self.hide()
-        self.thread.quit()
-        if not self.thread.wait(2000):
-            # A request is still unwinding. Destroying a running QThread aborts
-            # the process, so wait out the remaining socket timeout instead.
-            self.thread.wait(api.TIMEOUT_SECONDS * 1000 + 2000)
+        self._release_worker()
         super().closeEvent(event)
         # Quit explicitly rather than relying on quitOnLastWindowClosed: this
         # window changes flags at runtime and the app runs with that behaviour
