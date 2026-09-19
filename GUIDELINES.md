@@ -8,10 +8,12 @@
 
 ## โปรเจกต์ที่ต้องแก้
 
-- แอป Windows ใช้ Python + PySide6 มี Dashboard, Widget และ System tray
+- แอปเดสก์ท็อป Windows **และ macOS** ใช้ Python + PySide6 มี Dashboard, Widget
+  และ System tray (บน macOS คือเมนูบาร์)
 - ซอร์สหลักคือ `ai_usage_monitor/`; entry point คือ `run_ai_monitor.py`
 - `run_ai_monitor.py` เป็น entry point เดียว โปรแกรมรุ่นเก่า `claude_monitor/` กับ `run_app.py` ถูกลบออกจาก repo แล้ว ยังกู้ได้จาก history ถ้าจำเป็น
-- ใช้ `.venv\Scripts\python.exe` และ `AIUsageMonitor.spec` สำหรับ portable build
+- Windows: ใช้ `.venv\Scripts\python.exe` และ `AIUsageMonitor.spec` สำหรับ portable build
+- macOS: ใช้ `.venv/bin/python` และ `AIUsageMonitor-mac.spec`; `./build_mac.sh` ทำครบทั้ง .app และ .dmg
 - ตรวจ `git status` ก่อนแก้ และรักษางานที่ยังไม่ได้ commit ของผู้ใช้หรือผู้ช่วยอื่น
 
 ## ข้อกำหนด OpenAI ที่ผู้ใช้ต้องการ
@@ -70,6 +72,18 @@ OAuth หมดอายุ และ Admin fallback เมื่อไม่ม
 .\.venv\Scripts\python.exe -m ai_usage_monitor
 .\.venv\Scripts\python.exe -m PyInstaller AIUsageMonitor.spec --noconfirm --distpath dist/codex-first --workpath build/codex-first
 ```
+
+บน macOS:
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m ai_usage_monitor
+./build_mac.sh
+```
+
+`QT_QPA_PLATFORM=offscreen` จำเป็นเฉพาะตอนรันเทสต์ ไฟล์เทสต์ตั้งเองอยู่แล้วแต่ตั้งซ้ำไม่เสียหาย
+คำเตือน `Populating font family aliases ... "Sans Serif"` ระหว่างเทสต์เป็นของ platform
+offscreen เอง ไม่ใช่ของโค้ดเรา (บน cocoa ฟอนต์ปริยายคือ `.AppleSystemUIFont`)
 
 ทดสอบกรณีมี Admin key เดิมควบคู่กับ Codex login ทุกครั้งที่เปลี่ยน detection
 ใช้ข้อมูลจำลองสำหรับ automated tests และอย่าแสดงข้อมูลลับเมื่อวินิจฉัยเครื่องจริง
@@ -423,3 +437,99 @@ README แก้สามจุดที่ค้าง: บรรทัดต�
   ยืนยัน FileVersion 1.3.1.0 เมนูบาร์ ปุ่ม Widget/Refresh บน header และข้อมูลสดขึ้นครบ
 - คืนค่า `Run` registry หลังเปิด build ทุกครั้งตามหัวข้อ "ข้อควรระวังตอนรันจากซอร์ส"
   ซึ่งใช้กับ .exe ที่อยู่นอกโฟลเดอร์ติดตั้งเหมือนกัน
+
+## บันทึกการแก้ไข 2026-09-19 — พอร์ต macOS และ .dmg
+
+รอบนี้ทำบน macOS 26.3 (Apple Silicon) ทั้งหมด งานคือทำให้แอปทำงานจริงบน Mac
+ไม่ใช่แค่แพ็กใหม่ สาขา `Mac` แยกไปตั้งแต่ v1.1.0 แล้วรอบนี้ merge `main` ที่ v1.3.1
+กลับเข้ามา **ผู้ใช้สั่งให้ทำงานบนสาขา `Mac` ต่อไป `main` ที่ตามหลังอยู่เป็นความตั้งใจ**
+
+### ห้าจุดที่ผูกกับ Windows และต้องแก้จริง ไม่ใช่ข้ามไป
+
+- **API key เก็บไม่ได้เลย** `secrets.py` มีแต่ DPAPI พอเป็น Mac `available()` เป็นเท็จ
+  และกล่อง Settings ขึ้นว่าบันทึก key ไม่ได้ ทุก provider ที่ใช้ API key จึงตายหมด
+  ตอนนี้ `seal`/`unseal` รับ `handle` เพิ่ม และมี backend Keychain หลัง API เดิม
+  ค่าที่เขียนลง settings คือ `keychain:v1:<handle>` **ไม่ใช่ตัว key**
+- **ล็อกอิน Claude Code อยู่ใน Keychain ไม่ใช่ไฟล์** บน Mac ไม่มี
+  `~/.claude/.credentials.json` ถ้าไม่แก้ provider หลักจะรายงานว่ายังไม่ล็อกอินทุกเครื่อง
+  ยืนยันกับเครื่องจริงแล้วว่าเป็นแบบนี้
+- **`system_prefers_dark()` คืนเท็จเสมอนอก Windows** ธีม "ตามระบบ" จึงค้างที่สว่าง
+  เปลี่ยนไปถาม `QStyleHints.colorScheme()` ของ Qt ซึ่งตอบได้ทั้งสองระบบ
+- **Segoe UI ไม่มีบน macOS** Qt ไม่ฟ้องแต่แทนที่ให้เองทีละข้อความ หน้าต่างเดียวจึงมี
+  ฟอนต์ปนกัน ดู `fonts.py`
+- **เปิดพร้อมเครื่อง** Run key ใช้ไม่ได้ เปลี่ยนเป็น LaunchAgent
+
+### ข้อกำหนดที่ตั้งใจไว้ อย่าเปลี่ยนโดยไม่ตั้งใจ
+
+- **ห้ามส่ง API key ผ่าน argv** `security add-generic-password -w <key>` ทิ้ง key ไว้ใน
+  command line ให้โปรเซสอื่นของผู้ใช้เดียวกันอ่านจาก `ps` ได้ ใช้ `security -i`
+  ซึ่งรับคำสั่งทาง stdin เท่านั้น ทดลองยืนยันแล้วว่า `-w` ไม่เคยอ่าน stdin
+  (มันกลืน argument ตัวถัดไปเป็นค่า password)
+- **`secrets.forget()` ต้องถูกเรียกตอนล้าง key** บน Windows ลบค่าใน settings แล้ว
+  ciphertext หายตาม แต่บน Mac ค่าใน settings เป็นแค่ตัวชี้ ถ้าไม่ลบ item ใน Keychain
+  ด้วย การกด Clear จะไม่ได้ลบอะไรจริง
+- **ชื่อ service ใน Keychain ต้องมี settings scope ต่อท้าย** ไม่งั้นเทสต์ที่ตั้ง
+  `AI_USAGE_MONITOR_SETTINGS_SCOPE` จะไปทับ key จริงของผู้ใช้
+- **detection ห้ามอ่าน "ข้อมูล" ใน Keychain** `MainWindow.redetect()` รันบน GUI thread
+  การอ่านค่า secret จะเด้งกล่องขออนุญาตของ Keychain และค้างหน้าต่างไว้ข้างหลัง
+  `credentials.probe()` จึงถามแค่ metadata (`find-generic-password` ไม่ใส่ `-w`)
+  ซึ่งไม่ทริกเกอร์ ACL ส่วนตัว token อ่านใน `load()` บน worker thread
+- **ห้าม `launchctl bootout` ตอนปิดสวิตช์ "เปิดพร้อมเครื่อง"** ถ้าโปรเซสที่กำลังรัน
+  ถูก launchd เปิดมา การ bootout จะฆ่าแอปที่ผู้ใช้กำลังใช้อยู่ ลบไฟล์ plist พอ
+  แล้วมีผลตั้งแต่ login ครั้งถัดไป
+- **LaunchAgent คือรายการเดียวกับที่ System Settings → Login Items แสดง**
+  กติกา "ระบบชนะหลัง first run" เหมือนฝั่ง Windows `is_enabled()` จึงเช็ค
+  `launchctl print-disabled` ด้วย เพราะ Login Items เขียน override ทับ ไม่ได้ลบไฟล์เรา
+- **`.app` ต้องพก LICENSE และ THIRD-PARTY-NOTICES.md** เหมือน .exe ข้อผูกพัน GPL-3.0
+  ไม่ได้ขึ้นกับแพลตฟอร์ม
+- **build เป็น one-directory + BUNDLE เท่านั้น ห้าม onefile** onefile บน macOS แตกไฟล์
+  ทั้งก้อนลง temp ทุกครั้งที่เปิด ซึ่งเป็นราคาที่แอปเปิดพร้อม login ต้องจ่ายทุกเช้า
+
+### กับดักที่เจอ อย่าให้ซ้ำ
+
+- **`QFontDatabase.systemFont()` ตอบ `"Sans Serif"` บน platform offscreen**
+  ซึ่งเป็นชื่อที่ไม่มีจริง Qt จึงต้องไล่สแกน alias ~130 ms แล้ว log เตือน
+  `fonts.ui_font()` จึงใช้ `QFont()` เปล่า ๆ นอก Windows เพราะมันพกฟอนต์ของ
+  application ที่ Qt ตั้งเป็นฟอนต์ระบบไว้แล้ว **ไม่ต้องเอ่ยชื่อฟอนต์เลย**
+- **`css_family()` แยกตามแพลตฟอร์ม** ใส่ `Segoe UI` นำหน้าใน CSS ถูกบน Windows
+  แต่เป็นตัวจุดชนวนการสแกนบน macOS พอดี
+- **auto-merge ผ่านแต่โค้ดพัง** เมนู `Start on start up` ที่ main เพิ่มมาเรียก
+  `settings.start_with_windows` ซึ่งสาขานี้เปลี่ยนชื่อเป็น `start_at_login` ไปแล้ว
+  git ไม่เห็นเป็น conflict เพราะคนละบรรทัด และ**ไม่มีเทสต์ตัวไหนจับได้**
+  หลัง merge ทุกครั้งให้ `grep` ชื่อเก่าที่สาขานี้เปลี่ยน ไม่ใช่เชื่อว่า merge สะอาด
+- **การทดสอบเปิดแอปจะตั้ง login item ให้เอง** เพราะ `start_at_login` ปริยายเป็นจริง
+  และ `reconcile()` รันใน `MainWindow.__init__` เหมือนฝั่ง Windows ที่เขียนเตือนไว้แล้ว
+  ก่อนทดสอบให้ seed settings ใน scope ของตัวเอง:
+  `defaults write com.aiusagemonitor.<scope> once -dict startupApplied -bool true`
+  และ `startWithWindows -bool false` แล้วลบทิ้งเมื่อจบ
+- **`walk_packages()` บนแพ็กเกจนี้จะเปิดแอปขึ้นมา** เพราะ `__main__.py` เรียก `main()`
+  ตอน import ถ้าจะไล่ import ทุกโมดูลเพื่อตรวจ ต้องข้าม `__main__`
+- **`screencapture` ใช้ไม่ได้จาก terminal ที่ไม่มีสิทธิ์ Screen Recording**
+  ตอบว่า `could not create image from display` การตรวจหน้าตา UI จึงต้องให้คนเปิดดูเอง
+
+### ทดสอบและ build ที่ทำจริงในรอบนี้
+
+- ชุดทดสอบ **127 กรณีผ่านทั้งหมดบน macOS** ด้วย `QT_QPA_PLATFORM=offscreen`
+  โดยไม่ต้องแก้เทสต์เดิมให้ข้าม มีแก้สองจุดในเทสต์เอง: `test_connect_dialog`
+  ล้าง key ผ่าน `set_provider_key` เพื่อไม่ทิ้ง item ค้างใน Keychain
+  และข้อความ skip ไม่พูดว่าเป็น Windows อย่างเดียวอีก
+- `test_version.py` คุม `build_mac.sh` กับ `AIUsageMonitor-mac.spec` เพิ่ม
+  ทั้งสองไฟล์อ่าน `__version__` เอง ไม่มี literal และเป็นตัวที่จับ README
+  ที่ยังบอก 1.1.0 ได้ทันทีหลัง merge
+- เปิด **ไฟล์ .app ที่ build จริง** `dist/AI Usage Monitor.app` ยืนยัน
+  `CFBundleShortVersionString` เป็น 1.3.1, `codesign --verify --deep --strict` ผ่าน,
+  เปิดค้างได้ไม่ crash, เปิดซ้ำแล้วตัวที่สองออกด้วยโค้ด 0 โดยตัวแรกยังอยู่
+  และ LICENSE/THIRD-PARTY-NOTICES อยู่ในบันเดิลจริง
+- **ยังไม่ได้ตรวจด้วยตา** สิทธิ์ Screen Recording ไม่มี จึงยังไม่ยืนยันหน้าตาฟอนต์
+  โหมดมืด และเมนูบาร์บนจอจริง
+
+### สิ่งที่ยังไม่ได้ทำบน macOS
+
+- **ไม่ได้ notarize** เซ็นแบบ ad-hoc พอสำหรับเครื่องที่ build เอง แต่เครื่องอื่น
+  ที่โหลดไฟล์ไปจะติด quarantine ต้องคลิกขวา → Open ครั้งแรก
+  การแก้ถาวรต้องมี Developer ID Application แล้ว `notarytool submit` + `stapler staple`
+- **arm64 อย่างเดียว** ถ้าต้องรองรับ Intel ด้วย ต้องใช้ Python แบบ universal2
+  (ตัวติดตั้งจาก python.org เป็น universal2) แล้วตั้ง `target_arch="universal2"`
+- **`codex_usage.py` ยังไม่ได้ทดสอบบน Mac** โค้ดจัดการ `codex` กับ `CREATE_NO_WINDOW`
+  แยกตาม `os.name` ไว้ถูกแล้ว แต่ยังไม่มีใครรันคู่กับ Codex CLI จริงบนเครื่อง Mac
+- **ยังไม่มี Intel/Windows CI** ทุกอย่างตรวจด้วยมือบนเครื่องเดียว
