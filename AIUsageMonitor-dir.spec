@@ -4,33 +4,26 @@
 The onefile build is the portable one: a single .exe you can copy anywhere, at
 the cost of unpacking its whole payload into %TEMP% on every launch. An app you
 install and open daily should not pay that on each start, so the installer
-ships a one-directory tree instead - same code, same excludes, faster cold
-start (measured at roughly 0.6 s against 1.4 s for onefile).
+ships a one-directory tree instead - same code, faster cold start (measured
+at roughly 0.6 s against 1.4 s for onefile).
+
+"Same excludes" is not a claim this file can make on its own, and for a while
+it made it while being wrong: both specs read `build_excludes.py` now.
 """
 
+import sys as _sys
+
+# One source for what both specs leave out. See `build_excludes.py` - the two
+# specs drifted apart once already, and the installer went on shipping what
+# the portable had dropped.
+_sys.path.insert(0, SPECPATH)
+from build_excludes import (  # noqa: E402
+    EXCLUDED_QT,
+    EXCLUDED_STDLIB,
+    without_stray_openssl,
+)
+
 block_cipher = None
-
-EXCLUDED_QT = [
-    "PySide6.Qt3DAnimation", "PySide6.Qt3DCore", "PySide6.Qt3DExtras",
-    "PySide6.Qt3DInput", "PySide6.Qt3DLogic", "PySide6.Qt3DRender",
-    "PySide6.QtBluetooth", "PySide6.QtCharts", "PySide6.QtConcurrent",
-    "PySide6.QtDataVisualization", "PySide6.QtDesigner", "PySide6.QtGraphs",
-    "PySide6.QtGraphsWidgets", "PySide6.QtHelp", "PySide6.QtHttpServer",
-    "PySide6.QtLocation", "PySide6.QtMultimedia",
-    "PySide6.QtMultimediaWidgets", "PySide6.QtNetworkAuth", "PySide6.QtNfc",
-    "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets", "PySide6.QtPdf",
-    "PySide6.QtPdfWidgets", "PySide6.QtPositioning", "PySide6.QtQml",
-    "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.QtQuickControls2",
-    "PySide6.QtQuickWidgets", "PySide6.QtRemoteObjects", "PySide6.QtScxml",
-    "PySide6.QtSensors", "PySide6.QtSerialBus", "PySide6.QtSerialPort",
-    "PySide6.QtSpatialAudio", "PySide6.QtSql", "PySide6.QtStateMachine",
-    "PySide6.QtTest", "PySide6.QtTextToSpeech", "PySide6.QtUiTools",
-    "PySide6.QtWebChannel", "PySide6.QtWebEngineCore",
-    "PySide6.QtWebEngineQuick", "PySide6.QtWebEngineWidgets",
-    "PySide6.QtWebSockets", "PySide6.QtXml",
-]
-
-EXCLUDED_STDLIB = ["tkinter", "unittest", "pydoc_data", "test", "distutils"]
 
 a = Analysis(
     ["run_ai_monitor.py"],
@@ -85,7 +78,7 @@ exe = EXE(
 
 coll = COLLECT(
     exe,
-    a.binaries,
+    TOC(without_stray_openssl(a.binaries)),
     a.zipfiles,
     a.datas,
     strip=False,
