@@ -29,7 +29,18 @@ class SingleSourceTests(unittest.TestCase):
             match = re.search(rf"{field}=\((\d+), (\d+), (\d+), (\d+)\)", text)
             self.assertIsNotNone(match, f"{field} missing from version_info.txt")
             self.assertEqual(tuple(int(g) for g in match.groups()), expected)
-        self.assertIn(f"'{version.VERSION}.0'", text)
+        # The strings are free text and say what everything else says. Only
+        # the binary tuple above is padded, because its format has no room
+        # for three numbers.
+        for field in ("FileVersion", "ProductVersion"):
+            found = re.search(rf"StringStruct\('{field}', '([^']+)'\)", text)
+            self.assertIsNotNone(found, f"{field} missing from version_info.txt")
+            self.assertEqual(
+                found.group(1),
+                version.VERSION,
+                f"{field} spells the version differently from the rest of "
+                f"the project",
+            )
 
     def test_installer_version_matches(self):
         text = (ROOT / "installer" / "AIUsageMonitor.iss").read_text(encoding="utf-8")
