@@ -33,7 +33,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.3.1.exe`**.
+Run **`AIUsageMonitor-Setup-1.3.2.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -50,7 +50,7 @@ settings, including any stored API keys. A *silent* uninstall always keeps them.
 
 ### Portable alternative
 
-`AIUsageMonitor-1.3.1-portable.exe` is a single 47 MB file that needs no
+`AIUsageMonitor-1.3.2-portable.exe` is a single 47 MB file that needs no
 install. It is slower to start — a one-file build unpacks its whole payload into `%TEMP%` on every
 launch, measured at **1.40 s** against **0.63 s** for the installed build, and
 it leaves `_MEI*` folders behind. Use it for a USB stick; otherwise prefer the
@@ -74,7 +74,7 @@ found for each.
 |---|---|---|
 | **Claude** | Claude Code login | **True quota.** Session (5-hour), weekly, and per-model weekly windows, with real percentages and reset times. Plus local history: tokens per day, by model, by project. |
 | **OpenAI** | Codex ChatGPT login · `OPENAI_ADMIN_KEY` / `OPENAI_API_KEY` · Admin key saved here | **Codex quota:** server-reported percentages and reset times, plus available daily token totals. Without a Codex ChatGPT login, an optional Admin key (`sk-admin-…`) provides API platform spend and tokens by model. |
-| **Gemini** | Gemini CLI · `GOOGLE_APPLICATION_CREDENTIALS` · gcloud ADC · service account | **Request counts only.** From Cloud Monitoring, which is OAuth-only. Needs Monitoring Viewer on the project. |
+| **Gemini** | Gemini CLI · `GOOGLE_APPLICATION_CREDENTIALS` · service-account JSON, including one left in gcloud's application-default location | **Request counts only.** From Cloud Monitoring, which is OAuth-only. Needs Monitoring Viewer on the project. |
 
 ### OpenAI: Codex quota and API spend
 
@@ -224,25 +224,50 @@ formula is, the meters reflect it.
 | Shows | tabs, gauges, stat tiles, daily chart, model and project breakdowns | a row of radial meters with reset countdowns |
 | Resident memory | ~75–94 MB | ~16–26 MB |
 
-**Switching:** drag the window below 380 px on either edge and it collapses.
-Double-click the widget, or use its right-click menu, to expand again. `Ctrl+W`
-toggles. Each mode remembers its own position and size.
+**Switching** is always something you ask for: the **Widget** button in the
+header, `Ctrl+W`, or the Settings menu. Double-click the widget, or use its
+right-click menu, to expand again. Each mode remembers its own position and
+size.
+
+Dragging the window under 380 px used to collapse it on its own. That put a
+mode change on the same gesture as an ordinary resize, so a window nudged a
+little smaller turned into something else entirely; it is gone, and the
+dashboard now resizes down to 300x220 like any other window.
 
 **Resizing the widget.** A frameless window has no border to grab, so the
 widget carves one out of its own edge: the outer 7 px resize, the rest still
 drags the window, and the cursor says which you are about to get. The drag is
-handed to Windows itself, so snapping and the 150×96–300×300 bounds come for
-free. The row degrades as it shrinks rather than squashing — meters that
+handed to Windows itself, so snapping and the 150×300 wide, 300 tall bounds
+come for free. The height floor is not a fixed number: the widget works out
+the shortest it can be and still draw one labelled ring at the current text
+scale, because a constant guessed low on a real desktop and let the window be
+dragged to a size it could only refuse to draw. The row degrades as it shrinks rather than squashing — meters that
 cannot reach a legible size are dropped, the percentage moves out of the ring
 into the caption below a 46 px arc, and the "updated" line is the first thing
 sacrificed when the content reaches the bottom edge.
+
+What is given up, and in what order, matters: *how many* meters fit is a
+question about width alone, because dropping one only ever buys width. Height
+is answered by giving up the subtitle under each ring, then by letting the
+arcs shrink to a 28 px floor - never by showing fewer meters. Getting that
+wrong is what once left a short widget showing a single gauge that no amount
+of dragging it wider would bring back - the missing height was never what
+dropping a meter bought back - and a 17 px status line appearing was enough
+to tip a widget there while nobody was touching it.
 
 **Rotation.** The widget cycles through every configured service every four
 seconds — slower than the tray's two, because the tray shows one number in
 one glyph while the widget shows a row of meters with captions and a reset
 line, and two seconds was not long enough to finish reading one service
 before it was replaced. Services that returned no data are skipped, so an
-unconfigured Gemini never takes a turn. Picking one service
+unconfigured Gemini never takes a turn.
+
+The two chevrons in the widget's top-right step between services on a click,
+without waiting out the rotation and without fetching anything - the
+snapshots are already held, and the gesture is for looking at what is there.
+Clicking one restarts the four-second timer, so you get a whole interval
+rather than whatever was left of one; on a pinned widget it moves the pin.
+Picking one service
 from the right-click **Show** menu pins it and stops the rotation; **All
 services (rotate)** starts it again. Pinning also restores the single-service
 fetch — a rotating widget has to ask every service for its quota, while a
@@ -291,6 +316,12 @@ Each monitor arrangement remembers its **own** window position and size, keyed b
 a signature of every screen's position, size and scale factor. Switching between
 a laptop panel and a desk monitor no longer makes each overwrite the other's
 layout.
+
+The **eight most recently used** arrangements are kept. Past that the one you
+have not worked at for longest is forgotten, and the window opens at its
+default size there the next time — every desk, dock and projector the machine
+has ever met would otherwise keep an entry for good. Returning to an
+arrangement counts as using it, so a layout you come back to regularly stays.
 
 When the desktop changes the window refits — it shrinks to stay on screen and
 grows back to the preferred size. Windows does not reliably raise a signal when
@@ -626,6 +657,14 @@ Run the OpenAI detection, protocol, quota/history and API regression tests with:
   are real spend; Codex quota mode does not report dollar values.
 - Cache pricing follows the published multipliers: a 5-minute cache write costs
   1.25× the input rate, a 1-hour write 2×, and a cache read 0.1×.
+- The price table knows three answers, and the caption under the figure says
+  which one it used. A model with a **published** rate is priced exactly. A
+  model whose id is new but whose family is known is priced at the **family
+  rate**, and the caption says how many tokens were estimated that way — the
+  guess can be out by half, since Sonnet 5 lists at $2/$10 where Sonnet 4.6
+  listed at $3/$15. A model in an **unknown** family is left out of the total
+  altogether, and the caption names it and its token count rather than adding a
+  silent zero.
 - A failure in one service never discards another's result; each is fetched and
   reported independently, with its own error banner.
 

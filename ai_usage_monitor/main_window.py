@@ -6,8 +6,11 @@ Two modes share one window.
 * **Widget** - frameless, at most 300x300, optionally always-on-top and
   translucent, drawn by `CompactView`.
 
-Shrinking the window past `WIDGET_TRIGGER_EDGE` on either edge collapses it;
-double-clicking the widget (or its context menu) expands it again. Each mode
+Switching between them is always something you ask for: the Widget button in
+the header, the Settings menu, or double-clicking the widget to expand it
+again. Dragging the dashboard small used to collapse it on its own, which put
+a mode change on the same gesture as an ordinary resize - the window changed
+out from under a drag that meant nothing more than "a bit smaller". Each mode
 remembers its own geometry, so switching back and forth does not lose the
 window position you chose for either.
 
@@ -74,7 +77,6 @@ from .settings import (
     WIDGET_MAX_EDGE,
     WIDGET_MIN_H,
     WIDGET_MIN_W,
-    WIDGET_TRIGGER_EDGE,
 )
 from .settings_dialog import ProviderSettingsDialog
 from .theme import Theme, qcolor
@@ -147,11 +149,9 @@ class MainWindow(QMainWindow):
         self._quitting = False
 
         self.setWindowTitle("AI Usage Monitor")
-        # Deliberately below WIDGET_TRIGGER_EDGE so the window can still be
-        # dragged small enough to collapse into the widget. A squeezed
-        # dashboard is prevented by validating stored geometry on save and on
-        # restore, not by pinning the minimum above the collapse threshold -
-        # doing that killed the drag gesture entirely.
+        # Small, because a user who wants a narrow dashboard beside something
+        # else should have one. It is the floor for stored geometry too: below
+        # this a saved rect is corrupt rather than deliberate.
         self.setMinimumSize(DASHBOARD_DRAG_MIN_W, DASHBOARD_DRAG_MIN_H)
 
         self._build_ui()
@@ -202,11 +202,6 @@ class MainWindow(QMainWindow):
         self._fit_timer.setSingleShot(True)
         self._fit_timer.timeout.connect(self._fit_to_screen)
 
-        # One timer rather than a singleShot per resize event: a drag past the
-        # threshold fires dozens of them, and they would all still be queued.
-        self._collapse_timer = QTimer(self)
-        self._collapse_timer.setSingleShot(True)
-        self._collapse_timer.timeout.connect(self._collapse_when_drag_ends)
         self._watch_screens()
 
         self._sync_menus()
@@ -258,6 +253,7 @@ class MainWindow(QMainWindow):
         self.compact = CompactView(self.theme)
         self.compact.expand_requested.connect(self.enter_dashboard_mode)
         self.compact.menu_requested.connect(self._show_widget_menu)
+        self.compact.page_requested.connect(self._page_widget)
         # Widget rotation: the tray has always cycled services every two
         # seconds, so a widget frozen on one service read as broken beside
         # it. Pinning a service from the Show menu stops the timer.
@@ -675,6 +671,42 @@ class MainWindow(QMainWindow):
         ]
         return ids or [p.id for p in self.providers]
 
+    def _page_widget(self, step: int) -> None:
+        """Step to the next service now, on a click, without a fetch.
+
+        The rotation is a four-second wait and the context menu is three
+        clicks deep; neither is what you want when the widget is showing the
+        service you are not asking about. Nothing is fetched - the snapshots
+        are already held, and the point of the gesture is to look at what is
+        there rather than to wait for it again.
+
+        It starts from whatever is on screen rather than from the rotation
+        index, because the index is not always what is being shown. With
+        rotation switched off and nothing pinned - which is where a restart
+        leaves a user who had picked a service, since the pin lives only in
+        memory while the setting is saved - the widget follows the dashboard
+        tab, and stepping the index moved a number nobody was reading. The
+        chevrons were drawn, took the click, and changed nothing.
+        """
+        showable = self._rotatable_ids()
+        if len(showable) < 2:
+            return
+        showing = self._widget_provider_id()
+        here = showable.index(showing) if showing in showable else 0
+        target = (here + step) % len(showable)
+
+        if self._widget_pinned or not self.settings.widget_rotate:
+            # Not rotating, so the only way to say "show that one" is to pin
+            # it. Asking for the next service is not asking for the timer back.
+            self._widget_pinned = showable[target]
+        else:
+            self._rotate_index = target
+        self._render_compact()
+        if self._rotate_widget.isActive():
+            # Restart it, so a click buys a whole interval rather than
+            # whatever was left of one.
+            self._rotate_widget.start()
+
     def _advance_widget(self) -> None:
         showable = self._rotatable_ids()
         if len(showable) < 2:
@@ -746,7 +778,20 @@ class MainWindow(QMainWindow):
 
         self.setWindowFlags(flags)
         self.setWindowOpacity(self.settings.opacity)
-        self.setMinimumSize(WIDGET_MIN_W, WIDGET_MIN_H)
+        # The floor is whichever is taller: the designed one, or the shortest
+        # the meter row can actually be drawn in at this text scale. A fixed
+        # 96 was below the latter on a normal desktop, which let the widget be
+        # dragged to a size that could only say "too small to show the meters".
+        # Clamped to the maximum as well: an extreme text scale could put the
+        # computed floor above 300, and a minimum larger than the maximum is a
+        # contradiction Qt resolves however it likes.
+        self.setMinimumSize(
+            WIDGET_MIN_W,
+            min(
+                WIDGET_MAX_EDGE,
+                max(WIDGET_MIN_H, self.compact.minimum_useful_height()),
+            ),
+        )
         self.setMaximumSize(WIDGET_MAX_EDGE, WIDGET_MAX_EDGE)
         # Size it before showing it. Setting the maximum alone snaps the
         # dashboard's rect down to exactly 300x300 - the largest a widget may
@@ -816,44 +861,6 @@ class MainWindow(QMainWindow):
         self._fit_to_screen()
         self._sync_menus()
         self.refresh()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        super().resizeEvent(event)
-        if self._switching or self.mode == WIDGET:
-            return
-        # Transient sizes reported while hidden or minimised are not the user
-        # dragging the frame, and must not collapse the window.
-        if not self.isVisible() or self.isMinimized():
-            return
-        size = event.size()
-        if size.width() < WIDGET_TRIGGER_EDGE or size.height() < WIDGET_TRIGGER_EDGE:
-            self._collapse_when_drag_ends()
-
-    def _collapse_when_drag_ends(self) -> None:
-        """Collapse once the mouse is let go, not in the middle of the drag.
-
-        Resizing a window by its border is a modal loop inside Windows.
-        Collapsing recreates the native window - a window flag change does -
-        and doing that from inside the loop ended it badly: Windows put the
-        window back at the size it had when the drag began, past Qt's maximum,
-        so the dashboard snapped out to full size at the exact moment it
-        reached the widget. That is the bounce this waits out.
-
-        Waiting for the release also makes the gesture forgiving: drag below
-        the threshold and back out again without letting go, and nothing
-        happens, which is what the rubber-banding suggests should happen.
-        """
-        if self.mode != DASHBOARD or self._switching:
-            return
-        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
-            self._collapse_timer.start(60)
-            return
-        if (
-            self.width() >= WIDGET_TRIGGER_EDGE
-            and self.height() >= WIDGET_TRIGGER_EDGE
-        ):
-            return  # dragged back out before letting go
-        self.enter_widget_mode()
 
     def _show_widget_menu(self, global_pos) -> None:
         menu = QMenu(self)
@@ -983,6 +990,11 @@ class MainWindow(QMainWindow):
             self.setWindowOpacity(value)
 
     def _render_compact(self) -> None:
+        # Drawn from the same list `_page_widget` will refuse to act on, so
+        # the chevrons are never an affordance that does nothing. Installed
+        # providers is the wrong question: three configured services with two
+        # still unconnected leaves one place to go.
+        self.compact.set_pageable(len(self._rotatable_ids()) > 1)
         provider_id = self._widget_provider_id()
         snapshot = (
             self.last_result.snapshots.get(provider_id) if self.last_result else None
@@ -1060,10 +1072,11 @@ class MainWindow(QMainWindow):
             return
         rect = self.geometry()
         if mode == DASHBOARD and (
-            rect.width() < WIDGET_TRIGGER_EDGE or rect.height() < WIDGET_TRIGGER_EDGE
+            rect.width() < DASHBOARD_DRAG_MIN_W or rect.height() < DASHBOARD_DRAG_MIN_H
         ):
-            # This is the drag that collapsed the window, not a dashboard size
-            # anyone wants back. Storing it would reopen the app squeezed.
+            # Smaller than the window can be dragged, so it was not dragged
+            # there: a transient rect reported mid-switch. Storing it would
+            # reopen the app squeezed.
             return
         if mode == WIDGET and (
             rect.width() > WIDGET_MAX_EDGE or rect.height() > WIDGET_MAX_EDGE
@@ -1104,11 +1117,12 @@ class MainWindow(QMainWindow):
         # The preset is a *default*, not a cage: it seeds the size when there is
         # nothing remembered and is the target after a display change, but it
         # must not overwrite a size the user dragged to every time the window
-        # comes back from widget mode.
+        # comes back from widget mode. Only a rect below the window's own
+        # minimum is rejected, and that one cannot have come from a drag.
         if (
             rect
             and mode == DASHBOARD
-            and (rect[2] < WIDGET_TRIGGER_EDGE or rect[3] < WIDGET_TRIGGER_EDGE)
+            and (rect[2] < DASHBOARD_DRAG_MIN_W or rect[3] < DASHBOARD_DRAG_MIN_H)
         ):
             rect = None
 
@@ -1356,13 +1370,38 @@ class MainWindow(QMainWindow):
     def open_readme(self) -> None:
         """Show the shipped README. One copy, read from disk, never duplicated
         into the source as a second version that can drift."""
-        ReadmeDialog(self.theme, self).exec()
+        self._open_document("readme")
 
     def open_licence(self) -> None:
-        LicenceDialog(self.theme, self).exec()
+        self._open_document("licence")
 
     def open_notices(self) -> None:
-        NoticesDialog(self.theme, self).exec()
+        self._open_document("notices")
+
+    def _open_document(self, name: str) -> None:
+        """Open one bundled document, and follow links between them.
+
+        The window owns this rather than the dialog: it knows which documents
+        exist and what each is called, and a dialog that opened its own
+        siblings would leave a stack of windows behind. Each link closes the
+        one you were reading and opens the one you asked for, the way a single
+        help window behaves.
+        """
+        builders = {
+            "readme": ReadmeDialog,
+            "licence": LicenceDialog,
+            "notices": NoticesDialog,
+        }
+        builder = builders.get(name)
+        if builder is None:
+            return
+        dialog = builder(self.theme, self)
+        following: list[str] = []
+        dialog.sibling_requested.connect(following.append)
+        dialog.sibling_requested.connect(dialog.accept)
+        dialog.exec()
+        if following and following[0] != name:
+            self._open_document(following[0])
 
     def open_version(self) -> None:
         VersionDialog(self.theme, self).exec()

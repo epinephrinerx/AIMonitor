@@ -37,7 +37,12 @@ from .. import formatting
 from ..usage_log import DayBucket
 from ..detection import OAUTH, SERVICE_ACCOUNT, Credential, Source, bind
 from .base import HistoryView, Meter, Provider, ProviderSnapshot, Stat
-from .sources import GEMINI_SOURCES
+from .sources import (
+    GEMINI_SOURCES,
+    INCOMPLETE_KEY,
+    SERVICE_ACCOUNT_FIELDS,
+    usable_service_account,
+)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 MONITORING_URL = "https://monitoring.googleapis.com/v3/projects/{project}/timeSeries"
@@ -93,12 +98,38 @@ class GeminiProvider(Provider):
 
     @staticmethod
     def _service_account_credential(path: str) -> Credential | None:
+        """The key the user pointed this app at themselves.
+
+        Held to the same standard as the two it finds on its own. This was
+        the third place asking a different question - it accepted any JSON it
+        could parse - so a user who picked the wrong file, or a key exported
+        without its private half, saw Connected and then a refresh that
+        failed. The file is theirs and it is there, so the answer is Limited
+        with the reason, never silence.
+        """
         if not path or not Path(path).is_file():
             return None
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return None
+            return Credential(
+                kind=SERVICE_ACCOUNT,
+                value="",
+                usage_capable=False,
+                limited_reason=(
+                    "That file could not be read as JSON. Choose the "
+                    "service-account key downloaded from the Google Cloud "
+                    "console."
+                ),
+            )
+        if not usable_service_account(data):
+            return Credential(
+                kind=SERVICE_ACCOUNT,
+                value="",
+                account=data.get("client_email", "") if isinstance(data, dict) else "",
+                usage_capable=False,
+                limited_reason=INCOMPLETE_KEY,
+            )
         return Credential(
             kind=SERVICE_ACCOUNT,
             value=path,
@@ -131,7 +162,7 @@ class GeminiProvider(Provider):
             method="GET",
             headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
         )
-        payload = _send(request, "cloudresourcemanager.googleapis.com")
+        payload = self._request(request, "cloudresourcemanager.googleapis.com")
         projects = [
             item.get("projectId")
             for item in (payload.get("projects") or [])
@@ -231,12 +262,14 @@ class GeminiProvider(Provider):
             data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise _GeminiError(f"Could not read the service account file: {exc}") from exc
-        if data.get("type") != "service_account":
+        if not isinstance(data, dict) or data.get("type") != "service_account":
             raise _GeminiError(
                 "That JSON is not a service account key (expected "
                 '"type": "service_account").'
             )
-        for required in ("client_email", "private_key"):
+        # The same list the detection probes check, so a file that passes
+        # there cannot be rejected here.
+        for required in SERVICE_ACCOUNT_FIELDS:
             if not data.get(required):
                 raise _GeminiError(f"Service account key is missing {required}.")
         return data
@@ -295,7 +328,7 @@ class GeminiProvider(Provider):
                 "User-Agent": USER_AGENT,
             },
         )
-        payload = _send(request, "oauth2.googleapis.com")
+        payload = self._request(request, "oauth2.googleapis.com")
         token = payload.get("access_token")
         if not token:
             raise _GeminiError("Google returned no access token.", unauthorized=True)
@@ -305,14 +338,24 @@ class GeminiProvider(Provider):
 
     # -- monitoring -------------------------------------------------------
 
+    def _request(self, request: urllib.request.Request, host: str) -> dict:
+        """Every HTTP request this provider makes goes out through here.
+
+        The check was on the Monitoring call alone, which is only the last of
+        up to three: a token exchange and a project lookup can come first. A
+        refresh cancelled while the token request was in flight went on to ask
+        Cloud Resource Manager anyway, and each of those carries its own
+        20-second timeout - so closing the window could still be followed by
+        the better part of a minute of work nobody was waiting for. One check,
+        here, bounds a cancelled refresh to the single request already open.
+        """
+        if self.cancelled():
+            raise _GeminiError("Refresh cancelled.")
+        return _send(request, host)
+
     def _query(
         self, token: str, project: str, start: dt.datetime, end: dt.datetime, period: int
     ) -> list[dict]:
-        # Every Monitoring request funnels through here, so one check bounds a
-        # cancelled refresh to whatever single request is already in flight
-        # rather than the whole sequence behind it.
-        if self.cancelled():
-            raise _GeminiError("Refresh cancelled.")
         params = {
             "filter": (
                 'metric.type="serviceruntime.googleapis.com/api/request_count" '
@@ -333,7 +376,7 @@ class GeminiProvider(Provider):
                 "User-Agent": USER_AGENT,
             },
         )
-        payload = _send(request, "monitoring.googleapis.com")
+        payload = self._request(request, "monitoring.googleapis.com")
         return payload.get("timeSeries") or []
 
     def _series_total(

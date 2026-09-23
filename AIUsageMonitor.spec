@@ -6,6 +6,8 @@ collects most of it by default. The exclude list below drops the Qt modules
 this app never imports, which roughly halves the executable.
 """
 
+import pathlib
+
 block_cipher = None
 
 EXCLUDED_QT = [
@@ -29,6 +31,25 @@ EXCLUDED_QT = [
 ]
 
 EXCLUDED_STDLIB = ["tkinter", "unittest", "pydoc_data", "test", "distutils"]
+
+# Qt's TLS plugin (`qopensslbackend.dll`) loads OpenSSL at run time by name,
+# and the name it asks for is the Qt spelling: `libcrypto-3-x64.dll`. Nothing
+# here answers that - Python's own copy is `libcrypto-3.dll`, no suffix - so
+# PyInstaller goes looking down PATH and bundles whatever it finds. It has
+# been Git's copy before; on this machine it was PHP 8.5, installed by WinGet
+# and on PATH, carrying 8.2 MB of OpenSSL that has nothing to do with this
+# application.
+#
+# It is safe to drop because **this app never uses Qt networking**: every
+# HTTPS request goes through `urllib.request`, which uses Python's OpenSSL.
+# `QNetwork` and `QSsl` appear nowhere in the source, and `openUrl` hands the
+# address to the system browser rather than fetching anything.
+#
+# If Qt networking is ever introduced, this has to be revisited, and the
+# right answer then is to ship a known OpenSSL rather than to inherit a
+# stranger's. Verify by opening the built .exe and refreshing all three
+# services - a TLS failure here takes out every provider at once.
+STRAY_OPENSSL = {"libcrypto-3-x64.dll", "libssl-3-x64.dll"}
 
 a = Analysis(
     # The ai_usage_monitor entry point. A second entry point once existed for a
@@ -61,6 +82,14 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+_kept = []
+for entry in a.binaries:
+    if pathlib.PurePath(entry[0]).name.lower() in STRAY_OPENSSL:
+        print(f"spec: dropping {entry[1]} - see STRAY_OPENSSL")
+        continue
+    _kept.append(entry)
+a.binaries = TOC(_kept)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

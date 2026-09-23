@@ -69,22 +69,51 @@ _PREFIX_RATES: list[tuple[str, Rate]] = [
 _UNKNOWN = Rate(0.0, 0.0, "Unknown")
 
 
-def rate_for(model: str) -> Rate:
+def is_priced(model: str) -> bool:
+    """Is there any basis for pricing this model at all?
+
+    False only for `UNKNOWN`, where every rate is zero: such a model
+    contributes nothing to `cost()` and the equivalent-value figure comes out
+    quietly short. `ESTIMATED` does contribute, but on the family's rate
+    rather than a published one, which the caption says separately.
+    """
+    return price_kind(model) != UNKNOWN
+
+
+# How a model's price was arrived at. The distinction is not academic:
+# `claude-sonnet-5` is published at $2/$10 while `claude-sonnet-4-6` is
+# $3/$15, and the `claude-sonnet` prefix carries the older pair. A future
+# point release priced through the prefix could therefore be out by half.
+EXACT = "exact"          # published for this model id
+ESTIMATED = "estimated"  # the family's rate, applied to an id we predate
+UNKNOWN = "unknown"      # no basis at all
+
+
+def resolve(model: str) -> tuple[Rate, str]:
+    """The rate to use, and how much faith to put in it."""
     if not model:
-        return _UNKNOWN
+        return _UNKNOWN, UNKNOWN
     if model in RATES:
-        return RATES[model]
+        return RATES[model], EXACT
     # Strip a trailing date snapshot such as -20251001 and retry.
     trimmed = model
     tail = model.rsplit("-", 1)[-1]
     if tail.isdigit() and len(tail) == 8:
         trimmed = model.rsplit("-", 1)[0]
         if trimmed in RATES:
-            return RATES[trimmed]
+            return RATES[trimmed], EXACT
     for prefix, rate in _PREFIX_RATES:
         if trimmed.startswith(prefix):
-            return rate
-    return _UNKNOWN
+            return rate, ESTIMATED
+    return _UNKNOWN, UNKNOWN
+
+
+def rate_for(model: str) -> Rate:
+    return resolve(model)[0]
+
+
+def price_kind(model: str) -> str:
+    return resolve(model)[1]
 
 
 def display_name(model: str) -> str:

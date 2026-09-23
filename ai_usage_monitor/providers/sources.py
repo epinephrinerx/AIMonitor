@@ -137,11 +137,53 @@ OPENAI_SOURCES = [
 
 # -- Gemini ---------------------------------------------------------------
 
+# Exactly what `GeminiProvider._load_key_file` insists on before it will sign
+# a token with a key. The probes below check the same thing, from here, so the
+# two cannot drift apart: a detector that says Connected about a file the
+# provider then rejects turns an honest "not connected" into a refresh that
+# fails with no visible cause, which is the worse of the two outcomes.
+SERVICE_ACCOUNT_FIELDS = ("client_email", "private_key")
+
+
+def usable_service_account(data) -> bool:
+    """Total, on purpose: it is asked about whatever a file parsed into.
+
+    `[]`, `"text"`, `1` and `null` are all valid JSON, and a question phrased
+    as "is this a usable service account?" has an answer for every one of
+    them. Reaching for `.get()` first turned those into an AttributeError,
+    which the detection layer catches and reports as *not connected* - so a
+    user who picked the wrong file was told nothing had been found, when
+    their setting had been read and could not be used.
+    """
+    if not isinstance(data, dict):
+        return False
+    if data.get("type") != "service_account":
+        return False
+    return all(data.get(field) for field in SERVICE_ACCOUNT_FIELDS)
+
+
+INCOMPLETE_KEY = (
+    "This service account file is missing the fields needed to sign a "
+    "token. Export the key again from the Google Cloud console, or point "
+    "this at a complete service-account JSON with the Monitoring Viewer role."
+)
+
+
 def _gemini_service_account_env() -> Credential | None:
     value, _ = env_first("GOOGLE_APPLICATION_CREDENTIALS")
     if not value or not Path(value).is_file():
         return None
     data = read_json(Path(value)) or {}
+    if not usable_service_account(data):
+        # The variable is set and the file is there, so saying nothing would
+        # read as "not configured" - the one thing the user knows is untrue.
+        return Credential(
+            kind=SERVICE_ACCOUNT,
+            value="",
+            account=data.get("client_email", ""),
+            usage_capable=False,
+            limited_reason=INCOMPLETE_KEY,
+        )
     return Credential(
         kind=SERVICE_ACCOUNT,
         value=value,
@@ -183,6 +225,26 @@ def _gemini_cli_login() -> Credential | None:
 
 
 def _gcloud_adc() -> Credential | None:
+    """A service account parked in gcloud's application-default location.
+
+    `gcloud auth application-default login` writes an `authorized_user`
+    credential, not a service account, and this app cannot use one: reading it
+    would mean refreshing somebody else's OAuth token, which the credential
+    policy forbids outright. That case used to return None and vanish, so a
+    user who had followed the documentation saw "Not connected" and no reason
+    why. It now comes back as Limited with the explanation attached, which is
+    what every other unusable-but-present login does.
+
+    Every location is looked at before anything is returned, and "found a
+    service account" is not the same question as "found one this app can
+    use". Returning the first file found meant a user login in the Windows
+    path hid a perfectly good service account in the POSIX one - one machine
+    reaching both is ordinary, between WSL and native tooling - and a key
+    missing its `private_key` did the same while also reporting Connected,
+    so the failure only appeared later, as a refresh error. Limited is the
+    answer only when there is nothing usable anywhere.
+    """
+    fallback: Credential | None = None
     for candidate in (
         home() / "AppData" / "Roaming" / "gcloud" / "application_default_credentials.json",
         home() / ".config" / "gcloud" / "application_default_credentials.json",
@@ -190,14 +252,34 @@ def _gcloud_adc() -> Credential | None:
         data = read_json(candidate)
         if not data:
             continue
-        if data.get("type") == "service_account":
+        if usable_service_account(data):
             return Credential(
                 kind=SERVICE_ACCOUNT,
                 value=str(candidate),
                 account=data.get("client_email", ""),
                 project=data.get("project_id", ""),
             )
-    return None
+        if fallback is None:
+            fallback = Credential(
+                kind=SERVICE_ACCOUNT,
+                value="",
+                account=(
+                    data.get("client_email", "")
+                    or data.get("account", "")
+                    or data.get("client_id", "")
+                ),
+                usage_capable=False,
+                limited_reason=(
+                    INCOMPLETE_KEY
+                    if data.get("type") == "service_account"
+                    else "This is a gcloud user login (application-default). "
+                    "Reading usage with it would mean refreshing another "
+                    "tool's OAuth token, which this app never does. Sign in "
+                    "with `gemini`, or point this at a service-account JSON "
+                    "with the Monitoring Viewer role."
+                ),
+            )
+    return fallback
 
 
 GEMINI_SOURCES = [

@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QPalette
 from PySide6.QtWidgets import (
     QDialog,
@@ -34,6 +34,17 @@ DOC_NAME = "README.md"
 # rather than guessing which kind of install this is.
 LICENCE_NAMES = ("LICENSE.txt", "LICENSE")
 NOTICES_NAME = "THIRD-PARTY-NOTICES.md"
+
+# The only relative links a bundled document is allowed to open, keyed by the
+# path as it is written in the Markdown. An allow-list rather than "resolve
+# whatever the document asks for": these files are read from disk beside the
+# executable, and a document should not be able to name an arbitrary path.
+SIBLING_DOCUMENTS = {
+    "readme.md": "readme",
+    "license": "licence",
+    "license.txt": "licence",
+    "third-party-notices.md": "notices",
+}
 
 
 def doc_path(*names: str) -> Path | None:
@@ -71,6 +82,12 @@ def readme_path() -> Path | None:
 
 class DocumentDialog(QDialog):
     """A scrollable, themed view of one bundled document."""
+
+    # Emitted when the reader clicks a link to another bundled document. The
+    # dialog does not open it itself: the window owns which documents exist
+    # and how they are titled, and a dialog spawning dialogs leaves a stack of
+    # windows nobody asked for.
+    sibling_requested = Signal(str)
 
     def __init__(
         self,
@@ -148,6 +165,16 @@ class DocumentDialog(QDialog):
         if url.scheme() in ("http", "https"):
             QDesktopServices.openUrl(url)
             return
+
+        # A link to another bundled document - the readme points at LICENSE
+        # and the third-party notices. Everything that was not an http URL
+        # used to be treated as an in-page anchor, so these were handed to
+        # `scrollToAnchor("LICENSE")` and did nothing at all.
+        target = SIBLING_DOCUMENTS.get(url.path().strip().lstrip("./").lower())
+        if target is not None:
+            self.sibling_requested.emit(target)
+            return
+
         # A "#section" link: let the browser jump within the document.
         fragment = url.fragment() or url.toString().lstrip("#")
         if fragment:

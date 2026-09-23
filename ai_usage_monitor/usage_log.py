@@ -49,6 +49,15 @@ class Counters:
     cache_write: int = 0
     cache_read: int = 0
     cost_usd: float = 0.0
+    # Tokens from models with no published price. They are counted here and
+    # left out of `cost_usd`, so the equivalent-value figure can say how much
+    # it does not know about instead of quietly adding zero for them.
+    unpriced_tokens: int = 0
+    # Tokens priced at their family's published rate because the model id
+    # itself has none. These *are* in `cost_usd`, but on a guess: Sonnet 5
+    # ships at $2/$10 where Sonnet 4.6 was $3/$15, so the family rate can be
+    # out by half. Counted so the caption can say which part is estimated.
+    estimated_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -70,6 +79,8 @@ class Counters:
         cache_write: int,
         cache_read: int,
         cost_usd: float,
+        unpriced_tokens: int = 0,
+        estimated_tokens: int = 0,
     ) -> None:
         self.messages += 1
         self.input_tokens += input_tokens
@@ -77,6 +88,8 @@ class Counters:
         self.cache_write += cache_write
         self.cache_read += cache_read
         self.cost_usd += cost_usd
+        self.unpriced_tokens += unpriced_tokens
+        self.estimated_tokens += estimated_tokens
 
     def merge(self, other: "Counters") -> None:
         self.messages += other.messages
@@ -85,6 +98,8 @@ class Counters:
         self.cache_write += other.cache_write
         self.cache_read += other.cache_read
         self.cost_usd += other.cost_usd
+        self.unpriced_tokens += other.unpriced_tokens
+        self.estimated_tokens += other.estimated_tokens
 
 
 # Metrics the charts can be drawn against.
@@ -323,12 +338,16 @@ class TranscriptStore:
         cwd = record.get("cwd")
         project = Path(cwd).name if isinstance(cwd, str) and cwd else fallback_project
 
+        kind = pricing.price_kind(model)
+        total = input_tokens + output_tokens + write_5m + write_1h + cache_read
         fields = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cache_write": write_5m + write_1h,
             "cache_read": cache_read,
             "cost_usd": cost,
+            "unpriced_tokens": total if kind == pricing.UNKNOWN else 0,
+            "estimated_tokens": total if kind == pricing.ESTIMATED else 0,
         }
         model_label = pricing.display_name(model)
         self.by_day_model.setdefault(day, {}).setdefault(
@@ -363,6 +382,28 @@ class TranscriptStore:
             for counters in self.by_day_model.get(day, {}).values():
                 totals.merge(counters)
         return totals
+
+    def estimated_in_range(self, days: int) -> list[str]:
+        """Models priced at a family rate inside this range, alphabetically."""
+        return self._models_in_range(days, "estimated_tokens")
+
+    def unpriced_in_range(self, days: int) -> list[str]:
+        """Models with unpriced tokens inside this range, alphabetically.
+
+        Derived from the same per-day counters `window_totals` sums, so the
+        names and the token figure always describe one range. Keeping a
+        lifetime set instead meant a caption could name a model that had not
+        contributed a single token to the range it was printed over.
+        """
+        return self._models_in_range(days, "unpriced_tokens")
+
+    def _models_in_range(self, days: int, field: str) -> list[str]:
+        names = set()
+        for day in self._days_in_range(days):
+            for model, counters in self.by_day_model.get(day, {}).items():
+                if getattr(counters, field):
+                    names.add(model)
+        return sorted(names)
 
     def daily(self, days: int, metric: str) -> tuple[list[DayBucket], list[str]]:
         """Per-day buckets plus the model order (largest contributor first).

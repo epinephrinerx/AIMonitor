@@ -63,7 +63,7 @@ class ClaudeProvider(Provider):
                 snapshot.unauthorized = True
             else:
                 try:
-                    usage = api.fetch_usage(creds)
+                    usage = api.fetch_usage(creds, self.cancel)
                     snapshot.meters = [_to_meter(limit) for limit in usage.limits]
                     snapshot.fetched_at = usage.fetched_at
                     if usage.spend and usage.spend.enabled:
@@ -80,7 +80,7 @@ class ClaudeProvider(Provider):
 
                 if self._account is None and snapshot.meters:
                     try:
-                        self._account = api.fetch_account(creds)
+                        self._account = api.fetch_account(creds, self.cancel)
                     except api.ApiError:
                         self._account = None
 
@@ -106,7 +106,7 @@ class ClaudeProvider(Provider):
                 Stat(
                     "Equivalent API value",
                     formatting.money(totals.cost_usd),
-                    "at API list price",
+                    self._value_caveat(totals, days),
                 ),
                 Stat(
                     "Served from cache",
@@ -117,6 +117,42 @@ class ClaudeProvider(Provider):
             ] + snapshot.stats
 
         return snapshot
+
+    def _value_caveat(self, totals: usage_log.Counters, days: int) -> str:
+        """What the equivalent-value figure is, and what it left out.
+
+        Two different kinds of doubt, and they are not interchangeable. An
+        unpriced model contributes *nothing*, because every rate in the
+        fallback is zero, so the figure is quietly short. A model priced
+        through its family contributes something, but on a guess that has
+        already been wrong by half - Sonnet 5 lists at $2/$10 where Sonnet 4.6
+        listed at $3/$15. Saying only "at API list price" over either is the
+        kind of number that gets quoted. The price table does not have to know
+        every model; it has to admit which part it does not.
+        """
+        clauses = []
+        if totals.unpriced_tokens:
+            clauses.append(
+                f"excludes {formatting.compact(totals.unpriced_tokens)} tokens "
+                f"from {self._which(self._store.unpriced_in_range(days))}, "
+                f"which have no published price"
+            )
+        if totals.estimated_tokens:
+            clauses.append(
+                f"estimates {formatting.compact(totals.estimated_tokens)} tokens "
+                f"from {self._which(self._store.estimated_in_range(days))} at "
+                f"their family's rate"
+            )
+        if not clauses:
+            return "at API list price"
+        return "at API list price · " + " · ".join(clauses)
+
+    @staticmethod
+    def _which(names: list[str]) -> str:
+        """Name them while a caption can carry them; count them past that."""
+        if len(names) <= 2:
+            return ", ".join(names)
+        return f"{len(names)} models"
 
     def _history_note(self) -> str | None:
         """What went wrong reading the transcripts, if anything did.

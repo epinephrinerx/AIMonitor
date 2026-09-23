@@ -15,8 +15,10 @@ machinery.
 
 from __future__ import annotations
 
+import json
 import threading
 import unittest
+import urllib.request
 from unittest.mock import Mock, patch
 
 from ai_usage_monitor import codex_usage
@@ -314,3 +316,328 @@ class WindowQueueTests(unittest.TestCase):
         report = self.window._build_report()
         self.assertEqual(report.days, 14)
         self.assertEqual(report.metric, "Total tokens")
+
+
+class EveryPathIsCancellableTests(unittest.TestCase):
+    """Cancellation reached Codex and Gemini, but not Claude or Admin API.
+
+    The worker set the event and parked an overrunning thread, so a QThread
+    was never destroyed while running - but the two paths that never looked at
+    the event carried on. Admin API can start four requests in a row at 15
+    seconds each, and Claude does usage then profile. Closing the window left
+    them running to completion.
+    """
+
+    def test_claude_stops_before_the_next_request(self):
+        from ai_usage_monitor import api
+        from ai_usage_monitor.providers.claude_provider import ClaudeProvider
+
+        provider = ClaudeProvider()
+        provider.cancel = threading.Event()
+        provider.cancel.set()
+
+        with self.assertRaises(api.ApiError) as caught:
+            api._get("/v1/anything", "token", provider.cancel)
+        self.assertIn("cancelled", str(caught.exception).lower())
+
+    def test_claude_hands_the_event_to_both_of_its_endpoints(self):
+        """A check the provider does not perform is a check that is not there.
+
+        Asserts it found both calls first. Without that, deleting or renaming
+        them would turn this into an assertion about an empty loop.
+        """
+        import ast
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "ai_usage_monitor"
+            / "providers"
+            / "claude_provider.py"
+        ).read_text(encoding="utf-8")
+        seen = set()
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", "")
+            if name not in ("fetch_usage", "fetch_account"):
+                continue
+            seen.add(name)
+            # The event itself, not a word that happens to contain "cancel":
+            # every argument is checked for the attribute being passed.
+            passes_event = any(
+                isinstance(arg, ast.Attribute) and arg.attr == "cancel"
+                for arg in list(node.args) + [kw.value for kw in node.keywords]
+            )
+            self.assertTrue(
+                passes_event,
+                f"line {node.lineno}: {ast.unparse(node)} does not pass "
+                "self.cancel to the API helper",
+            )
+        self.assertEqual(
+            seen,
+            {"fetch_usage", "fetch_account"},
+            "both Claude endpoints should be called from the provider; "
+            f"found {sorted(seen)}",
+        )
+
+    def test_the_admin_api_stops_before_the_next_of_its_four_requests(self):
+        from ai_usage_monitor.providers import openai_provider as module
+
+        provider = module.OpenAIProvider()
+        provider.configure("sk-admin-test", "")
+        provider.cancel = threading.Event()
+        provider.cancel.set()
+
+        with self.assertRaises(module._OpenAIError) as caught:
+            provider._get("/v1/organization/costs", {})
+        self.assertIn("cancelled", str(caught.exception).lower())
+
+    def test_an_uncancelled_request_is_not_blocked(self):
+        """The guard must only fire when the event is actually set."""
+        from ai_usage_monitor.providers import openai_provider as module
+
+        provider = module.OpenAIProvider()
+        provider.configure("sk-admin-test", "")
+        provider.cancel = threading.Event()   # created, never set
+        with patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = b"{}"
+            self.assertEqual(provider._get("/v1/organization/costs", {}), {})
+
+    def test_gemini_stops_before_the_next_monitoring_request(self):
+        """The third choke point, checked directly like the other two."""
+        import datetime as dt
+
+        from ai_usage_monitor.providers import gemini_provider as module
+
+        provider = module.GeminiProvider()
+        provider.cancel = threading.Event()
+        provider.cancel.set()
+
+        now = dt.datetime.now(dt.timezone.utc)
+        with self.assertRaises(module._GeminiError) as caught:
+            provider._query("token", "project", now, now, 86_400)
+        self.assertIn("cancelled", str(caught.exception).lower())
+
+    def test_a_cancelled_refresh_makes_no_second_request(self):
+        """Each provider driven through its real fetch, with no login needed.
+
+        The first version of this built providers from the environment and
+        only asserted that `urlopen` was never called. On a machine signed in
+        to nothing every provider returns before the network anyway, so
+        deleting the guards outright would have left it green.
+
+        The transport is what gets faked here, not the request helpers: the
+        cancellation guards live inside `api._get`, `OpenAIProvider._get` and
+        `GeminiProvider._query`, so patching those would step over the very
+        thing under test. An earlier draft did exactly that and reported four
+        Admin API requests where it should have seen one.
+        """
+        from ai_usage_monitor import api
+        from ai_usage_monitor.providers.claude_provider import ClaudeProvider
+        from ai_usage_monitor.providers import (
+            gemini_provider,
+            openai_provider,
+            sources,
+        )
+
+        def transport(cancel, seen, payload=b"{}"):
+            """Answer the first request, then declare the refresh cancelled.
+
+            `cancel` may be None, which is the control: the same fetch with
+            nobody cancelling it, used to show that the request the guard is
+            meant to stop is a request that would otherwise be made.
+            """
+
+            def urlopen(request, *args, **kwargs):
+                seen.append(getattr(request, "full_url", str(request)))
+                if cancel is not None:
+                    cancel.set()
+                body = Mock()
+                body.read.return_value = payload
+                handle = Mock()
+                handle.__enter__ = Mock(return_value=body)
+                handle.__exit__ = Mock(return_value=False)
+                return handle
+
+            return urlopen
+
+        # Claude asks for the quota, then for the profile - but only if the
+        # quota reply contained limits. Review caught the first version of
+        # this answering `{}`: with no limits there are no meters, the profile
+        # branch is never entered, and the test passed because the second
+        # request was unreachable rather than because it was stopped. The
+        # payload below is the smallest one that makes it reachable.
+        quota = json.dumps(
+            {"limits": [{"kind": "session", "percent": 12, "is_active": True}]}
+        ).encode()
+
+        def claude_fetch(cancel, seen):
+            provider = ClaudeProvider()
+            provider.cancel = cancel or threading.Event()
+            creds = Mock(expired=False, access_token="t")
+            with (
+                patch("urllib.request.urlopen", transport(cancel, seen, quota)),
+                patch("ai_usage_monitor.credentials.load", return_value=creds),
+            ):
+                return provider.fetch(14, "Total tokens", False)
+
+        with self.subTest(provider="claude-control"):
+            # Nobody cancels: both endpoints are asked, which is what makes
+            # the assertion below mean something.
+            seen = []
+            snapshot = claude_fetch(None, seen)
+            self.assertTrue(snapshot.meters, "the quota reply produced no meters")
+            self.assertEqual(
+                len(seen), 2, f"the profile request is not reachable: {seen}"
+            )
+
+        with self.subTest(provider="claude"):
+            cancel, seen = threading.Event(), []
+            claude_fetch(cancel, seen)
+            self.assertEqual(len(seen), 1, f"Claude kept going: {seen}")
+
+        with self.subTest(provider="openai-admin"):
+            cancel, seen = threading.Event(), []
+            admin = openai_provider.OpenAIProvider()
+            admin.configure("sk-admin-test", "")
+            admin.cancel = cancel
+            with (
+                patch.object(sources, "read_json", return_value=None),
+                patch("urllib.request.urlopen", transport(cancel, seen)),
+            ):
+                admin.fetch(14, "Total tokens", True)
+            self.assertEqual(len(seen), 1, f"the Admin API kept going: {seen}")
+
+        with self.subTest(provider="gemini"):
+            cancel, seen = threading.Event(), []
+            gemini = gemini_provider.GeminiProvider()
+            gemini.cancel = cancel
+            detected = Mock(
+                usable=True,
+                state="connected",
+                account="a",
+                credential=Mock(project="p", account="a"),
+                hint="",
+            )
+            with (
+                patch.object(gemini, "detect", return_value=detected),
+                patch.object(gemini, "_bearer", return_value="token"),
+                patch("urllib.request.urlopen", transport(cancel, seen)),
+            ):
+                gemini.fetch(14, "Total tokens", True)
+            self.assertEqual(len(seen), 1, f"Gemini kept querying: {seen}")
+
+        # Gemini can make three requests, not one: a token exchange, a project
+        # lookup, and only then the Monitoring query. Review found the guard
+        # sat on the last of them, so a refresh cancelled during the token
+        # request still went on to ask Cloud Resource Manager - each with its
+        # own 20-second timeout. The subtest above mocks `_bearer` and hands
+        # over a project, so it never reaches either. This one does.
+        with self.subTest(provider="gemini-two-step"):
+            cancel, seen = threading.Event(), []
+            gemini = gemini_provider.GeminiProvider()
+            gemini.cancel = cancel
+            detected = Mock(
+                usable=True,
+                state="connected",
+                account="a",
+                credential=Mock(project="", account="a"),   # nothing to skip to
+                hint="",
+            )
+            # The lookup has to *succeed*, or `fetch` gives up on its own and
+            # the count is 1 whether or not anything was cancelled - which is
+            # what the first draft of this did. Only the contract test below
+            # caught it, and a behavioural test that cannot fail is worse than
+            # no behavioural test, because it reads like cover.
+            projects = json.dumps({"projects": [{"projectId": "p"}]}).encode()
+            with (
+                patch.object(gemini, "detect", return_value=detected),
+                patch.object(gemini, "_bearer", return_value="token"),
+                patch("urllib.request.urlopen", transport(cancel, seen, projects)),
+            ):
+                gemini.fetch(14, "Total tokens", True)
+            self.assertEqual(
+                len(seen), 1, f"Gemini went on to the next endpoint: {seen}"
+            )
+            self.assertIn(
+                "cloudresourcemanager",
+                seen[0],
+                "the one request made was not the project lookup",
+            )
+
+        with self.subTest(provider="gemini-already-cancelled"):
+            # The shape that actually happens: the window is closed, so the
+            # event is set before the provider is even reached. Nothing should
+            # go out at all. With the guard on the Monitoring call alone, the
+            # project lookup went out anyway - a request nobody is waiting for,
+            # holding a 20-second timeout open after the window is gone.
+            cancel, seen = threading.Event(), []
+            cancel.set()
+            gemini = gemini_provider.GeminiProvider()
+            gemini.cancel = cancel
+            detected = Mock(
+                usable=True,
+                state="connected",
+                account="a",
+                credential=Mock(project="", account="a"),
+                hint="",
+            )
+            with (
+                patch.object(gemini, "detect", return_value=detected),
+                patch.object(gemini, "_bearer", return_value="token"),
+                patch("urllib.request.urlopen", transport(None, seen)),
+            ):
+                gemini.fetch(14, "Total tokens", True)
+            self.assertEqual(
+                seen, [], f"a cancelled refresh still reached the network: {seen}"
+            )
+
+        # `api` is imported for the guard it holds; referencing it keeps the
+        # import honest rather than decorative.
+        self.assertTrue(hasattr(api, "_get"))
+
+    def test_the_gemini_choke_point_refuses_before_opening_a_socket(self):
+        from ai_usage_monitor.providers import gemini_provider
+
+        gemini = gemini_provider.GeminiProvider()
+        gemini.cancel = threading.Event()
+        gemini.cancel.set()
+        request = urllib.request.Request("https://example.invalid/")
+        with patch("urllib.request.urlopen") as opened:
+            with self.assertRaises(gemini_provider._GeminiError) as caught:
+                gemini._request(request, "example.invalid")
+        opened.assert_not_called()
+        self.assertIn("cancelled", str(caught.exception).lower())
+
+    def test_every_gemini_request_goes_through_the_choke_point(self):
+        """A new endpoint must not be able to slip past the check.
+
+        Three call sites each carried their own guard, or did not; that is
+        how two of them ended up without one. The rule is now structural:
+        `_send` is the transport and only `_request` may call it.
+        """
+        import ast
+        import inspect
+
+        from ai_usage_monitor.providers import gemini_provider
+
+        tree = ast.parse(inspect.getsource(gemini_provider))
+        callers = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for call in ast.walk(node):
+                if (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "_send"
+                ):
+                    callers.append(node.name)
+
+        self.assertTrue(callers, "no call to _send found - has it been renamed?")
+        self.assertEqual(
+            sorted(set(callers)),
+            ["_request"],
+            f"these reach the network without a cancellation check: {callers}",
+        )

@@ -145,7 +145,16 @@ def _parse_timestamp(value: object) -> dt.datetime | None:
     return parsed.astimezone(dt.timezone.utc)
 
 
-def _get(path: str, token: str) -> dict:
+def _get(path: str, token: str, cancel=None) -> dict:
+    """One request. `cancel` is a `threading.Event` the caller may hand in.
+
+    Checked here rather than at the two call sites so a third endpoint added
+    later is covered without anyone having to remember. Only stops the *next*
+    request from starting - a socket already waiting is left to its timeout,
+    which is the same bargain the other two providers make.
+    """
+    if cancel is not None and cancel.is_set():
+        raise ApiError("Refresh cancelled.")
     request = urllib.request.Request(
         BASE_URL + path,
         method="GET",
@@ -306,8 +315,8 @@ def _spend_from_payload(payload: dict) -> Spend | None:
     )
 
 
-def fetch_usage(creds: credentials.Credentials) -> UsageSnapshot:
-    payload = _get(USAGE_PATH, creds.access_token)
+def fetch_usage(creds: credentials.Credentials, cancel=None) -> UsageSnapshot:
+    payload = _get(USAGE_PATH, creds.access_token, cancel)
     return UsageSnapshot(
         limits=_limits_from_payload(payload),
         spend=_spend_from_payload(payload),
@@ -316,8 +325,8 @@ def fetch_usage(creds: credentials.Credentials) -> UsageSnapshot:
     )
 
 
-def fetch_account(creds: credentials.Credentials) -> Account:
-    payload = _get(PROFILE_PATH, creds.access_token)
+def fetch_account(creds: credentials.Credentials, cancel=None) -> Account:
+    payload = _get(PROFILE_PATH, creds.access_token, cancel)
     account = payload.get("account") or {}
     org = payload.get("organization") or {}
     plan = org.get("organization_type") or creds.subscription_type

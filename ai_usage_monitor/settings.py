@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
+import re
 
 from PySide6.QtCore import QSettings
 
@@ -47,16 +49,15 @@ WIDGET_MAX_EDGE = 300  # the widget must fit inside 300x300
 # smallest that still reads at a glance.
 WIDGET_MIN_W = 150
 WIDGET_MIN_H = 96
-WIDGET_TRIGGER_EDGE = 380  # shrinking past this switches modes
 
 # A sane dashboard size: used to validate stored geometry and as the floor when
 # fitting to a screen. NOT the window's minimum - see below.
 DASHBOARD_MIN_W = 760
 DASHBOARD_MIN_H = 560
 
-# The actual minimum the user can drag to. It has to sit BELOW
-# WIDGET_TRIGGER_EDGE, or the window can never be dragged small enough to
-# collapse into the widget and that gesture silently stops working.
+# The actual minimum the user can drag to, and the floor a stored dashboard
+# rect has to clear to be believed. Resizing no longer changes modes, so this
+# is just a size: anything at or above it is a size someone chose.
 DASHBOARD_DRAG_MIN_W = 300
 DASHBOARD_DRAG_MIN_H = 220
 
@@ -69,6 +70,41 @@ WINDOW_SIZE_OPTIONS = [
     ("Remember last size", (0, 0)),
 ]
 DEFAULT_WINDOW_SIZE = (1120, 820)
+
+# How many display layouts keep a remembered window position. Enough for a
+# laptop, the same laptop docked, a second desk and a projector, with room to
+# spare; past that the oldest are forgotten rather than kept forever.
+RETAINED_LAYOUTS = 8
+
+# Exactly what `MainWindow._display_signature` produces: "d" and ten hex
+# digits of a SHA-1. Nothing else under `geometry/` is a display layout, and
+# nothing else may be deleted as though it were one.
+LAYOUT_ID = re.compile(r"d[0-9a-f]{10}")
+
+
+def _now_stamp() -> str:
+    """Sortable, and readable by anyone who opens the settings tree.
+
+    UTC, not local time. Local time is not monotonic: it steps backwards an
+    hour at a DST fall-back and jumps when the machine changes zone, either
+    of which would make a layout used minutes ago sort as the oldest and be
+    the one deleted. Microseconds because two layouts saved inside the same
+    second would otherwise compare equal and the tie would decide which
+    survived.
+
+    The trailing `Z` is what makes the value self-describing. Without it a
+    stamp written in local time is indistinguishable from one written in UTC,
+    and the two sort together as though they meant the same thing - an hour
+    of local offset reading as an hour of age. `_stamp_is_utc` is the other
+    half of that: anything unmarked is treated as predating this rule rather
+    than silently trusted.
+    """
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _stamp_is_utc(stamp: str) -> bool:
+    return stamp.endswith("Z")
+
 
 THEME_OPTIONS = [
     ("Follow Windows · default", "system"),
@@ -270,6 +306,63 @@ class Settings:
         self._q.setValue(f"geometry/{name}", value)
         if display:
             self._q.setValue(f"geometry/{display}/{name}", value)
+            self._q.setValue(f"geometry/{display}/usedAt", _now_stamp())
+            self._forget_stale_layouts()
+
+    def _forget_stale_layouts(self) -> None:
+        """Keep the most recently used layouts and drop the rest.
+
+        Every monitor arrangement the machine has ever been in leaves a
+        subkey behind - a laptop panel, the same laptop docked, a meeting
+        room projector - and nothing ever removed one. It is only a few
+        hundred bytes each, so this is tidiness rather than a leak, but the
+        settings tree is something a person may go and look at.
+
+        This routine deletes from the user's settings, so it is deliberately
+        narrow about what it is willing to touch:
+
+        * only ids matching `LAYOUT_ID`, the exact shape
+          `MainWindow._display_signature` produces. A hand-written key, a key
+          from an older build, or one a later feature puts under `geometry/`
+          is not this function's to remove.
+        * never an empty id. `geometry/usedAt` would otherwise slice down to
+          `""` and turn into `remove("geometry/")`, which QSettings reads as
+          the whole group - every remembered rect, gone.
+        * never the unscoped rect, which is the fallback for an arrangement
+          that has not been seen before.
+        """
+        stamps: list[tuple[tuple[int, str], str, str]] = []
+        for key in self._q.allKeys():
+            if not key.startswith("geometry/") or not key.endswith("/usedAt"):
+                continue
+            layout = key[len("geometry/"):-len("/usedAt")]
+            if not LAYOUT_ID.fullmatch(layout):
+                continue
+            stamp = str(self._q.value(key, ""))
+            # Unmarked stamps were written before this became UTC, in whatever
+            # zone the machine was in, so their ordering against a UTC stamp
+            # means nothing: on UTC+7 a local 10:00 outranks a UTC 03:30 that
+            # is half an hour *newer*. Rank them all behind the marked ones
+            # instead of guessing. They are the first to go, the layout being
+            # saved right now always carries a marked stamp so it is never the
+            # victim, and after eight saves none are left.
+            rank = 1 if _stamp_is_utc(stamp) else 0
+            stamps.append(((rank, stamp), stamp, layout))
+        if len(stamps) <= RETAINED_LAYOUTS:
+            return
+        stamps.sort(reverse=True)  # newest first, unmarked last
+        for _, stamp, layout in stamps[RETAINED_LAYOUTS:]:
+            if not LAYOUT_ID.fullmatch(layout):   # belt and braces before a delete
+                continue
+            # Read the timestamp again rather than trusting the snapshot the
+            # sort was built from. Between the two, another copy of the app -
+            # a second signed-in user, or one that started while the guard was
+            # briefly down - may have used this very layout, and deleting a
+            # layout somebody is sitting at is exactly what "least recently
+            # used" is supposed to prevent.
+            if str(self._q.value(f"geometry/{layout}/usedAt", "")) != stamp:
+                continue
+            self._q.remove(f"geometry/{layout}")
 
     def load_geometry(self, name: str, display: str = ""):
         """Prefer the rect saved for this exact display layout.

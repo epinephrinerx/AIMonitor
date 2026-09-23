@@ -185,10 +185,15 @@ class OpenAIProvider(Provider):
         )
 
         if want_history:
+            # The two meters above are already read and real. A failure
+            # fetching the range behind them is a gap in the page, not the
+            # service having failed - the same separation the Codex path
+            # makes below, which this path was missed out of when
+            # `history_error` was introduced.
             try:
                 snapshot.history, totals = self._history(days, metric)
             except _OpenAIError as exc:
-                snapshot.error = str(exc)
+                snapshot.history_error = str(exc)
                 return snapshot
             snapshot.stats = [
                 Stat("Spend in range", formatting.money(totals["cost"])),
@@ -237,6 +242,12 @@ class OpenAIProvider(Provider):
     # -- endpoints --------------------------------------------------------
 
     def _get(self, path: str, params: dict) -> dict:
+        # Every Admin API request funnels through here, so one check stops a
+        # cancelled refresh before the next of the four - month cost, today
+        # cost, usage history, cost history - each of which would otherwise
+        # sit out its own 15-second timeout after the window had closed.
+        if self.cancelled():
+            raise _OpenAIError("Refresh cancelled.")
         query = urllib.parse.urlencode(params, doseq=True)
         request = urllib.request.Request(
             f"{BASE_URL}{path}?{query}",

@@ -10,7 +10,9 @@ a success.
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
+import pathlib
 import unittest
 from unittest.mock import Mock, patch
 
@@ -154,35 +156,160 @@ class ReportTests(unittest.TestCase):
 
 
 class NoHistoryErrorInTheBannerTests(unittest.TestCase):
-    """The rule, checked in the source: providers must not conflate the two."""
+    """The rule, checked in the source: providers must not conflate the two.
 
-    def test_codex_history_error_is_not_assigned_to_error(self):
-        import ast
-        import pathlib
+    The first version of this test looked for one exact shape - assigning a
+    variable literally named `history_error` to `snapshot.error` - and passed
+    while the Admin API path did `snapshot.error = str(exc)` in the handler
+    around its history call. A contract test that only recognises the mistake
+    it was written from is not a contract test. This one asks the question
+    that matters: does any handler wrapped around a history fetch report the
+    whole service as failed?
+    """
 
-        source = (
-            pathlib.Path(__file__).resolve().parent.parent
-            / "ai_usage_monitor"
-            / "providers"
-            / "openai_provider.py"
-        ).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            targets = [
-                t.attr for t in node.targets if isinstance(t, ast.Attribute)
-            ]
-            if "error" not in targets:
-                continue
-            if isinstance(node.value, ast.Name):
-                self.assertNotEqual(
-                    node.value.id,
-                    "history_error",
-                    f"line {node.lineno}: a history failure assigned to "
-                    "snapshot.error marks the whole service failed",
+    PROVIDERS = ("claude_provider.py", "openai_provider.py", "gemini_provider.py")
+
+    @staticmethod
+    def _calls(node) -> list[str]:
+        names = []
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call):
+                func = inner.func
+                name = getattr(func, "attr", None) or getattr(func, "id", "")
+                if name:
+                    names.append(str(name))
+        return names
+
+    @classmethod
+    def _history_only(cls, body: list) -> bool:
+        """Is the history fetch the only thing in here that can fail?
+
+        The distinction matters. Codex reads quota and history inside one
+        call, so a failure there really is the whole service failing and its
+        handler is right to set `error`. A block whose only risky operation is
+        the history fetch has no such excuse.
+        """
+        names = [name for stmt in body for name in cls._calls(stmt)]
+        if not names:
+            return False
+        return all("history" in name.lower() for name in names)
+
+    @staticmethod
+    def _assigns_error(handler) -> int | None:
+        for inner in ast.walk(handler):
+            if isinstance(inner, ast.Assign):
+                for target in inner.targets:
+                    if isinstance(target, ast.Attribute) and target.attr == "error":
+                        return inner.lineno
+        return None
+
+    def test_no_handler_whose_only_risk_is_history_sets_error(self):
+        root = pathlib.Path(__file__).resolve().parent.parent / "ai_usage_monitor"
+        examined = 0
+        for name in self.PROVIDERS:
+            path = root / "providers" / name
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Try):
+                    continue
+                if not self._history_only(node.body):
+                    continue
+                examined += 1
+                for handler in node.handlers:
+                    line = self._assigns_error(handler)
+                    self.assertIsNone(
+                        line,
+                        f"{name}:{line}: a handler around a history fetch sets "
+                        "snapshot.error, which marks the whole service failed "
+                        "and puts a banner over live gauges. Use history_error.",
+                    )
+        # Without this the test passes on a codebase where the shape it looks
+        # for no longer exists - a rename of `_history` would silently turn it
+        # into an assertion about nothing.
+        self.assertGreater(
+            examined,
+            0,
+            "no history-only try block was found in any provider; this test "
+            "matches on the call name, so a rename has made it vacuous",
+        )
+
+    def test_every_provider_assigns_history_error_somewhere(self):
+        """Not a substring search: an actual assignment to the attribute.
+
+        The first version looked for the word anywhere in the file, which a
+        comment or a docstring would have satisfied.
+        """
+        root = pathlib.Path(__file__).resolve().parent.parent / "ai_usage_monitor"
+        for name in self.PROVIDERS:
+            tree = ast.parse((root / "providers" / name).read_text(encoding="utf-8"))
+            assigned = any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "history_error"
+                    for target in node.targets
                 )
+                for node in ast.walk(tree)
+            )
+            self.assertTrue(
+                assigned,
+                f"{name} never assigns snapshot.history_error, so a history "
+                "problem there has nowhere to go but the error banner",
+            )
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdminApiHistoryTests(unittest.TestCase):
+    """The OpenAI path that was missed when `history_error` was introduced.
+
+    Month-to-date and today's spend are read from two requests that have
+    already returned by the time the range is fetched. A failure there used to
+    be written to `snapshot.error`, which put a banner over both of them and
+    stopped the refresh counting as a success.
+    """
+
+    def _provider(self):
+        from ai_usage_monitor.providers.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider()
+        provider.configure("sk-admin-test", "")
+        return provider
+
+    def _fetch_with_failing_history(self, provider):
+        from ai_usage_monitor.providers import openai_provider as module
+        from ai_usage_monitor.providers import sources
+
+        with (
+            patch.object(sources, "read_json", return_value=None),
+            patch.object(provider, "_total_cost", side_effect=[20.0, 3.0]),
+            patch.object(
+                provider,
+                "_history",
+                side_effect=module._OpenAIError("Usage history unavailable"),
+            ),
+        ):
+            return provider.fetch(14, "Total tokens", True)
+
+    def test_live_spend_survives_a_failed_history(self):
+        snapshot = self._fetch_with_failing_history(self._provider())
+        self.assertEqual(snapshot.history_error, "Usage history unavailable")
+        self.assertIsNone(snapshot.error)
+        self.assertTrue(snapshot.ok, "a refresh with live spend is a success")
+
+    def test_both_spend_meters_are_still_there(self):
+        snapshot = self._fetch_with_failing_history(self._provider())
+        titles = [meter.title for meter in snapshot.meters]
+        self.assertIn("Month to date", titles)
+        self.assertIn("Today", titles)
+
+    def test_a_budget_meter_keeps_its_percentage(self):
+        provider = self._provider()
+        provider.configure("sk-admin-test", "100")
+        snapshot = self._fetch_with_failing_history(provider)
+        lead = snapshot.meters[0]
+        self.assertEqual(lead.key, "month_budget")
+        self.assertEqual(lead.percent, 20.0)
+        self.assertIsNone(snapshot.error)
