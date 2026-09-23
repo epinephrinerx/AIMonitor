@@ -211,3 +211,61 @@ class CheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheNameTheAppGoesByTests(unittest.TestCase):
+    """Windows shows `FileDescription` as the process name in Task Manager.
+
+    That resource still said "Claude Usage Monitor" three releases after the
+    rename, so the application announced itself to the operating system by a
+    name it had abandoned everywhere else - in Task Manager, on the Details
+    tab, and in the tooltip of its own taskbar button. Nothing in the code or
+    the installer said it, and nothing was checking.
+    """
+
+    def version_resource(self):
+        return (ROOT / "version_info.txt").read_text(encoding="utf-8")
+
+    def test_the_version_resource_names_this_application(self):
+        from ai_usage_monitor import APP_NAME
+
+        text = self.version_resource()
+        for field in ("FileDescription", "ProductName"):
+            match = re.search(rf"StringStruct\('{field}', '([^']+)'\)", text)
+            self.assertIsNotNone(match, f"{field} missing from version_info.txt")
+            self.assertEqual(match.group(1), APP_NAME)
+
+    def test_the_installer_agrees(self):
+        from ai_usage_monitor import APP_NAME
+
+        text = (ROOT / "installer" / "AIUsageMonitor.iss").read_text(
+            encoding="utf-8"
+        )
+        match = re.search(r'#define AppName\s+"([^"]+)"', text)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), APP_NAME)
+
+    def test_the_old_name_is_gone_from_everything_shipped(self):
+        """Except where it is deliberately named as history.
+
+        `settings.py` and `secrets.py` still know the old identifiers, because
+        they have to read what an older build wrote. Those are the only two.
+        """
+        allowed = {
+            ROOT / "ai_usage_monitor" / "settings.py",
+            ROOT / "ai_usage_monitor" / "secrets.py",
+            ROOT / "installer" / "AIUsageMonitor.iss",
+            ROOT / "GUIDELINES.md",
+            ROOT / "README.md",
+        }
+        offenders = []
+        for path in list(ROOT.glob("*.txt")) + list(ROOT.glob("*.spec")) + list(
+            (ROOT / "ai_usage_monitor").rglob("*.py")
+        ):
+            if path in allowed:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "Claude Usage Monitor" in text or "ClaudeUsageMonitor" in text:
+                offenders.append(str(path.relative_to(ROOT)))
+        self.assertEqual(offenders, [], "the pre-rename name is back")
+

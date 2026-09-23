@@ -117,6 +117,157 @@ THEME_OPTIONS = [
 SCOPE_ENV_VAR = "AI_USAGE_MONITOR_SETTINGS_SCOPE"
 
 
+
+def _own_scope(org: str, app: str) -> QSettings:
+    r"""A view of exactly one application's own settings, and nothing else.
+
+    `QSettings` consults fallbacks by default: an organisation-wide default
+    under `HKCU\Software\<org>\OrganizationDefaults`, and the system scope.
+    `value()` answers from those, and `allKeys()` even lists their names, so
+    asking a plain `QSettings` "do you already have this key?" does not ask
+    about its own storage at all.
+
+    That is not a hypothetical. Measured: with an organisation default in
+    place, a brand-new application key reports `value("theme")` as
+    `'from-org-defaults'` rather than `None`. Migration would read that as
+    "already carried over", skip the copy, and then the cleanup below would
+    delete the only real copy the user had. Every decision about what has
+    been migrated is made through this.
+    """
+    store = QSettings(org, app)
+    store.setFallbacksEnabled(False)
+    return store
+
+
+def _prune_empty_registry_keys(org: str, app: str) -> bool:
+    r"""Remove `HKCU\Software\<org>\<app>`, then the organisation key if it
+    is left holding nothing. True when the organisation key is gone.
+
+    `QSettings.clear()` empties a key and leaves it, so the old name stays
+    visible in the registry editor - which is the whole complaint.
+
+    Two rules, and the second one was learned the hard way:
+
+    * only keys with no values and no subkeys are deleted. `DeleteKey`
+      refuses when subkeys remain but will happily delete a key that still
+      holds values, which is not the guarantee this needs - a test caught an
+      earlier version doing exactly that.
+    * the recursive walk stays inside `<app>`. The organisation key is
+      examined, never descended into. An earlier version pruned from the
+      leaves of the organisation and so deleted an **empty sibling
+      application** that had nothing to do with this one; measured, and
+      nothing had asked for it.
+
+    There is a window between reading a key and deleting it in which another
+    process could write a value, and Windows offers no way to hold a registry
+    key against that. It is narrow, and the alternative is leaving the key
+    forever.
+    """
+    if not _is_safe_key_name(org) or not _is_safe_key_name(app):
+        return False
+    try:
+        import winreg
+    except ImportError:  # not Windows; QSettings used a file we do not own
+        return False
+
+    def empty_and_delete(path: str) -> bool:
+        """Delete `path` if it holds nothing. True when it is gone."""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+                subkeys, values, _ = winreg.QueryInfoKey(key)
+            if subkeys or values:
+                return False
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
+    def prune_subtree(path: str) -> bool:
+        """Children first, then the key itself. Confined to one subtree."""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+                count, _, _ = winreg.QueryInfoKey(key)
+                children = [winreg.EnumKey(key, i) for i in range(count)]
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        for child in children:
+            prune_subtree(f"{path}\\{child}")
+        return empty_and_delete(path)
+
+    if not prune_subtree(rf"Software\{org}\{app}"):
+        return False
+    # The organisation key is only removed when nothing else lives under it,
+    # and its other tenants are left exactly as they are.
+    return empty_and_delete(rf"Software\{org}")
+
+
+def _delete_registry_value(org: str, app: str, key: str, expected=None) -> bool:
+    r"""Delete one value, named by a QSettings-style `group/name` path.
+
+    Not `QSettings.remove()`: that removes the key **and every setting
+    beneath it**, so removing a `geometry/dashboard` that was checked would
+    also take a `geometry/dashboard/...` that arrived afterwards and never
+    was. Measured. This removes exactly the one value it is given.
+
+    `expected` is re-read and compared under the same open handle, so the
+    gap between deciding a value is a spent duplicate and removing it is as
+    small as this can be made. It cannot be closed: Windows offers no way to
+    hold a registry key against another writer, so there is no atomic
+    compare-and-delete. What is left is a window of microseconds, and a
+    writer that would have to be a build retired several releases ago.
+    """
+    if not _is_safe_key_name(org) or not _is_safe_key_name(app):
+        return False
+    try:
+        import winreg
+    except ImportError:
+        return False
+    *groups, name = key.split("/")
+    if not name or any(not _is_safe_key_name(part) for part in groups):
+        return False
+    # Qt's Windows backend spells the default unnamed value as `Default` or
+    # `.`, and hands those names back from `allKeys()`. Deleting a value
+    # literally called "Default" would miss it, the key would still hold
+    # something, and the tidy-up would never finish.
+    if name in ("Default", "."):
+        name = ""
+    path = "\\".join([rf"Software\{org}\{app}", *groups])
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            path,
+            0,
+            winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE,
+        ) as handle:
+            if expected is not None:
+                try:
+                    current, _ = winreg.QueryValueEx(handle, name)
+                except FileNotFoundError:
+                    return True  # already gone
+                if str(current) != str(expected):
+                    return False  # rewritten since it was checked
+            winreg.DeleteValue(handle, name)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _is_safe_key_name(name: str) -> bool:
+    """One registry key name, not a path and not nothing.
+
+    The function above builds a path by interpolation, so a name carrying a
+    separator would move which key gets examined and deleted. Production only
+    ever passes a module constant, but a generic signature invites reuse.
+    """
+    return bool(name) and not any(c in name for c in "\\/")
+
+
 class Settings:
     def __init__(self) -> None:
         scope = os.environ.get(SCOPE_ENV_VAR, "").strip()
@@ -125,20 +276,90 @@ class Settings:
             self._migrate_from_legacy()
 
     def _migrate_from_legacy(self) -> None:
-        """Carry settings over from the pre-rename location, once.
+        """Carry settings over from the pre-rename location, then remove it.
 
         Copies every key rather than a hand-listed subset, so sealed provider
         keys come across too; `secrets.unseal` still reads them because it
-        falls back to the old DPAPI entropy. The old location is left intact -
-        this is a copy, not a move, so an older build still works.
+        falls back to the old DPAPI entropy.
+
+        This used to be a copy and nothing else, so that an older build would
+        still find its settings. That build was retired and removed from the
+        repository, and what the choice left behind was a `ClaudeUsageMonitor`
+        key sitting in the registry of everyone who had ever run the old
+        version - a name the application had otherwise finished with.
+
+        A key already present here is left alone rather than overwritten: the
+        value this application holds is the newer of the two, and the one the
+        user last chose.
         """
-        if self._q.value("migratedFromLegacy") is not None:
+        own = _own_scope(ORG, APP)
+        if own.value("migratedFromLegacy") is None:
+            legacy = _own_scope(LEGACY_ORG, LEGACY_APP)
+            for key in legacy.allKeys():
+                if own.value(key) is None:
+                    self._q.setValue(key, legacy.value(key))
+            self._q.setValue("migratedFromLegacy", True)
+            self._q.sync()
+        self._discard_legacy()
+
+    def _discard_legacy(self) -> None:
+        """Remove the pre-rename settings that are provably duplicates.
+
+        Separate from the copy above because most installations migrated long
+        ago: they are already marked and would never reach this through the
+        copy path.
+
+        "Provably" is doing real work here, and it used to be doing less. A
+        value is removed only when the one this application holds **equals**
+        it. A key of the same name is not proof of anything: the copy step
+        does not overwrite, so a name can match while the contents differ -
+        a setting changed since the migration, or a sealed credential this
+        application stored badly over one the old location still holds
+        intact. Anything that does not match is left where it is, and the
+        old key then stays too. Clutter is much the lesser mistake.
+
+        The rest of the care:
+
+        * every question about what is already here is asked of this
+          application's own storage, with fallbacks off - see `_own_scope`;
+        * the copies are flushed and checked before an original is touched,
+          because `QSettings` does not promise a `setValue` has reached
+          storage until `sync()` says so;
+        * values are deleted one at a time, by name, through the registry -
+          `QSettings.remove()` takes everything beneath the name with it;
+        * the marker is set only once the old location is really gone, so a
+          failure anywhere means the next launch tries again rather than
+          leaving the key forever.
+        """
+        own = _own_scope(ORG, APP)
+        if own.value("legacyDiscarded") is not None:
             return
-        legacy = QSettings(LEGACY_ORG, LEGACY_APP)
+        legacy = _own_scope(LEGACY_ORG, LEGACY_APP)
+
+        duplicates = []
         for key in legacy.allKeys():
-            if self._q.value(key) is None:
-                self._q.setValue(key, legacy.value(key))
-        self._q.setValue("migratedFromLegacy", True)
+            here, there = own.value(key), legacy.value(key)
+            if here is None or here != there:
+                return  # not ours to tidy: it was never copied, or it differs
+            duplicates.append((key, there))
+
+        self._q.sync()
+        if self._q.status() != QSettings.Status.NoError:
+            return
+
+        for key, value in duplicates:
+            if not _delete_registry_value(LEGACY_ORG, LEGACY_APP, key, value):
+                return
+        legacy.sync()
+        if legacy.status() != QSettings.Status.NoError or legacy.allKeys():
+            # Something arrived after the list was taken, or a write failed.
+            # Leave the marker unset so the next launch looks again.
+            return
+
+        if not _prune_empty_registry_keys(LEGACY_ORG, LEGACY_APP):
+            return
+        self._q.setValue("legacyDiscarded", True)
+        self._q.sync()
 
     # -- generic ---------------------------------------------------------
 

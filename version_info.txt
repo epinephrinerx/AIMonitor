@@ -1,9 +1,14 @@
 # UTF-8
 # Windows version resource, shown on the executable's Details tab.
+#
+# `FileDescription` is also the name Task Manager puts in its Name column,
+# which is why this file kept announcing the application by the name it was
+# renamed away from long after everything else had moved on. The app, the
+# installer and this file must agree: `tests/test_version.py` checks that.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 3, 2, 0),
-    prodvers=(1, 3, 2, 0),
+    filevers=(1, 3, 3, 0),
+    prodvers=(1, 3, 3, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -15,12 +20,13 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         '040904B0',
-        [StringStruct('FileDescription', 'Claude Usage Monitor'),
-         StringStruct('FileVersion', '1.3.2.0'),
+        [StringStruct('CompanyName', 'Apichart Chantanis'),
+         StringStruct('FileDescription', 'AI Usage Monitor'),
+         StringStruct('FileVersion', '1.3.3.0'),
          StringStruct('InternalName', 'AIUsageMonitor'),
          StringStruct('OriginalFilename', 'AIUsageMonitor.exe'),
-         StringStruct('ProductName', 'Claude Usage Monitor'),
-         StringStruct('ProductVersion', '1.3.2.0')])
+         StringStruct('ProductName', 'AI Usage Monitor'),
+         StringStruct('ProductVersion', '1.3.3.0')])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

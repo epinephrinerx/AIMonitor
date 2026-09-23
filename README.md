@@ -33,7 +33,7 @@ lives in the system tray, showing your session level as a drawn icon.
 
 ## Installing
 
-Run **`AIUsageMonitor-Setup-1.3.2.exe`**.
+Run **`AIUsageMonitor-Setup-1.3.3.exe`**.
 
 It installs **per user** into `%LocalAppData%\Programs\AIUsageMonitor`, so there
 is no UAC prompt and no admin rights are needed — the app only reads the current
@@ -50,7 +50,7 @@ settings, including any stored API keys. A *silent* uninstall always keeps them.
 
 ### Portable alternative
 
-`AIUsageMonitor-1.3.2-portable.exe` is a single 47 MB file that needs no
+`AIUsageMonitor-1.3.3-portable.exe` is a single 47 MB file that needs no
 install. It is slower to start — a one-file build unpacks its whole payload into `%TEMP%` on every
 launch, measured at **1.40 s** against **0.63 s** for the installed build, and
 it leaves `_MEI*` folders behind. Use it for a USB stick; otherwise prefer the
