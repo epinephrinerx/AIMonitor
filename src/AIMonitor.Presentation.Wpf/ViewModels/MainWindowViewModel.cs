@@ -9,7 +9,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly LatestRefreshCoordinator _refreshCoordinator;
     private readonly SettingsSession _settingsSession;
-    private readonly TrayIconHost? _trayHost;
+    private ITrayReadingsSink? _traySink;
+    private IReadOnlyList<TrayReading>? _latestTrayReadings;
 
     private bool _isRefreshing;
     private string _lastRefreshStatus = "Ready";
@@ -18,11 +19,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
         SettingsSession settingsSession,
-        TrayIconHost? trayHost = null)
+        ITrayReadingsSink? trayHost = null)
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
         _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
-        _trayHost = trayHost;
+        _traySink = trayHost;
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
@@ -81,6 +82,20 @@ public sealed class MainWindowViewModel : ViewModelBase
     public event Action? RequestOpenLog;
     public event Action? RequestOpenAbout;
 
+    /// <summary>
+    /// Attaches or detaches a tray readings sink. When a non-null sink is attached,
+    /// any cached latest readings are immediately forwarded to it.
+    /// When null is passed, the previous sink is detached and will receive no further updates.
+    /// </summary>
+    public void AttachTray(ITrayReadingsSink? traySink)
+    {
+        _traySink = traySink;
+        if (_traySink is not null && _latestTrayReadings is not null)
+        {
+            _traySink.UpdateReadings(_latestTrayReadings);
+        }
+    }
+
     private long _requestIdCounter;
 
     public async Task RefreshAsync()
@@ -106,34 +121,33 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (result.Snapshots.TryGetValue("gemini", out var geminiSnap)) GeminiTab.UpdateFromSnapshot(geminiSnap);
 
             // Update tray readings
-            if (_trayHost is not null)
+            var trayReadings = new List<TrayReading>();
+            foreach (var tab in ProviderTabs)
             {
-                var trayReadings = new List<TrayReading>();
-                foreach (var tab in ProviderTabs)
+                var highestMeter = tab.Meters.MaxBy(m => m.Value);
+                var pct = highestMeter?.Value ?? 0.0;
+                var sev = highestMeter?.Severity ?? Domain.Severity.Normal;
+                var detail = highestMeter?.Title ?? tab.Status;
+                var code = tab.ProviderId switch
                 {
-                    var highestMeter = tab.Meters.MaxBy(m => m.Value);
-                    var pct = highestMeter?.Value ?? 0.0;
-                    var sev = highestMeter?.Severity ?? Domain.Severity.Normal;
-                    var detail = highestMeter?.Title ?? tab.Status;
-                    var code = tab.ProviderId switch
-                    {
-                        "claude" => "CL",
-                        "openai" => "OA",
-                        "gemini" => "GE",
-                        _ => "AI"
-                    };
+                    "claude" => "CL",
+                    "openai" => "OA",
+                    "gemini" => "GE",
+                    _ => "AI"
+                };
 
-                    trayReadings.Add(new TrayReading(
-                        tab.ProviderId,
-                        tab.DisplayName,
-                        code,
-                        pct,
-                        sev,
-                        detail,
-                        tab.Status is "Connected" or "Limited"));
-                }
-                _trayHost.UpdateReadings(trayReadings);
+                trayReadings.Add(new TrayReading(
+                    tab.ProviderId,
+                    tab.DisplayName,
+                    code,
+                    pct,
+                    sev,
+                    detail,
+                    tab.Status is "Connected" or "Limited"));
             }
+
+            _latestTrayReadings = trayReadings;
+            _traySink?.UpdateReadings(trayReadings);
 
             LastRefreshStatus = $"Updated at {DateTime.Now:HH:mm:ss}";
         }

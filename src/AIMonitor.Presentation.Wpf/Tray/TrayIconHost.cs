@@ -15,7 +15,7 @@ namespace AIMonitor.Presentation.Wpf.Tray;
 /// - Preserves last good reading on refresh failure
 /// - Provides live context menu and tooltip
 /// </summary>
-public sealed class TrayIconHost : IDisposable
+public sealed class TrayIconHost : ITrayHost
 {
     private readonly NotifyIcon _notifyIcon;
     private readonly System.Windows.Forms.Timer _rotationTimer;

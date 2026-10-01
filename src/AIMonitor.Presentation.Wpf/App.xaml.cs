@@ -34,7 +34,7 @@ public partial class App : System.Windows.Application
     private SettingsSession? _settingsSession;
     private DpapiSecretStore? _secretStore;
     private WindowsStartupRegistrar? _startupRegistrar;
-    private TrayIconHost? _trayHost;
+    private LiveSettingsApplier? _liveSettingsApplier;
     private DispatcherTimer? _refreshTimer;
 
     private MainWindow? _mainWindow;
@@ -116,31 +116,34 @@ public partial class App : System.Windows.Application
         var refreshUseCase = new RefreshProvidersUseCase(registrations);
         _refreshCoordinator = new LatestRefreshCoordinator(refreshUseCase);
 
-        // 5. System Tray Host (PAR-022, PAR-025)
-        if (_settingsSession.Current.ShowTrayIcon)
-        {
-            _trayHost = new TrayIconHost();
-            _trayHost.OpenDashboardRequested += SwitchToDashboardMode;
-            _trayHost.OpenWidgetRequested += SwitchToWidgetMode;
-            _trayHost.OpenLogRequested += OpenUsageLogDialog;
-            _trayHost.RefreshRequested += async () =>
-            {
-                if (_mainViewModel is not null) await _mainViewModel.RefreshAsync();
-            };
-            _trayHost.OpenSettingsRequested += OpenSettingsDialog;
-            _trayHost.OpenAboutRequested += OpenAboutDialog;
-            _trayHost.ExitRequested += ShutdownApp;
-        }
-
-        // 6. ViewModels
-        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, _trayHost);
+        // 5. ViewModels
+        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
 
-        // 7. Initial Window
-        var startMinimized = e.Args.Any(a => a is "--minimized" or "--tray" or "-m");
-        if (!startMinimized)
+        // 6. Periodic Refresh Timer
+        _refreshTimer = new DispatcherTimer();
+        _refreshTimer.Tick += async (s, args) => await _mainViewModel.RefreshAsync();
+        _refreshTimer.Start();
+
+        // 7. Live Settings & Tray Lifecycle Coordinator
+        _liveSettingsApplier = new LiveSettingsApplier(
+            _widgetViewModel,
+            _mainViewModel,
+            CreateTrayHost,
+            interval =>
+            {
+                if (_refreshTimer is not null)
+                {
+                    _refreshTimer.Interval = interval;
+                }
+            });
+        _liveSettingsApplier.Apply(_settingsSession.Current);
+
+        // 8. Initial Window
+        var startMinimizedRequested = e.Args.Any(a => a is "--minimized" or "--tray" or "-m");
+        if (!TrayPolicy.ShouldStartHidden(_settingsSession.Current, startMinimizedRequested))
         {
             SwitchToDashboardMode();
         }
@@ -148,25 +151,30 @@ public partial class App : System.Windows.Application
         // Initial background fetch
         _ = _mainViewModel.RefreshAsync();
 
-        // 8. Periodic Refresh Timer
-        _refreshTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(_settingsSession.Current.RefreshIntervalSeconds)
-        };
-        _refreshTimer.Tick += async (s, args) => await _mainViewModel.RefreshAsync();
-        _refreshTimer.Start();
-
         _settingsSession.Changed += OnSettingsChanged;
+    }
+
+    private ITrayHost CreateTrayHost()
+    {
+        var host = new TrayIconHost();
+        host.OpenDashboardRequested += SwitchToDashboardMode;
+        host.OpenWidgetRequested += SwitchToWidgetMode;
+        host.OpenLogRequested += OpenUsageLogDialog;
+        host.RefreshRequested += async () =>
+        {
+            if (_mainViewModel is not null) await _mainViewModel.RefreshAsync();
+        };
+        host.OpenSettingsRequested += OpenSettingsDialog;
+        host.OpenAboutRequested += OpenAboutDialog;
+        host.ExitRequested += ShutdownApp;
+        return host;
     }
 
     private void OnSettingsChanged(AppSettings settings)
     {
         Dispatcher.InvokeAsync(() =>
         {
-            if (_refreshTimer is not null)
-            {
-                _refreshTimer.Interval = TimeSpan.FromSeconds(settings.RefreshIntervalSeconds);
-            }
+            _liveSettingsApplier?.Apply(settings);
         });
     }
 
@@ -308,7 +316,7 @@ public partial class App : System.Windows.Application
         }
 
         _refreshTimer?.Stop();
-        _trayHost?.Dispose();
+        _liveSettingsApplier?.CurrentTray?.Dispose();
         _ = _refreshCoordinator?.DisposeAsync();
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();

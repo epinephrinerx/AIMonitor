@@ -47,6 +47,34 @@ public sealed class WindowStructuralContractTests
         Assert.True(inspectedCount >= 2, $"Expected at least 2 files inspected, but inspected {inspectedCount}");
     }
 
+    [Fact]
+    public void MainWindowAndApp_AdhereToTrayPolicyAndStartupApplyContract()
+    {
+        var solutionRoot = FindSolutionRoot();
+        var presentationDir = Path.Combine(solutionRoot, "src", "AIMonitor.Presentation.Wpf");
+
+        var mainWindowFile = Path.Combine(presentationDir, "MainWindow.xaml.cs");
+        var appFile = Path.Combine(presentationDir, "App.xaml.cs");
+
+        Assert.True(File.Exists(mainWindowFile), $"Expected file does not exist: {mainWindowFile}");
+        Assert.True(File.Exists(appFile), $"Expected file does not exist: {appFile}");
+
+        var inspectedCount = 0;
+
+        // 1. MainWindow.xaml.cs must route hide-on-close decisions through TrayPolicy.ShouldHideOnClose
+        var mainWindowContent = File.ReadAllText(mainWindowFile);
+        Assert.Contains("TrayPolicy.ShouldHideOnClose", mainWindowContent, StringComparison.Ordinal);
+        inspectedCount++;
+
+        // 2. App.xaml.cs must route startup hidden decisions through TrayPolicy, and invoke startup settings apply
+        var appContent = File.ReadAllText(appFile);
+        Assert.Contains("TrayPolicy.ShouldStartHidden", appContent, StringComparison.Ordinal);
+        Assert.Contains("_liveSettingsApplier.Apply(_settingsSession.Current)", appContent, StringComparison.Ordinal);
+        inspectedCount++;
+
+        Assert.True(inspectedCount >= 2, $"Expected at least 2 files inspected, but inspected {inspectedCount}");
+    }
+
     private static string FindSolutionRoot()
     {
         var testAssemblyLocation = typeof(WindowStructuralContractTests).Assembly.Location;
