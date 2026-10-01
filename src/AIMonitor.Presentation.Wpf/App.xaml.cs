@@ -281,26 +281,38 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // Flush pending settings FIRST (before disposing the single-instance coordinator/mutex, tray,
+        // HTTP client, and theme) because releasing the mutex allows a relaunched process to load settings
+        // before this process has finished writing.
+        // OnExit is a void lifecycle method that cannot be async-awaited; we block with a bounded timeout
+        // to prevent process termination before the atomic file write completes.
+        // Because SettingsSession uses ConfigureAwait(false) internally, this will not deadlock.
+        var flushed = false;
+        try
+        {
+            if (_settingsSession is not null)
+            {
+                flushed = _settingsSession.FlushAsync().Wait(TimeSpan.FromSeconds(2));
+            }
+        }
+        catch
+        {
+            // Non-fatal during application exit
+        }
+
+        // If flush timed out, do NOT dispose SettingsSession: the process is exiting, and disposing
+        // the session's underlying gate would throw ObjectDisposedException and strand queued waiters.
+        if (flushed)
+        {
+            _settingsSession?.Dispose();
+        }
+
         _refreshTimer?.Stop();
         _trayHost?.Dispose();
         _ = _refreshCoordinator?.DisposeAsync();
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();
         ThemeManager.Instance.Dispose();
-
-        // Flush any pending settings updates (e.g. window geometry saved on closing) before process exit.
-        // OnExit is a void lifecycle method that cannot be async-awaited; we block with a bounded timeout
-        // to prevent process termination before the atomic file write completes.
-        // Because SettingsSession uses ConfigureAwait(false) internally, this will not deadlock.
-        try
-        {
-            _settingsSession?.FlushAsync().Wait(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-            // Non-fatal during application exit
-        }
-        _settingsSession?.Dispose();
 
         base.OnExit(e);
     }

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Input;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
@@ -41,7 +42,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _widgetAlwaysOnTop = _originalSettings.WidgetAlwaysOnTop;
         _chartRangeDays = _originalSettings.ChartRangeDays;
 
-        SaveCommand = new RelayCommand(async () => await SaveAsync());
+        SaveCommand = new RelayCommand(async () => await ExecuteSaveCommandAsync());
         CancelCommand = new RelayCommand(Cancel);
     }
 
@@ -104,6 +105,22 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand CancelCommand { get; }
 
     public event Action<bool>? RequestClose;
+    public event Action<string>? SaveFailed;
+
+    private async Task ExecuteSaveCommandAsync()
+    {
+        try
+        {
+            await SaveAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            var message = ex is UnauthorizedAccessException
+                ? "Failed to save settings: Access denied."
+                : "Failed to save settings due to an I/O error.";
+            SaveFailed?.Invoke(message);
+        }
+    }
 
     public async Task SaveAsync()
     {

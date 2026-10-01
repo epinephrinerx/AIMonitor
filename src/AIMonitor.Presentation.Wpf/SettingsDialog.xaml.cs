@@ -15,11 +15,17 @@ public partial class SettingsDialog : Window
     {
         DataContext = viewModel;
         viewModel.RequestClose += OnRequestClose;
+        viewModel.SaveFailed += OnSaveFailed;
     }
 
     private void OnRequestClose(bool result)
     {
         DialogResult = result;
         Close();
+    }
+
+    private void OnSaveFailed(string message)
+    {
+        System.Windows.MessageBox.Show(this, message, "Settings", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
     }
 }

@@ -1,4 +1,6 @@
 using AIMonitor.Application.Settings;
+using AIMonitor.Application.Windows;
+using AIMonitor.TestSupport;
 
 namespace AIMonitor.Application.Tests.Settings;
 
@@ -129,25 +131,108 @@ public sealed class SettingsSessionTests
     }
 
     [Fact]
-    public async Task FlushAsync_WaitsForInFlightUpdates()
+    public async Task UpdateAsync_WhenCallsOverlapWithBlockingStore_PersistsBothFieldsInOrderOfArrival()
     {
-        var store = new ControllableSettingsStore();
+        var store = new BlockingSettingsStore();
+        using var session = new SettingsSession(store, new AppSettings
+        {
+            Theme = "system",
+            RefreshIntervalSeconds = 60
+        });
+
+        // 1. Start first update modifying Theme
+        var update1 = session.UpdateAsync(s => s with { Theme = "dark" });
+
+        // 2. Wait until first update has entered SaveAsync
+        await store.SaveStarted.Task;
+
+        // 3. Second update is started while first update is blocked
+        var update2 = session.UpdateAsync(s => s with { RefreshIntervalSeconds = 300 });
+
+        // 4. Release store and let both finish
+        store.Release();
+        await Task.WhenAll(update1, update2);
+
+        // 5. Assert both fields persisted in order of arrival; fails if gate is removed
+        Assert.Equal(2, store.SavedSettings.Count);
+        Assert.Equal("dark", store.SavedSettings[0].Theme);
+        Assert.Equal(60, store.SavedSettings[0].RefreshIntervalSeconds);
+
+        Assert.Equal("dark", store.SavedSettings[1].Theme);
+        Assert.Equal(300, store.SavedSettings[1].RefreshIntervalSeconds);
+
+        Assert.Equal("dark", session.Current.Theme);
+        Assert.Equal(300, session.Current.RefreshIntervalSeconds);
+    }
+
+    [Fact]
+    public async Task AcceptanceCriteria4_FlushAsync_WaitsUntilInFlightSaveCompletes()
+    {
+        var store = new BlockingSettingsStore();
         using var session = new SettingsSession(store, new AppSettings { Theme = "system" });
 
         var updateTask = session.UpdateAsync(s => s with { Theme = "dark" });
 
-        // Wait until store has entered SaveAsync
-        await store.SaveEntered.Task;
+        // Wait until the save has actually started
+        await store.SaveStarted.Task;
 
+        // Call FlushAsync and assert it is NOT completed while save is held
         var flushTask = session.FlushAsync();
         Assert.False(flushTask.IsCompleted);
 
-        // Allow SaveAsync to complete
-        store.SaveCompletion.TrySetResult();
+        // Release the save
+        store.Release();
 
-        await Task.WhenAll(updateTask, flushTask);
+        // Assert FlushAsync completes and settings were updated
+        await flushTask;
+        await updateTask;
 
+        Assert.True(flushTask.IsCompletedSuccessfully);
         Assert.Equal("dark", session.Current.Theme);
+    }
+
+    [Fact]
+    public async Task AcceptanceCriteria5_ImmediateExitAfterSave_FlushesQueuedPlacementRecord()
+    {
+        var store = new BlockingSettingsStore();
+        using var session = new SettingsSession(store, new AppSettings { Theme = "system", RefreshIntervalSeconds = 60 });
+
+        var placement = new WindowPlacement(120, 80, 800, 600, false);
+        var displays = new[] { new DisplayArea(0, 0, 1920, 1080) };
+        var now = DateTimeOffset.UtcNow;
+
+        // 1. Start save A (a settings change) and wait until save has actually started
+        var settingsUpdateTask = session.UpdateAsync(s => s with { Theme = "dark", RefreshIntervalSeconds = 300 });
+        await store.SaveStarted.Task;
+
+        // 2. Queue a placement record while save A is blocked (simulates window Closing saving geometry right before exit)
+        var recordTask = WindowPlacementRecorder.RecordAsync(session, WindowGeometryManager.DashboardMode, placement, displays, now);
+
+        // 3. Call FlushAsync (simulates App.OnExit flushing before shutdown)
+        var flushTask = session.FlushAsync();
+        Assert.False(flushTask.IsCompleted);
+
+        // 4. Release save
+        store.Release();
+
+        // 5. Await flush task to complete
+        await flushTask;
+        await settingsUpdateTask;
+        await recordTask;
+
+        // 6. Assert the placement is persisted after flush returns
+        var topologyId = WindowGeometryManager.GenerateTopologyId(displays);
+        Assert.Equal("dark", session.Current.Theme);
+        Assert.Equal(300, session.Current.RefreshIntervalSeconds);
+        Assert.True(WindowGeometryManager.TryRestorePlacement(session.Current, topologyId, WindowGeometryManager.DashboardMode, displays, out var restoredPlacement));
+        Assert.Equal(120, restoredPlacement.Left);
+
+        Assert.NotEmpty(store.SavedSettings);
+        var lastSaved = store.SavedSettings.Last();
+        Assert.Equal("dark", lastSaved.Theme);
+        Assert.Equal(300, lastSaved.RefreshIntervalSeconds);
+        Assert.True(WindowGeometryManager.TryRestorePlacement(lastSaved, topologyId, WindowGeometryManager.DashboardMode, displays, out var filePlacement));
+        Assert.Equal(120, filePlacement.Left);
     }
 
     [Fact]
@@ -166,17 +251,17 @@ public sealed class SettingsSessionTests
     [Fact]
     public async Task UpdateAsync_WhenDisposedWhileUpdateInFlight_DoesNotThrowFromFinally()
     {
-        var store = new ControllableSettingsStore();
+        var store = new BlockingSettingsStore();
         var session = new SettingsSession(store, new AppSettings { Theme = "system" });
 
         var updateTask = session.UpdateAsync(s => s with { Theme = "dark" });
-        await store.SaveEntered.Task;
+        await store.SaveStarted.Task;
 
         // Dispose session while UpdateAsync is in-flight and holding the gate
         session.Dispose();
 
         // Release store so UpdateAsync proceeds to finally block
-        store.SaveCompletion.TrySetResult();
+        store.Release();
 
         // Must complete without throwing ObjectDisposedException from finally block
         await updateTask;
@@ -218,22 +303,6 @@ public sealed class SettingsSessionTests
         public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
         {
             await Task.Delay(20, cancellationToken);
-        }
-    }
-
-    private sealed class ControllableSettingsStore : ISettingsStore
-    {
-        public bool Exists => true;
-        public TaskCompletionSource SaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource SaveCompletion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AppSettings());
-
-        public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
-        {
-            SaveEntered.TrySetResult();
-            await SaveCompletion.Task.WaitAsync(cancellationToken);
         }
     }
 }

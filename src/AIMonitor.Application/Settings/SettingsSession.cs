@@ -19,6 +19,8 @@ public sealed class SettingsSession : IDisposable
 
     /// <summary>
     /// Event raised after an update is successfully persisted to the store and applied to <see cref="Current"/>.
+    /// Raised while the update gate is held, so handlers must not synchronously wait on the session
+    /// (<see cref="UpdateAsync"/>/<see cref="FlushAsync"/>) and must marshal UI work asynchronously.
     /// </summary>
     public event Action<AppSettings>? Changed;
 
