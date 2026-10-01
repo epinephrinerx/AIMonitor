@@ -1,0 +1,30 @@
+<Project>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!--
+    === Single version source of truth (PAR-035) ===
+    Update VersionPrefix here only.  AssemblyVersion, FileVersion and
+    InformationalVersion are all derived from it automatically.
+    The installer script reads AppVersion from this same constant via a
+    #define that must be kept in sync — see installer/AIMonitor2.iss.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>2.0.0</VersionPrefix>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+    <Product>AI Usage Monitor</Product>
+    <Company>Apichart Chantanis</Company>
+    <Copyright>Copyright © 2025 Apichart Chantanis. Licensed under GPL-3.0.</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>
