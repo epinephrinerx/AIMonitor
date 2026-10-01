@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AIMonitor.Application\AIMonitor.Application.csproj" />
+    <ProjectReference Include="..\AIMonitor.Infrastructure\AIMonitor.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- PE / Explorer metadata (version comes from Directory.Build.props) -->
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
+    <Description>AI Usage Monitor — view Claude, OpenAI and Gemini quota at a glance</Description>
+    <Platforms>x64</Platforms>
+    <!-- Ensure the publish output uses the canonical exe name -->
+    <AssemblyName>AIUsageMonitor</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,75 @@
+<Window x:Class="AIMonitor.Presentation.Wpf.WidgetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:AIMonitor.Presentation.Wpf.Controls"
+        xmlns:vm="clr-namespace:AIMonitor.Presentation.Wpf.ViewModels"
+        mc:Ignorable="d"
+        Title="AIMonitor Widget"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="{Binding AlwaysOnTop}"
+        Opacity="{Binding Opacity}"
+        Width="240" Height="240"
+        MouseDown="OnWindowMouseDown">
+    
+    <Border Background="{DynamicResource CardBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="16"
+            Padding="12"
+            Margin="6">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="12" Direction="270" Opacity="0.3" ShadowDepth="4" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Top Header with Chevrons and Title -->
+            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                <Button Content="&#x25C0;" Command="{Binding PreviousProviderCommand}" DockPanel.Dock="Left"
+                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
+                        FontSize="11" Cursor="Hand" Padding="4,0" ToolTip="Previous provider" />
+                
+                <Button Content="&#x25B6;" Command="{Binding NextProviderCommand}" DockPanel.Dock="Right"
+                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
+                        FontSize="11" Cursor="Hand" Padding="4,0" ToolTip="Next provider" />
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding CurrentProvider.DisplayName}" FontWeight="Bold" FontSize="13"
+                               Foreground="{DynamicResource TextPrimaryBrush}" HorizontalAlignment="Center" />
+                    <Button Content="&#x1F4CC;" Command="{Binding TogglePinCommand}" Margin="6,0,0,0"
+                            Background="Transparent" BorderThickness="0" FontSize="10" Cursor="Hand"
+                            Opacity="{Binding IsPinned, Converter={x:Null}}" ToolTip="Toggle rotation pin" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Center Gauge Display -->
+            <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <controls:GaugeControl DataContext="{Binding CurrentProvider.Meters[0]}"
+                                       Value="{Binding Value}"
+                                       ValueText="{Binding ValueText}"
+                                       Title="{Binding Title}"
+                                       Subtitle="{Binding Subtitle}"
+                                       GaugeBrush="{Binding GaugeBrush}"
+                                       Width="160" Height="160" />
+            </Grid>
+
+            <!-- Footer: Switch to Dashboard & Status -->
+            <DockPanel Grid.Row="2" Margin="0,4,0,0">
+                <TextBlock Text="{Binding CurrentProvider.Status}" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}"
+                           VerticalAlignment="Center" DockPanel.Dock="Left" />
+                <Button Content="Dashboard" Click="OnOpenDashboardClick" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource AccentBrush}"
+                        FontSize="11" Cursor="Hand" FontWeight="SemiBold" />
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>
