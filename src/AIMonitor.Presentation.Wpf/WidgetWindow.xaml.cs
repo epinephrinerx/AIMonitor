@@ -8,20 +8,18 @@ namespace AIMonitor.Presentation.Wpf;
 
 public partial class WidgetWindow : Window
 {
-    private readonly ISettingsStore? _settingsStore;
-    private AppSettings? _currentSettings;
+    private readonly SettingsSession? _session;
 
     public WidgetWindow()
     {
         InitializeComponent();
     }
 
-    public WidgetWindow(WidgetViewModel viewModel, ISettingsStore settingsStore, AppSettings settings)
+    public WidgetWindow(WidgetViewModel viewModel, SettingsSession session)
         : this()
     {
-        DataContext = viewModel;
-        _settingsStore = settingsStore;
-        _currentSettings = settings;
+        DataContext = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -29,12 +27,12 @@ public partial class WidgetWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (_currentSettings is not null)
+        if (_session is not null)
         {
             var displays = GetDisplayAreas();
             var topologyId = WindowGeometryManager.GenerateTopologyId(displays);
 
-            if (WindowGeometryManager.TryRestorePlacement(_currentSettings, topologyId, WindowGeometryManager.WidgetMode, displays, out var placement))
+            if (WindowGeometryManager.TryRestorePlacement(_session.Current, topologyId, WindowGeometryManager.WidgetMode, displays, out var placement))
             {
                 Left = placement.Left;
                 Top = placement.Top;
@@ -47,22 +45,37 @@ public partial class WidgetWindow : Window
         SaveGeometry();
     }
 
-    private void SaveGeometry()
+    public Task SaveGeometryAsync()
     {
-        if (_settingsStore is null || _currentSettings is null) return;
+        if (_session is null) return Task.CompletedTask;
 
         try
         {
             var displays = GetDisplayAreas();
-            var topologyId = WindowGeometryManager.GenerateTopologyId(displays);
             var placement = new WindowPlacement(Left, Top, ActualWidth, ActualHeight, false);
-
-            var updated = WindowGeometryManager.SavePlacement(_currentSettings, topologyId, WindowGeometryManager.WidgetMode, placement, DateTimeOffset.UtcNow);
-            _currentSettings = updated;
-            _ = _settingsStore.SaveAsync(updated);
+            return WindowPlacementRecorder.RecordAsync(_session, WindowGeometryManager.WidgetMode, placement, displays, DateTimeOffset.UtcNow);
         }
         catch
         {
+            return Task.CompletedTask;
+        }
+    }
+
+    public void SaveGeometry()
+    {
+        // Fire-and-forget helper observes and catches any task exception to avoid unobserved task exceptions on exit.
+        _ = FireAndForgetAsync(SaveGeometryAsync());
+    }
+
+    private static async Task FireAndForgetAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Non-fatal: ignored to prevent unobserved task exceptions
         }
     }
 

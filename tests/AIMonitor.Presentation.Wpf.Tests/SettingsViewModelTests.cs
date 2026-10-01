@@ -23,7 +23,8 @@ public class SettingsViewModelTests
 
         var store = new FakeSettingsStore(settings);
         var registrar = new FakeStartupRegistrar();
-        var vm = new SettingsViewModel(settings, store, registrar);
+        using var session = new SettingsSession(store, settings);
+        var vm = new SettingsViewModel(session, registrar);
 
         Assert.Equal("dark", vm.Theme);
         Assert.True(vm.StartWithWindows);
@@ -41,7 +42,8 @@ public class SettingsViewModelTests
         var initial = new AppSettings { Theme = "system", StartWithWindows = false };
         var store = new FakeSettingsStore(initial);
         var registrar = new FakeStartupRegistrar();
-        var vm = new SettingsViewModel(initial, store, registrar);
+        using var session = new SettingsSession(store, initial);
+        var vm = new SettingsViewModel(session, registrar);
 
         var closeResult = false;
         vm.RequestClose += result => closeResult = result;
@@ -56,7 +58,42 @@ public class SettingsViewModelTests
         Assert.NotNull(store.SavedSettings);
         Assert.Equal("light", store.SavedSettings.Theme);
         Assert.Equal(90, store.SavedSettings.RefreshIntervalSeconds);
+        Assert.Equal("light", session.Current.Theme);
+        Assert.Equal(90, session.Current.RefreshIntervalSeconds);
         Assert.True(registrar.UnregisterCalled);
+    }
+
+    [Fact]
+    public async Task SaveAsync_PreservesUnmanagedFieldsLikeGeometryAndProviders()
+    {
+        var initial = new AppSettings { Theme = "system", RefreshIntervalSeconds = 60 };
+        var store = new FakeSettingsStore(initial);
+        var registrar = new FakeStartupRegistrar();
+        using var session = new SettingsSession(store, initial);
+        var vm = new SettingsViewModel(session, registrar);
+
+        // Another writer changes geometry/providers/ActiveProvider AFTER view model was constructed
+        await session.UpdateAsync(s => s with
+        {
+            ActiveProvider = "gemini",
+            ChartMetric = "Output tokens",
+            LegacyGeometry = new Dictionary<string, string> { ["d0123456789/dash/usedAt"] = "timestamp" },
+            Providers = new Dictionary<string, ProviderPreference> { ["gemini"] = new(true, "extra-val") }
+        });
+
+        // User edits dialog fields and saves
+        vm.Theme = "dark";
+        vm.RefreshIntervalSeconds = 300;
+
+        await vm.SaveAsync();
+
+        // Fields written after construction must survive
+        Assert.Equal("dark", session.Current.Theme);
+        Assert.Equal(300, session.Current.RefreshIntervalSeconds);
+        Assert.Equal("gemini", session.Current.ActiveProvider);
+        Assert.Equal("Output tokens", session.Current.ChartMetric);
+        Assert.True(session.Current.LegacyGeometry.ContainsKey("d0123456789/dash/usedAt"));
+        Assert.True(session.Current.Providers.ContainsKey("gemini"));
     }
 
     [Fact]
@@ -65,7 +102,8 @@ public class SettingsViewModelTests
         var initial = new AppSettings { Theme = "dark" };
         var store = new FakeSettingsStore(initial);
         var registrar = new FakeStartupRegistrar();
-        var vm = new SettingsViewModel(initial, store, registrar);
+        using var session = new SettingsSession(store, initial);
+        var vm = new SettingsViewModel(session, registrar);
 
         var closeResult = true;
         vm.RequestClose += result => closeResult = result;

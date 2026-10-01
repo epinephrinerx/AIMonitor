@@ -8,7 +8,7 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly LatestRefreshCoordinator _refreshCoordinator;
-    private readonly ISettingsStore _settingsStore;
+    private readonly SettingsSession _settingsSession;
     private readonly TrayIconHost? _trayHost;
 
     private bool _isRefreshing;
@@ -17,11 +17,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
-        ISettingsStore settingsStore,
+        SettingsSession settingsSession,
         TrayIconHost? trayHost = null)
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
-        _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
+        _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
         _trayHost = trayHost;
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
@@ -91,7 +91,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var settings = await _settingsStore.LoadAsync().ConfigureAwait(true);
+            var settings = _settingsSession.Current;
             var req = new ProviderSnapshotRequest(
                 historyDays: settings.ChartRangeDays,
                 metric: settings.ChartMetric,

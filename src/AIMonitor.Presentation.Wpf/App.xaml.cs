@@ -31,12 +31,12 @@ public partial class App : System.Windows.Application
     private HttpClient? _httpClient;
     private LatestRefreshCoordinator? _refreshCoordinator;
     private JsonSettingsStore? _settingsStore;
+    private SettingsSession? _settingsSession;
     private DpapiSecretStore? _secretStore;
     private WindowsStartupRegistrar? _startupRegistrar;
     private TrayIconHost? _trayHost;
     private DispatcherTimer? _refreshTimer;
 
-    private AppSettings _currentSettings = new();
     private MainWindow? _mainWindow;
     private WidgetWindow? _widgetWindow;
     private MainWindowViewModel? _mainViewModel;
@@ -82,10 +82,10 @@ public partial class App : System.Windows.Application
             await migrationUseCase.ExecuteAsync();
         }
 
-        _currentSettings = await _settingsStore.LoadAsync();
+        _settingsSession = await SettingsSession.CreateAsync(_settingsStore);
 
         // 3. Theme Application (PAR-028)
-        ThemeManager.Instance.ApplyTheme(_currentSettings.Theme);
+        ThemeManager.Instance.ApplyTheme(_settingsSession.Current.Theme);
 
         // 4. Provider Clients & Refresh Orchestration (PAR-001, PAR-002, PAR-003, PAR-004, PAR-029)
         _httpClient = new HttpClient();
@@ -95,8 +95,8 @@ public partial class App : System.Windows.Application
         var openAiKey = await _secretStore.GetAsync("providers/openai/key").ConfigureAwait(true);
         var geminiKey = await _secretStore.GetAsync("providers/gemini/key").ConfigureAwait(true);
 
-        _currentSettings.Providers.TryGetValue("openai", out var openAiPref);
-        _currentSettings.Providers.TryGetValue("gemini", out var geminiPref);
+        _settingsSession.Current.Providers.TryGetValue("openai", out var openAiPref);
+        _settingsSession.Current.Providers.TryGetValue("gemini", out var geminiPref);
 
         double? monthlyBudget = double.TryParse(openAiPref?.Extra, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedBudget) && parsedBudget > 0
             ? parsedBudget
@@ -117,7 +117,7 @@ public partial class App : System.Windows.Application
         _refreshCoordinator = new LatestRefreshCoordinator(refreshUseCase);
 
         // 5. System Tray Host (PAR-022, PAR-025)
-        if (_currentSettings.ShowTrayIcon)
+        if (_settingsSession.Current.ShowTrayIcon)
         {
             _trayHost = new TrayIconHost();
             _trayHost.OpenDashboardRequested += SwitchToDashboardMode;
@@ -133,7 +133,7 @@ public partial class App : System.Windows.Application
         }
 
         // 6. ViewModels
-        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsStore, _trayHost);
+        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, _trayHost);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
@@ -151,10 +151,23 @@ public partial class App : System.Windows.Application
         // 8. Periodic Refresh Timer
         _refreshTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(_currentSettings.RefreshIntervalSeconds)
+            Interval = TimeSpan.FromSeconds(_settingsSession.Current.RefreshIntervalSeconds)
         };
         _refreshTimer.Tick += async (s, args) => await _mainViewModel.RefreshAsync();
         _refreshTimer.Start();
+
+        _settingsSession.Changed += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(AppSettings settings)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_refreshTimer is not null)
+            {
+                _refreshTimer.Interval = TimeSpan.FromSeconds(settings.RefreshIntervalSeconds);
+            }
+        });
     }
 
     public void SwitchToDashboardMode()
@@ -166,17 +179,17 @@ public partial class App : System.Windows.Application
                 _widgetWindow.Hide();
             }
 
-            if (_mainWindow is null)
+            if (_mainWindow is null && _settingsSession is not null)
             {
-                _mainWindow = new MainWindow(_mainViewModel!, _settingsStore!, _currentSettings);
+                _mainWindow = new MainWindow(_mainViewModel!, _settingsSession);
             }
 
-            _mainWindow.Show();
-            if (_mainWindow.WindowState == WindowState.Minimized)
+            _mainWindow?.Show();
+            if (_mainWindow?.WindowState == WindowState.Minimized)
             {
                 _mainWindow.WindowState = WindowState.Normal;
             }
-            _mainWindow.Activate();
+            _mainWindow?.Activate();
         });
     }
 
@@ -189,13 +202,13 @@ public partial class App : System.Windows.Application
                 _mainWindow.Hide();
             }
 
-            if (_widgetWindow is null)
+            if (_widgetWindow is null && _settingsSession is not null)
             {
-                _widgetWindow = new WidgetWindow(_widgetViewModel!, _settingsStore!, _currentSettings);
+                _widgetWindow = new WidgetWindow(_widgetViewModel!, _settingsSession);
             }
 
-            _widgetWindow.Show();
-            _widgetWindow.Activate();
+            _widgetWindow?.Show();
+            _widgetWindow?.Activate();
         });
     }
 
@@ -203,26 +216,15 @@ public partial class App : System.Windows.Application
     {
         Dispatcher.Invoke(() =>
         {
-            var vm = new SettingsViewModel(_currentSettings, _settingsStore!, _startupRegistrar!);
+            if (_settingsSession is null) return;
+
+            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!);
             var dialog = new SettingsDialog(vm)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
             };
 
-            if (dialog.ShowDialog() == true)
-            {
-                _ = Task.Run(async () =>
-                {
-                    _currentSettings = await _settingsStore!.LoadAsync();
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (_refreshTimer is not null)
-                        {
-                            _refreshTimer.Interval = TimeSpan.FromSeconds(_currentSettings.RefreshIntervalSeconds);
-                        }
-                    });
-                });
-            }
+            dialog.ShowDialog();
         });
     }
 
@@ -238,7 +240,8 @@ public partial class App : System.Windows.Application
             };
 
             var snapshots = _mainViewModel?.LatestSnapshots ?? new Dictionary<string, Domain.ProviderSnapshot>();
-            var report = UsageReportGenerator.Build(providers, snapshots, _currentSettings.ChartRangeDays, "Total tokens");
+            var chartRangeDays = _settingsSession?.Current.ChartRangeDays ?? 14;
+            var report = UsageReportGenerator.Build(providers, snapshots, chartRangeDays, "Total tokens");
             var vm = new UsageLogViewModel(report);
             var dialog = new UsageLogDialog(vm)
             {
@@ -284,6 +287,20 @@ public partial class App : System.Windows.Application
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();
         ThemeManager.Instance.Dispose();
+
+        // Flush any pending settings updates (e.g. window geometry saved on closing) before process exit.
+        // OnExit is a void lifecycle method that cannot be async-awaited; we block with a bounded timeout
+        // to prevent process termination before the atomic file write completes.
+        // Because SettingsSession uses ConfigureAwait(false) internally, this will not deadlock.
+        try
+        {
+            _settingsSession?.FlushAsync().Wait(TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
+            // Non-fatal during application exit
+        }
+        _settingsSession?.Dispose();
 
         base.OnExit(e);
     }

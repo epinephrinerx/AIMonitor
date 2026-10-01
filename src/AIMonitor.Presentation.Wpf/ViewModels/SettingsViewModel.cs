@@ -11,7 +11,7 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 /// </summary>
 public sealed class SettingsViewModel : ViewModelBase
 {
-    private readonly ISettingsStore _settingsStore;
+    private readonly SettingsSession _session;
     private readonly IStartupRegistrar _startupRegistrar;
     private readonly AppSettings _originalSettings;
 
@@ -25,22 +25,21 @@ public sealed class SettingsViewModel : ViewModelBase
     private int _chartRangeDays;
 
     public SettingsViewModel(
-        AppSettings currentSettings,
-        ISettingsStore settingsStore,
+        SettingsSession session,
         IStartupRegistrar startupRegistrar)
     {
-        _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
         _startupRegistrar = startupRegistrar ?? throw new ArgumentNullException(nameof(startupRegistrar));
-        _originalSettings = currentSettings ?? throw new ArgumentNullException(nameof(currentSettings));
+        _originalSettings = session.Current;
 
-        _theme = currentSettings.Theme;
-        _startWithWindows = currentSettings.StartWithWindows;
-        _minimizeToTray = currentSettings.MinimizeToTray;
-        _showTrayIcon = currentSettings.ShowTrayIcon;
-        _refreshIntervalSeconds = currentSettings.RefreshIntervalSeconds;
-        _widgetOpacity = currentSettings.WidgetOpacity;
-        _widgetAlwaysOnTop = currentSettings.WidgetAlwaysOnTop;
-        _chartRangeDays = currentSettings.ChartRangeDays;
+        _theme = _originalSettings.Theme;
+        _startWithWindows = _originalSettings.StartWithWindows;
+        _minimizeToTray = _originalSettings.MinimizeToTray;
+        _showTrayIcon = _originalSettings.ShowTrayIcon;
+        _refreshIntervalSeconds = _originalSettings.RefreshIntervalSeconds;
+        _widgetOpacity = _originalSettings.WidgetOpacity;
+        _widgetAlwaysOnTop = _originalSettings.WidgetAlwaysOnTop;
+        _chartRangeDays = _originalSettings.ChartRangeDays;
 
         SaveCommand = new RelayCommand(async () => await SaveAsync());
         CancelCommand = new RelayCommand(Cancel);
@@ -108,7 +107,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public async Task SaveAsync()
     {
-        var updated = (_originalSettings with
+        await _session.UpdateAsync(s => s with
         {
             Theme = Theme,
             StartWithWindows = StartWithWindows,
@@ -118,9 +117,7 @@ public sealed class SettingsViewModel : ViewModelBase
             WidgetOpacity = WidgetOpacity,
             WidgetAlwaysOnTop = WidgetAlwaysOnTop,
             ChartRangeDays = ChartRangeDays
-        }).Normalize();
-
-        await _settingsStore.SaveAsync(updated).ConfigureAwait(true);
+        }).ConfigureAwait(true);
 
         // Update Windows startup entry only on Save (PAR-024, PAR-027)
         try
