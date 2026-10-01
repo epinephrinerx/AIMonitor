@@ -82,6 +82,32 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.Equal("original", await File.ReadAllTextAsync(path));
     }
 
+    [Fact]
+    public async Task AcceptanceCriteria3_UpdateAsync_WhenRealJsonSettingsStoreFailsDueToExistingDirectory_PreservesCurrentAndThrows()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"aimonitor-dir-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var store = new JsonSettingsStore(tempDir);
+            var initial = new AppSettings { Theme = "system", RefreshIntervalSeconds = 60 };
+            using var session = new SettingsSession(store, initial);
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                session.UpdateAsync(s => s with { Theme = "dark", RefreshIntervalSeconds = 300 }));
+
+            Assert.Equal("system", session.Current.Theme);
+            Assert.Equal(60, session.Current.RefreshIntervalSeconds);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
