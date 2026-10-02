@@ -148,6 +148,41 @@ public sealed class SettingsDialogTests
     }
 
     [Fact]
+    public void SettingsDialog_WindowSizeComboBox_SelectedItem_BindsTwoWayWithSelectedWindowSize()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var initial = new AppSettings
+            {
+                Theme = "light",
+                WidgetOpacity = 0.8,
+                DashboardWidth = 1120,
+                DashboardHeight = 820
+            };
+
+            var store = new FakeSettingsStore(initial);
+            var registrar = new FakeStartupRegistrar();
+            using var session = new SettingsSession(store, initial);
+            var vm = new SettingsViewModel(session, registrar);
+
+            var dialog = new SettingsDialog(vm);
+            using var offscreen = WpfTestHost.ShowOffscreen(dialog);
+
+            var windowSizeCombo = (dialog.FindName("WindowSizeComboBox") ?? dialog.FindName("DefaultWindowSizeComboBox")) as ComboBox;
+            Assert.NotNull(windowSizeCombo);
+
+            // Sets vm.SelectedWindowSize to a non-default option (e.g. Wide), and asserts WindowSizeComboBox.SelectedItem equals it
+            vm.SelectedWindowSize = WindowSizeOption.Wide;
+            Assert.Equal(WindowSizeOption.Wide, windowSizeCombo.SelectedItem);
+
+            // Then sets ComboBox.SelectedItem to Compact and asserts vm.SelectedWindowSize changed
+            windowSizeCombo.SelectedItem = WindowSizeOption.Compact;
+            Assert.NotEqual(WindowSizeOption.Wide, vm.SelectedWindowSize);
+            Assert.Equal(WindowSizeOption.Compact, vm.SelectedWindowSize);
+        });
+    }
+
+    [Fact]
     public void SourceContract_OpenSettingsDialog_ConstructsAppearanceApplier_AndPassesApplyCallbackToSettingsViewModel()
     {
         var repoRoot = FindRepoRoot();
