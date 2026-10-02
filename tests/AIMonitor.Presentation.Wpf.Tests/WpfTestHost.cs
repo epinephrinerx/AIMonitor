@@ -159,11 +159,46 @@ public static class WpfTestHost
         Run(() =>
         {
             element.ApplyTemplate();
-            var measureSize = element is Window
-                ? new Size(1000, 800)
-                : new Size(double.PositiveInfinity, double.PositiveInfinity);
-            element.Measure(measureSize);
-            element.Arrange(new Rect(element.DesiredSize));
+
+            Size measureSize;
+            Rect arrangeRect;
+
+            if (element is Window window)
+            {
+                double minW = window.MinWidth > 0 ? window.MinWidth : 0.0;
+                double maxW = window.MaxWidth > 0 ? window.MaxWidth : double.PositiveInfinity;
+                double minH = window.MinHeight > 0 ? window.MinHeight : 0.0;
+                double maxH = window.MaxHeight > 0 ? window.MaxHeight : double.PositiveInfinity;
+
+                double targetW = !double.IsNaN(window.Width) && window.Width > 0
+                    ? Math.Clamp(window.Width, minW, maxW)
+                    : (window.ActualWidth > 0 ? window.ActualWidth : 1000.0);
+
+                double targetH = !double.IsNaN(window.Height) && window.Height > 0
+                    ? Math.Clamp(window.Height, minH, maxH)
+                    : (window.ActualHeight > 0 ? window.ActualHeight : 800.0);
+
+                measureSize = new Size(targetW, targetH);
+                element.Measure(measureSize);
+
+                double arrangeW = !double.IsNaN(window.Width) && window.Width > 0
+                    ? targetW
+                    : Math.Clamp(element.DesiredSize.Width, minW, maxW);
+
+                double arrangeH = !double.IsNaN(window.Height) && window.Height > 0
+                    ? targetH
+                    : Math.Clamp(element.DesiredSize.Height, minH, maxH);
+
+                arrangeRect = new Rect(0, 0, arrangeW, arrangeH);
+            }
+            else
+            {
+                measureSize = new Size(double.PositiveInfinity, double.PositiveInfinity);
+                element.Measure(measureSize);
+                arrangeRect = new Rect(element.DesiredSize);
+            }
+
+            element.Arrange(arrangeRect);
             element.UpdateLayout();
             element.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
         });

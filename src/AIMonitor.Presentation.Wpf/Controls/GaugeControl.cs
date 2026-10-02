@@ -35,6 +35,14 @@ public sealed class GaugeControl : FrameworkElement
         DependencyProperty.Register(nameof(GaugeBrush), typeof(Brush), typeof(GaugeControl),
             new FrameworkPropertyMetadata(Brushes.Teal, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty ShowSubtitleProperty =
+        DependencyProperty.Register(nameof(ShowSubtitle), typeof(bool), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ShowInlineValueProperty =
+        DependencyProperty.Register(nameof(ShowInlineValue), typeof(bool), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public double Value
     {
         get => (double)GetValue(ValueProperty);
@@ -65,9 +73,38 @@ public sealed class GaugeControl : FrameworkElement
         set => SetValue(GaugeBrushProperty, value);
     }
 
+    public bool ShowSubtitle
+    {
+        get => (bool)GetValue(ShowSubtitleProperty);
+        set => SetValue(ShowSubtitleProperty, value);
+    }
+
+    public bool ShowInlineValue
+    {
+        get => (bool)GetValue(ShowInlineValueProperty);
+        set => SetValue(ShowInlineValueProperty, value);
+    }
+
+    internal static string FormatCaptionText(string title, string valueText, bool showInlineValue)
+    {
+        if (showInlineValue)
+        {
+            return title;
+        }
+
+        if (string.IsNullOrWhiteSpace(valueText))
+        {
+            return title;
+        }
+
+        return string.IsNullOrWhiteSpace(title) ? valueText : $"{title} {valueText}";
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
-        var side = Math.Min(availableSize.Width, availableSize.Height);
+        double w = !double.IsNaN(Width) ? Width : availableSize.Width;
+        double h = !double.IsNaN(Height) ? Height : availableSize.Height;
+        var side = Math.Min(w, h);
         if (double.IsInfinity(side) || side <= 0) side = 140;
         return new Size(side, side);
     }
@@ -110,23 +147,27 @@ public sealed class GaugeControl : FrameworkElement
         var typeface = new Typeface(fontFamily, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
         var subTypeface = new Typeface(fontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
-        // Value text (e.g. 45%)
-        var valFormatted = new FormattedText(
-            ValueText,
-            CultureInfo.CurrentCulture,
-            System.Windows.FlowDirection.LeftToRight,
-            typeface,
-            Math.Max(12, radius * 0.46),
-            textPrimaryBrush,
-            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        // Value text (e.g. 45% in center) - only if ShowInlineValue is true
+        if (ShowInlineValue)
+        {
+            var valFormatted = new FormattedText(
+                ValueText,
+                CultureInfo.CurrentCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                typeface,
+                Math.Max(12, radius * 0.46),
+                textPrimaryBrush,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
-        dc.DrawText(valFormatted, new Point(center.X - valFormatted.Width / 2.0, center.Y - valFormatted.Height / 2.0));
+            dc.DrawText(valFormatted, new Point(center.X - valFormatted.Width / 2.0, center.Y - valFormatted.Height / 2.0));
+        }
 
-        // Title text (e.g. Session)
-        if (!string.IsNullOrEmpty(Title))
+        // Title text (e.g. Session or Session 45% when !ShowInlineValue)
+        var captionText = FormatCaptionText(Title, ValueText, ShowInlineValue);
+        if (!string.IsNullOrEmpty(captionText))
         {
             var titleFormatted = new FormattedText(
-                Title,
+                captionText,
                 CultureInfo.CurrentCulture,
                 System.Windows.FlowDirection.LeftToRight,
                 typeface,
@@ -137,8 +178,8 @@ public sealed class GaugeControl : FrameworkElement
             dc.DrawText(titleFormatted, new Point(center.X - titleFormatted.Width / 2.0, center.Y + radius * 0.45));
         }
 
-        // Subtitle text (e.g. Resets in 2h)
-        if (!string.IsNullOrEmpty(Subtitle))
+        // Subtitle text (e.g. Resets in 2h) - only if ShowSubtitle is true
+        if (ShowSubtitle && !string.IsNullOrEmpty(Subtitle))
         {
             var subFormatted = new FormattedText(
                 Subtitle,

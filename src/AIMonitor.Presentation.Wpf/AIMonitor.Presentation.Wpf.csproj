@@ -18,4 +18,8 @@
     <AssemblyName>AIUsageMonitor</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AIMonitor.Presentation.Wpf.Tests" />
+  </ItemGroup>
+
 </Project>

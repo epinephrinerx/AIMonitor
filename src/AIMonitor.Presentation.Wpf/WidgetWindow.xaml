@@ -8,13 +8,23 @@
         mc:Ignorable="d"
         Title="AIMonitor Widget"
         WindowStyle="None"
+        ResizeMode="CanResize"
         AllowsTransparency="True"
         Background="Transparent"
         Topmost="{Binding AlwaysOnTop}"
         Opacity="{Binding Opacity}"
-        Width="240" Height="240"
+        MinWidth="150" MinHeight="96" MaxWidth="300" MaxHeight="300"
+        Width="230" Height="175"
         MouseDown="OnWindowMouseDown">
     
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"
+                      ResizeBorderThickness="7"
+                      GlassFrameThickness="0"
+                      UseAeroCaptionButtons="False"
+                      CornerRadius="0" />
+    </WindowChrome.WindowChrome>
+
     <Border Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1"
@@ -51,15 +61,63 @@
                 </StackPanel>
             </DockPanel>
 
-            <!-- Center Gauge Display -->
-            <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <controls:GaugeControl DataContext="{Binding CurrentProvider.Meters[0]}"
-                                       Value="{Binding Value}"
-                                       ValueText="{Binding ValueText}"
-                                       Title="{Binding Title}"
-                                       Subtitle="{Binding Subtitle}"
-                                       GaugeBrush="{Binding GaugeBrush}"
-                                       Width="160" Height="160" />
+            <!-- Center Gauge Display / Too Small Message -->
+            <Grid Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                <TextBlock x:Name="TooSmallTextBlock"
+                           Text="Too small to show the meters."
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsTooSmall}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <ItemsControl x:Name="MetersItemsControl"
+                              ItemsSource="{Binding VisibleMeters}"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center">
+                    <ItemsControl.Style>
+                        <Style TargetType="ItemsControl">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsTooSmall}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ItemsControl.Style>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Rows="1" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <controls:GaugeControl Value="{Binding Value}"
+                                                   ValueText="{Binding ValueText}"
+                                                   Title="{Binding Title}"
+                                                   Subtitle="{Binding Subtitle}"
+                                                   GaugeBrush="{Binding GaugeBrush}"
+                                                   Width="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   Height="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   ShowSubtitle="{Binding DataContext.ShowSubtitle, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   ShowInlineValue="{Binding DataContext.InlineValue, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </Grid>
 
             <!-- Footer: Switch to Dashboard & Status -->
