@@ -159,6 +159,39 @@ public sealed class ReconfigurableQuotaClientTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_WhenCancelledWhileRequestBlocked_ThrowsOperationCanceledException_AndReleasesLease()
+    {
+        var (store, _, _) = CreateStore("openai", initialKey: "key-1");
+        BlockingDisposableTestClient? inner = null;
+
+        var client = new ReconfigurableQuotaClient(
+            store,
+            "openai",
+            _ =>
+            {
+                inner = new BlockingDisposableTestClient();
+                return inner;
+            });
+
+        using var cts = new CancellationTokenSource();
+        var req = client.GetSnapshotAsync(ProviderSnapshotRequest.Default, cts.Token);
+
+        Assert.NotNull(inner);
+        await inner.StartedTcs.Task;
+
+        // Cancel while the inner client request is blocked
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => req);
+
+        // Assert the lease was released: inner must not be disposed prior to retire,
+        // and when retired (via Dispose), inner must be disposed because lease count is 0.
+        Assert.Equal(0, inner.DisposeCount);
+        client.Dispose();
+        Assert.Equal(1, inner.DisposeCount);
+    }
+
+    [Fact]
     public async Task Dispose_DisposesCurrentInnerClient()
     {
         var (store, _, _) = CreateStore("openai", initialKey: "key");

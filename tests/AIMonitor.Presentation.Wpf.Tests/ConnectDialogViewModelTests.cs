@@ -389,23 +389,96 @@ public sealed class ConnectDialogViewModelTests
     }
 
     [Fact]
-    public async Task SaveCommand_ExecutesSaveAsync()
+    public async Task SaveCommand_AfterClearArmedAndNewKeyTyped_ReplacesKeyAndSavesExtraAndClosesWithTrue()
     {
-        var (store, secretStore, _) = CreateConnectionStore();
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        secretStore.OnSet = (_, _) => tcs.TrySetResult(true);
+        var (store, secretStore, session) = CreateConnectionStore(initialKey: "old-key", initialExtra: "10");
+        var closeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var vm = new ConnectDialogViewModel(
             ProviderMeta.OpenAi,
             null,
-            new ProviderConnection(null, "50"),
+            new ProviderConnection("old-key", "10"),
             store);
 
-        vm.Key = "sk-command-triggers-save";
+        vm.RequestClose += result =>
+        {
+            if (result)
+            {
+                closeTcs.TrySetResult(true);
+            }
+            else
+            {
+                closeTcs.TrySetException(new InvalidOperationException("Dialog closed with false instead of true."));
+            }
+        };
+
+        // Clear armed
+        vm.ClearCommand.Execute(null);
+        Assert.True(vm.ClearRequested);
+
+        // Typed new key, with an extra value for OpenAI
+        vm.Key = "sk-replacement-new-key";
+        vm.Extra = "75.00";
+
+        // Drive the REAL SaveCommand (not vm.SaveAsync())
         vm.SaveCommand.Execute(null);
 
-        await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal("sk-command-triggers-save", secretStore.Secrets["providers/openai/key"]);
+        // Wait on TaskCompletionSource completed by RequestClose(true) (WaitAsync 5s)
+        await closeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert secret store holds the new key (replace beats clear) and the extra was saved
+        Assert.Equal("sk-replacement-new-key", secretStore.Secrets["providers/openai/key"]);
+        Assert.Equal(1, secretStore.SetCalls);
+        Assert.Equal(0, secretStore.RemoveCalls);
+
+        var conn = await store.GetAsync("openai");
+        Assert.Equal("sk-replacement-new-key", conn.Key);
+        Assert.Equal("75.00", conn.Extra);
+        Assert.Equal("75.00", session.Current.Providers["openai"].Extra);
+    }
+
+    [Fact]
+    public async Task SaveCommand_AfterClearArmedAndBlankKey_RemovesKeyFromSecretStoreAndClosesWithTrue()
+    {
+        var (store, secretStore, _) = CreateConnectionStore(initialKey: "existing-key-to-remove", initialExtra: "50");
+        var closeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var vm = new ConnectDialogViewModel(
+            ProviderMeta.OpenAi,
+            null,
+            new ProviderConnection("existing-key-to-remove", "50"),
+            store);
+
+        vm.RequestClose += result =>
+        {
+            if (result)
+            {
+                closeTcs.TrySetResult(true);
+            }
+            else
+            {
+                closeTcs.TrySetException(new InvalidOperationException("Dialog closed with false instead of true."));
+            }
+        };
+
+        // Clear armed
+        vm.ClearCommand.Execute(null);
+        Assert.True(vm.ClearRequested);
+        Assert.Equal("", vm.Key);
+
+        // Save with blank key via REAL SaveCommand
+        vm.SaveCommand.Execute(null);
+
+        // Wait on TaskCompletionSource completed by RequestClose(true) (WaitAsync 5s)
+        await closeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert key removed from secret store and closed with true
+        Assert.Equal(1, secretStore.RemoveCalls);
+        Assert.Equal(0, secretStore.SetCalls);
+        Assert.False(secretStore.Secrets.ContainsKey("providers/openai/key"));
+
+        var conn = await store.GetAsync("openai");
+        Assert.Null(conn.Key);
     }
 
     [Fact]

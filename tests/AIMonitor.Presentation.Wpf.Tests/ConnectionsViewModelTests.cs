@@ -100,31 +100,40 @@ public sealed class ConnectionsViewModelTests
     [Fact]
     public async Task ShowAtStartup_PreservesOtherSettingsLikeTheme_WhenModifiedConcurrently()
     {
-        var (vm, session, store) = CreateViewModel(new AppSettings
+        var initial = new AppSettings
         {
             Theme = "light",
             ShowConnectionsAtStartup = true,
-            RefreshIntervalSeconds = 90
-        });
+            RefreshIntervalSeconds = 30
+        };
 
-        // Concurrently change Theme on session
-        await session.UpdateAsync(s => s with { Theme = "dark" });
+        var store = new BlockingSettingsStore(initial);
+        var session = new SettingsSession(store, initial);
+        var vm = new ConnectionsViewModel(session);
 
-        // Update ShowAtStartup
+        // 1. Start a first, unrelated update X and await store.SaveStarted.Task so the gate is HELD by X
+        var xTask = session.UpdateAsync(s => s with { RefreshIntervalSeconds = 90 });
+        await store.SaveStarted.Task;
+
+        // 2. Queue the competing update Y via session.UpdateAsync (it waits behind X)
+        var yTask = session.UpdateAsync(s => s with { Theme = "dark" });
+
+        // 3. NOW start the operation under test so any snapshot it captures at call time predates Y
         vm.ShowAtStartup = false;
-        if (vm.LastSaveTask is not null)
-        {
-            await vm.LastSaveTask;
-        }
+        Assert.NotNull(vm.LastSaveTask);
 
+        // 4. store.Release(); await X, Y and the operation; assert session.Current AND the last saved settings contain X's, Y's AND the operation's change
+        store.Release();
+        await Task.WhenAll(xTask, yTask, vm.LastSaveTask);
+
+        Assert.Equal(90, session.Current.RefreshIntervalSeconds);
         Assert.Equal("dark", session.Current.Theme);
         Assert.False(session.Current.ShowConnectionsAtStartup);
-        Assert.Equal(90, session.Current.RefreshIntervalSeconds);
 
         var lastSaved = store.SavedSettings.Last();
+        Assert.Equal(90, lastSaved.RefreshIntervalSeconds);
         Assert.Equal("dark", lastSaved.Theme);
         Assert.False(lastSaved.ShowConnectionsAtStartup);
-        Assert.Equal(90, lastSaved.RefreshIntervalSeconds);
     }
 
     [Fact]

@@ -216,32 +216,55 @@ public sealed class ProviderConnectionStoreTests : IDisposable
     [Fact]
     public async Task SaveAsync_PreservesOtherSettingsAndOtherProviders_EvenIfConcurrentModificationOccurred()
     {
-        var (settingsStore, settingsPath) = CreateSettingsStore();
         var initial = new AppSettings
         {
-            Theme = "system",
+            Theme = "light",
+            RefreshIntervalSeconds = 30,
             Providers = new Dictionary<string, ProviderPreference>
             {
-                ["gemini"] = new(Enabled: true, Extra: "gemini-project")
+                ["gemini"] = new(Enabled: true, Extra: "gemini-initial")
             }
         };
-        await settingsStore.SaveAsync(initial);
 
-        using var session = new SettingsSession(settingsStore, initial);
+        var store = new BlockingSettingsStore(initial);
+        using var session = new SettingsSession(store, initial);
         var secretStore = new TestSecretStore();
         var connectionStore = new ProviderConnectionStore(secretStore, session);
 
-        await session.UpdateAsync(s => s with { Theme = "dark" });
-        await connectionStore.SaveAsync("openai", typedKey: "sk-openai", clearRequested: false, extra: "200.0");
+        // 1. Start a first, unrelated update X and await store.SaveStarted.Task, so the gate is HELD by X
+        var xTask = session.UpdateAsync(s => s with { RefreshIntervalSeconds = 90 });
+        await store.SaveStarted.Task;
 
+        // 2. Queue the competing update Y via session.UpdateAsync (it waits behind X)
+        var yTask = session.UpdateAsync(s =>
+        {
+            var updatedProviders = new Dictionary<string, ProviderPreference>(s.Providers, StringComparer.OrdinalIgnoreCase)
+            {
+                ["gemini"] = new(Enabled: true, Extra: "gemini-updated")
+            };
+            return s with { Theme = "dark", Providers = updatedProviders };
+        });
+
+        // 3. NOW start the operation under test so any snapshot it captures at call time predates Y
+        var saveTask = connectionStore.SaveAsync("openai", typedKey: "sk-openai", clearRequested: false, extra: "200.0");
+
+        // 4. store.Release(); await X, Y and the operation; assert session.Current AND the last saved settings contain X's, Y's AND the operation's change
+        store.Release();
+        await Task.WhenAll(xTask, yTask, saveTask);
+
+        Assert.Equal(90, session.Current.RefreshIntervalSeconds);
         Assert.Equal("dark", session.Current.Theme);
-        Assert.Equal("gemini-project", session.Current.Providers["gemini"].Extra);
+        Assert.Equal("gemini-updated", session.Current.Providers["gemini"].Extra);
         Assert.Equal("200.0", session.Current.Providers["openai"].Extra);
+        Assert.True(session.Current.Providers["gemini"].Enabled);
 
-        var reloaded = await new JsonSettingsStore(settingsPath).LoadAsync();
-        Assert.Equal("dark", reloaded.Theme);
-        Assert.Equal("gemini-project", reloaded.Providers["gemini"].Extra);
-        Assert.Equal("200.0", reloaded.Providers["openai"].Extra);
+        var lastSaved = store.SavedSettings.Last();
+        Assert.Equal(90, lastSaved.RefreshIntervalSeconds);
+        Assert.Equal("dark", lastSaved.Theme);
+        Assert.Equal("gemini-updated", lastSaved.Providers["gemini"].Extra);
+        Assert.Equal("200.0", lastSaved.Providers["openai"].Extra);
+        Assert.True(lastSaved.Providers["gemini"].Enabled);
+        Assert.Equal("sk-openai", secretStore.Secrets["providers/openai/key"]);
     }
 
     [Fact]
