@@ -2,19 +2,19 @@ using System.IO;
 using System.Windows.Input;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
-using AIMonitor.Presentation.Wpf.Theme;
 
 namespace AIMonitor.Presentation.Wpf.ViewModels;
 
 /// <summary>
-/// ViewModel for the Settings dialog with live preview and atomic save.
-/// Conforms to PAR-026 and PAR-027.
+/// ViewModel for the Settings dialog with live preview, atomic save, and revert on discard/cancel.
+/// Conforms to PAR-026, PAR-027, and 1.3.3 parity.
 /// </summary>
 public sealed class SettingsViewModel : ViewModelBase
 {
     private readonly SettingsSession _session;
     private readonly IStartupRegistrar _startupRegistrar;
-    private readonly AppSettings _originalSettings;
+    private readonly Action<AppSettings>? _applyPreview;
+    private readonly AppSettings _entrySettings;
 
     private string _theme;
     private bool _startWithWindows;
@@ -24,23 +24,30 @@ public sealed class SettingsViewModel : ViewModelBase
     private double _widgetOpacity;
     private bool _widgetAlwaysOnTop;
     private int _chartRangeDays;
+    private WindowSizeOption _selectedWindowSize;
+
+    private bool _discarded;
+    private bool _saved;
 
     public SettingsViewModel(
         SettingsSession session,
-        IStartupRegistrar startupRegistrar)
+        IStartupRegistrar startupRegistrar,
+        Action<AppSettings>? applyPreview = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _startupRegistrar = startupRegistrar ?? throw new ArgumentNullException(nameof(startupRegistrar));
-        _originalSettings = session.Current;
+        _applyPreview = applyPreview;
+        _entrySettings = session.Current;
 
-        _theme = _originalSettings.Theme;
-        _startWithWindows = _originalSettings.StartWithWindows;
-        _minimizeToTray = _originalSettings.MinimizeToTray;
-        _showTrayIcon = _originalSettings.ShowTrayIcon;
-        _refreshIntervalSeconds = _originalSettings.RefreshIntervalSeconds;
-        _widgetOpacity = _originalSettings.WidgetOpacity;
-        _widgetAlwaysOnTop = _originalSettings.WidgetAlwaysOnTop;
-        _chartRangeDays = _originalSettings.ChartRangeDays;
+        _theme = _entrySettings.Theme;
+        _startWithWindows = _entrySettings.StartWithWindows;
+        _minimizeToTray = _entrySettings.MinimizeToTray;
+        _showTrayIcon = _entrySettings.ShowTrayIcon;
+        _refreshIntervalSeconds = _entrySettings.RefreshIntervalSeconds;
+        _widgetOpacity = Math.Clamp(_entrySettings.WidgetOpacity, 0.25, 1.0);
+        _widgetAlwaysOnTop = _entrySettings.WidgetAlwaysOnTop;
+        _chartRangeDays = _entrySettings.ChartRangeDays;
+        _selectedWindowSize = WindowSizeOption.FromSize(_entrySettings.DashboardWidth, _entrySettings.DashboardHeight);
 
         SaveCommand = new RelayCommand(async () => await ExecuteSaveCommandAsync());
         CancelCommand = new RelayCommand(Cancel);
@@ -53,8 +60,7 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             if (SetProperty(ref _theme, value))
             {
-                // Live preview theme (PAR-027)
-                ThemeManager.Instance.ApplyTheme(value);
+                ApplyPreview();
             }
         }
     }
@@ -86,13 +92,29 @@ public sealed class SettingsViewModel : ViewModelBase
     public double WidgetOpacity
     {
         get => _widgetOpacity;
-        set => SetProperty(ref _widgetOpacity, value);
+        set
+        {
+            var clamped = Math.Clamp(value, 0.25, 1.0);
+            if (SetProperty(ref _widgetOpacity, clamped))
+            {
+                OnPropertyChanged(nameof(OpacityPercent));
+                ApplyPreview();
+            }
+        }
     }
+
+    public int OpacityPercent => (int)Math.Round(_widgetOpacity * 100);
 
     public bool WidgetAlwaysOnTop
     {
         get => _widgetAlwaysOnTop;
-        set => SetProperty(ref _widgetAlwaysOnTop, value);
+        set
+        {
+            if (SetProperty(ref _widgetAlwaysOnTop, value))
+            {
+                ApplyPreview();
+            }
+        }
     }
 
     public int ChartRangeDays
@@ -101,11 +123,38 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _chartRangeDays, value);
     }
 
+    public IReadOnlyList<WindowSizeOption> WindowSizeOptions => WindowSizeOption.All;
+
+    public WindowSizeOption SelectedWindowSize
+    {
+        get => _selectedWindowSize;
+        set
+        {
+            var option = value ?? WindowSizeOption.Standard;
+            if (SetProperty(ref _selectedWindowSize, option))
+            {
+                ApplyPreview();
+            }
+        }
+    }
+
     public ICommand SaveCommand { get; }
     public ICommand CancelCommand { get; }
 
     public event Action<bool>? RequestClose;
     public event Action<string>? SaveFailed;
+
+    private void ApplyPreview()
+    {
+        _applyPreview?.Invoke(_session.Current with
+        {
+            Theme = Theme,
+            WidgetOpacity = WidgetOpacity,
+            WidgetAlwaysOnTop = WidgetAlwaysOnTop,
+            DashboardWidth = SelectedWindowSize.Width,
+            DashboardHeight = SelectedWindowSize.Height
+        });
+    }
 
     private async Task ExecuteSaveCommandAsync()
     {
@@ -133,8 +182,12 @@ public sealed class SettingsViewModel : ViewModelBase
             RefreshIntervalSeconds = RefreshIntervalSeconds,
             WidgetOpacity = WidgetOpacity,
             WidgetAlwaysOnTop = WidgetAlwaysOnTop,
-            ChartRangeDays = ChartRangeDays
+            ChartRangeDays = ChartRangeDays,
+            DashboardWidth = SelectedWindowSize.Width,
+            DashboardHeight = SelectedWindowSize.Height
         }).ConfigureAwait(true);
+
+        _saved = true;
 
         // Update Windows startup entry only on Save (PAR-024, PAR-027)
         try
@@ -160,10 +213,27 @@ public sealed class SettingsViewModel : ViewModelBase
         RequestClose?.Invoke(true);
     }
 
+    public void Discard()
+    {
+        if (_saved || _discarded)
+        {
+            return;
+        }
+
+        _discarded = true;
+        _applyPreview?.Invoke(_session.Current with
+        {
+            Theme = _entrySettings.Theme,
+            WidgetOpacity = _entrySettings.WidgetOpacity,
+            WidgetAlwaysOnTop = _entrySettings.WidgetAlwaysOnTop,
+            DashboardWidth = _entrySettings.DashboardWidth,
+            DashboardHeight = _entrySettings.DashboardHeight
+        });
+    }
+
     public void Cancel()
     {
-        // Revert live preview back to original settings (PAR-027)
-        ThemeManager.Instance.ApplyTheme(_originalSettings.Theme);
+        Discard();
         RequestClose?.Invoke(false);
     }
 }
