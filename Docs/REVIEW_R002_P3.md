@@ -28,7 +28,7 @@ Clear ลบทันที · Cancel บันทึก · Save ไม่สน
 **เขียว (ต้องตรวจมือ):** Exit ระหว่าง Save (ข้อ 7)
 
 ## ผลรวม
-build 0 warning · tests ผ่านทั้งโซลูชัน (Domain 218, Application 84, Presentation 148, Infrastructure 661) · `dotnet format` สะอาด
+build 0 warning · tests ผ่านทั้งโซลูชัน (Domain 218, Application 85, Presentation 148, Infrastructure 661) · `dotnet format` สะอาด
 
 ## ตรวจมือบนแอปจริง (🧪 รอผู้ใช้)
 1. เปิดปุ่ม Connections บน header → เห็น 3 การ์ด สถานะมีสัญลักษณ์+คำ; Re-detect all ทำงาน; ติ๊ก "Show this page at startup" แล้วเปิดแอปใหม่ตรงตามที่เลือก
