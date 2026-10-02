@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.Json;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
@@ -451,5 +453,89 @@ public sealed class ConnectDialogViewModelTests
         Assert.False(results[1]);
         Assert.Equal(0, secretStore.SetCalls);
         Assert.Equal(0, secretStore.RemoveCalls);
+    }
+
+    [Fact]
+    public async Task SaveCommand_WhenStoreThrowsWin32ExceptionWithKey_DoesNotClose_FiresSaveFailed_AndMessageDoesNotContainKey()
+    {
+        var (store, secretStore, _) = CreateConnectionStore();
+        var typedKey = "sk-admin-win32-secret-key-99999";
+        secretStore.FailOnSet = new Win32Exception(5, $"Native DPAPI error for key: {typedKey}");
+
+        var vm = new ConnectDialogViewModel(
+            ProviderMeta.OpenAi,
+            null,
+            new ProviderConnection(null, ""),
+            store);
+
+        var closeInvoked = false;
+        vm.RequestClose += _ => closeInvoked = true;
+
+        string? failureMessage = null;
+        vm.SaveFailed += msg => failureMessage = msg;
+
+        vm.Key = typedKey;
+        await vm.SaveAsync();
+
+        Assert.False(closeInvoked);
+        Assert.NotNull(failureMessage);
+        Assert.Contains(nameof(Win32Exception), failureMessage);
+        Assert.DoesNotContain(typedKey, failureMessage);
+    }
+
+    [Fact]
+    public async Task SaveCommand_WhenStoreThrowsInvalidDataExceptionWithKey_DoesNotClose_FiresSaveFailed_AndMessageDoesNotContainKey()
+    {
+        var (store, secretStore, _) = CreateConnectionStore();
+        var typedKey = "sk-admin-invalid-data-secret-88888";
+        secretStore.FailOnSet = new InvalidDataException($"Corrupted store payload containing: {typedKey}");
+
+        var vm = new ConnectDialogViewModel(
+            ProviderMeta.OpenAi,
+            null,
+            new ProviderConnection(null, ""),
+            store);
+
+        var closeInvoked = false;
+        vm.RequestClose += _ => closeInvoked = true;
+
+        string? failureMessage = null;
+        vm.SaveFailed += msg => failureMessage = msg;
+
+        vm.Key = typedKey;
+        await vm.SaveAsync();
+
+        Assert.False(closeInvoked);
+        Assert.NotNull(failureMessage);
+        Assert.Contains(nameof(InvalidDataException), failureMessage);
+        Assert.DoesNotContain(typedKey, failureMessage);
+    }
+
+    [Fact]
+    public async Task SaveCommand_WhenStoreThrowsJsonExceptionWithKey_DoesNotClose_FiresSaveFailed_AndMessageDoesNotContainKey()
+    {
+        var (store, secretStore, _) = CreateConnectionStore();
+        var typedKey = "sk-admin-json-secret-77777";
+        secretStore.FailOnSet = new JsonException($"Syntax error parsing JSON containing: {typedKey}");
+
+        var vm = new ConnectDialogViewModel(
+            ProviderMeta.OpenAi,
+            null,
+            new ProviderConnection(null, ""),
+            store);
+
+        var closeInvoked = false;
+        vm.RequestClose += _ => closeInvoked = true;
+
+        string? failureMessage = null;
+        vm.SaveFailed += msg => failureMessage = msg;
+
+        vm.Key = typedKey;
+        await vm.SaveAsync();
+
+        Assert.False(closeInvoked);
+        Assert.NotNull(failureMessage);
+        Assert.Contains(nameof(JsonException), failureMessage);
+        Assert.DoesNotContain(typedKey, failureMessage);
     }
 }

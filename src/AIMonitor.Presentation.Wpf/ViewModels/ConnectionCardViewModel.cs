@@ -138,4 +138,17 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             ConnectButtonText = detection.State == DetectionState.Connected ? "Change..." : "Connect...";
         }
     }
+
+    /// <summary>
+    /// Displays the card in an unavailable state when detection failed and no prior detection was present.
+    /// </summary>
+    public void SetUnavailable(string? error)
+    {
+        Detection = null;
+        StateWord = "Unavailable";
+        StateGlyph = "!";
+        Account = "Could not check";
+        SourceLine = error ?? "";
+        ConnectButtonText = !Meta.NeedsKey ? "Sign-in help" : "Connect...";
+    }
 }

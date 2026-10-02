@@ -154,6 +154,56 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(80.0, reading.Percentage);
     }
 
+    [Fact]
+    public async Task RefreshAsync_WhenCalledWhileRefreshing_SetsPendingRefreshAndRunsExactlyOnceMore()
+    {
+        var blockTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callCount = 0;
+
+        var client = new TestQuotaClient(async (req, ct) =>
+        {
+            var current = Interlocked.Increment(ref callCount);
+            if (current == 1)
+            {
+                startedTcs.TrySetResult(true);
+                await blockTcs.Task;
+            }
+
+            return new ProviderSnapshot("claude", configured: true);
+        });
+
+        var registrations = new[] { new ProviderClientRegistration("claude", client) };
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var vm = new MainWindowViewModel(coordinator, session);
+
+        // Start first refresh
+        var task1 = vm.RefreshAsync();
+        await startedTcs.Task;
+        Assert.True(vm.IsRefreshing);
+        Assert.Equal(1, callCount);
+
+        // Call again twice while blocked
+        var task2 = vm.RefreshAsync();
+        var task3 = vm.RefreshAsync();
+
+        // Release the blocked quota client
+        blockTcs.TrySetResult(true);
+
+        await task1;
+        await task2;
+        await task3;
+
+        // Quota client must be invoked exactly twice in total
+        Assert.Equal(2, callCount);
+
+        // A call with nothing pending does not loop
+        await vm.RefreshAsync();
+        Assert.Equal(3, callCount);
+    }
+
     private sealed class FakeTrayReadingsSink : ITrayReadingsSink
     {
         public List<IReadOnlyList<TrayReading>> RecordedUpdates { get; } = [];

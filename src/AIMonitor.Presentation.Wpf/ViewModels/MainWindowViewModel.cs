@@ -13,6 +13,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
 
     private bool _isRefreshing;
+    private bool _pendingRefresh;
     private string _lastRefreshStatus = "Ready";
     private ProviderTabViewModel _selectedTab;
 
@@ -122,7 +123,12 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public async Task RefreshAsync()
     {
-        if (IsRefreshing) return;
+        if (IsRefreshing)
+        {
+            _pendingRefresh = true;
+            return;
+        }
+
         IsRefreshing = true;
         LastRefreshStatus = "Refreshing providers...";
 
@@ -188,6 +194,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         finally
         {
             IsRefreshing = false;
+            if (_pendingRefresh)
+            {
+                _pendingRefresh = false;
+                await RefreshAsync();
+            }
         }
     }
 }

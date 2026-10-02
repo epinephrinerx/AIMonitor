@@ -1,3 +1,4 @@
+using System.IO;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.ViewModels;
@@ -160,5 +161,92 @@ public sealed class ConnectionsViewModelTests
 
         vm.GeminiCard.RedetectCommand.Execute(null);
         Assert.Equal("gemini", redetectedProvider);
+    }
+
+    [Fact]
+    public void Update_WhenSnapshotDetectionIsNull_AndCardHadPreviousDetection_KeepsPreviousDetection()
+    {
+        var (vm, _, _) = CreateViewModel();
+
+        var initialDetection = new DetectionInfo("claude", DetectionState.Connected, "cli", "Claude CLI", "claude-user@example.com");
+        var initialSnap = new ProviderSnapshot("claude", configured: true, detection: initialDetection);
+        vm.Update(new Dictionary<string, ProviderSnapshot> { ["claude"] = initialSnap });
+
+        Assert.Equal(DetectionState.Connected, vm.ClaudeCard.Detection?.State);
+        Assert.Equal("Connected", vm.ClaudeCard.StateWord);
+        Assert.Equal("claude-user@example.com", vm.ClaudeCard.Account);
+
+        // Snapshot with Detection == null (e.g. unexpected error on refresh)
+        var errorSnap = new ProviderSnapshot("claude", configured: false, error: "Network timeout");
+        vm.Update(new Dictionary<string, ProviderSnapshot> { ["claude"] = errorSnap });
+
+        // Must keep previous detection
+        Assert.Equal(DetectionState.Connected, vm.ClaudeCard.Detection?.State);
+        Assert.Equal("Connected", vm.ClaudeCard.StateWord);
+        Assert.Equal("claude-user@example.com", vm.ClaudeCard.Account);
+    }
+
+    [Fact]
+    public void Update_WhenSnapshotDetectionIsNull_AndCardNeverHadDetection_ShowsUnavailable()
+    {
+        var (vm, _, _) = CreateViewModel();
+
+        var errorSnap = new ProviderSnapshot("openai", configured: false, error: "App server crashed");
+        vm.Update(new Dictionary<string, ProviderSnapshot> { ["openai"] = errorSnap });
+
+        Assert.Null(vm.OpenAiCard.Detection);
+        Assert.Equal("Unavailable", vm.OpenAiCard.StateWord);
+        Assert.Equal("!", vm.OpenAiCard.StateGlyph);
+        Assert.Equal("Could not check", vm.OpenAiCard.Account);
+        Assert.Equal("App server crashed", vm.OpenAiCard.SourceLine);
+        Assert.Equal("Connect...", vm.OpenAiCard.ConnectButtonText);
+    }
+
+    [Fact]
+    public void Update_WhenCardHasNoSnapshotAtAll_StaysChecking()
+    {
+        var (vm, _, _) = CreateViewModel();
+
+        // Card never had a snapshot and snapshots dictionary is empty
+        vm.Update(new Dictionary<string, ProviderSnapshot>());
+
+        Assert.Null(vm.ClaudeCard.Detection);
+        Assert.Equal("Checking...", vm.ClaudeCard.StateWord);
+        Assert.Equal("–", vm.ClaudeCard.StateGlyph);
+        Assert.Equal("Not signed in", vm.ClaudeCard.Account);
+        Assert.Equal(ProviderMeta.Claude.Tagline, vm.ClaudeCard.SourceLine);
+    }
+
+    [Fact]
+    public async Task ShowAtStartup_WhenSaveThrowsIOException_RevertsValue_RaisesSaveFailed_AndObservesException()
+    {
+        var initial = new AppSettings { ShowConnectionsAtStartup = true };
+        var store = new BlockingSettingsStore(initial);
+        store.Release();
+        store.FailOnSave = new IOException("Disk write failure");
+        var session = new SettingsSession(store, initial);
+        var vm = new ConnectionsViewModel(session);
+
+        string? failedMessage = null;
+        vm.SaveFailed += msg => failedMessage = msg;
+
+        var propertyChangedList = new List<string?>();
+        vm.PropertyChanged += (_, e) => propertyChangedList.Add(e.PropertyName);
+
+        // Attempt change
+        vm.ShowAtStartup = false;
+
+        // Await observed task
+        Assert.NotNull(vm.LastSaveTask);
+        await vm.LastSaveTask;
+
+        // Value must be reverted to persisted value (true)
+        Assert.True(vm.ShowAtStartup);
+        Assert.Contains(nameof(ConnectionsViewModel.ShowAtStartup), propertyChangedList);
+
+        // Generic message, no exception text
+        Assert.NotNull(failedMessage);
+        Assert.DoesNotContain("Disk write failure", failedMessage);
+        Assert.DoesNotContain("IOException", failedMessage);
     }
 }

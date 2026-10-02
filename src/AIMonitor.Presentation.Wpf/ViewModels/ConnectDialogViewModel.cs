@@ -161,13 +161,14 @@ public sealed class ConnectDialogViewModel : ViewModelBase
             await _store.SaveAsync(Meta.Id, Key, ClearRequested, extraToSave).ConfigureAwait(true);
             RequestClose?.Invoke(true);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var message = ex switch
             {
                 UnauthorizedAccessException => "Failed to save credentials: Access denied.",
                 CryptographicException => "Failed to save credentials: Cryptographic error.",
-                _ => "Failed to save credentials due to an I/O error."
+                IOException => "Failed to save credentials due to an I/O error.",
+                _ => $"Failed to save credentials ({ex.GetType().Name})."
             };
 
             SaveFailed?.Invoke(message);

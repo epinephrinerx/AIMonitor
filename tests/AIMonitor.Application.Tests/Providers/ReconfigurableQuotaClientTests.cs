@@ -184,6 +184,116 @@ public sealed class ReconfigurableQuotaClientTests
             () => client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task GetSnapshotAsync_WhenConnectionChangesMidRequest_DefersDisposalUntilBlockedRequestCompletes()
+    {
+        var (store, _, _) = CreateStore("openai", initialKey: "key-1");
+        var clients = new List<BlockingDisposableTestClient>();
+
+        using var client = new ReconfigurableQuotaClient(
+            store,
+            "openai",
+            _ =>
+            {
+                var c = new BlockingDisposableTestClient();
+                clients.Add(c);
+                return c;
+            });
+
+        // Start request 1 on client 1 (will block)
+        var req1 = client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+        await clients[0].StartedTcs.Task;
+
+        // Change connection in store
+        await store.SaveAsync("openai", typedKey: "key-2", clearRequested: false, extra: null);
+
+        // Start request 2 on client 2
+        var req2 = client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+        await clients[1].StartedTcs.Task;
+
+        // Client 1 must NOT be disposed while its request is still running
+        Assert.Equal(0, clients[0].DisposeCount);
+
+        // Complete request 2
+        clients[1].BlockTcs.TrySetResult(true);
+        await req2;
+
+        // Client 1 STILL must NOT be disposed while request 1 is running
+        Assert.Equal(0, clients[0].DisposeCount);
+
+        // Release client 1 request
+        clients[0].BlockTcs.TrySetResult(true);
+        await req1;
+
+        // Now client 1 must be disposed exactly once
+        Assert.Equal(1, clients[0].DisposeCount);
+    }
+
+    [Fact]
+    public async Task Dispose_WhenCalledMidRequest_DefersInnerDisposalUntilBlockedRequestCompletes()
+    {
+        var (store, _, _) = CreateStore("openai", initialKey: "key-1");
+        BlockingDisposableTestClient? inner = null;
+
+        var client = new ReconfigurableQuotaClient(
+            store,
+            "openai",
+            _ =>
+            {
+                inner = new BlockingDisposableTestClient();
+                return inner;
+            });
+
+        var req = client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+        Assert.NotNull(inner);
+        await inner.StartedTcs.Task;
+
+        // Call Dispose() mid-request
+        client.Dispose();
+
+        // Inner must NOT be disposed yet while request is still running
+        Assert.Equal(0, inner.DisposeCount);
+
+        // Release the blocked request
+        inner.BlockTcs.TrySetResult(true);
+        await req;
+
+        // Now inner must be disposed exactly once
+        Assert.Equal(1, inner.DisposeCount);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_PropagatesCancellationTokenToStoreAndInnerClient()
+    {
+        var secretStore = new TokenCapturingSecretStore();
+        var initialSettings = new AppSettings();
+        var settingsStore = new BlockingSettingsStore(initialSettings);
+        settingsStore.ReleaseSource.TrySetResult();
+        var session = new SettingsSession(settingsStore, initialSettings);
+        var store = new ProviderConnectionStore(secretStore, session);
+
+        TokenCapturingTestClient? inner = null;
+        using var client = new ReconfigurableQuotaClient(
+            store,
+            "openai",
+            _ =>
+            {
+                inner = new TokenCapturingTestClient();
+                return inner;
+            });
+
+        using var cts = new CancellationTokenSource();
+        var distinctToken = cts.Token;
+        Assert.False(distinctToken.IsCancellationRequested);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, distinctToken);
+        Assert.NotNull(snapshot);
+
+        Assert.NotNull(inner);
+        Assert.Equal(distinctToken, secretStore.CapturedGetToken);
+        Assert.Equal(distinctToken, inner.CapturedToken);
+    }
+
     private sealed class DisposableTestClient : IProviderQuotaClient, IDisposable
     {
         public bool IsDisposed { get; private set; }
@@ -198,5 +308,49 @@ public sealed class ReconfigurableQuotaClientTests
         {
             IsDisposed = true;
         }
+    }
+
+    private sealed class BlockingDisposableTestClient : IProviderQuotaClient, IDisposable
+    {
+        public TaskCompletionSource<bool> StartedTcs { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> BlockTcs { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DisposeCount;
+
+        public async Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+        {
+            StartedTcs.TrySetResult(true);
+            await BlockTcs.Task.WaitAsync(cancellationToken);
+            return new ProviderSnapshot("openai", configured: true);
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Increment(ref DisposeCount);
+        }
+    }
+
+    private sealed class TokenCapturingTestClient : IProviderQuotaClient
+    {
+        public CancellationToken CapturedToken { get; private set; }
+
+        public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+        {
+            CapturedToken = cancellationToken;
+            return Task.FromResult(new ProviderSnapshot("openai", configured: true));
+        }
+    }
+
+    private sealed class TokenCapturingSecretStore : ISecretStore
+    {
+        public CancellationToken CapturedGetToken { get; private set; }
+
+        public Task<string?> GetAsync(string name, CancellationToken cancellationToken = default)
+        {
+            CapturedGetToken = cancellationToken;
+            return Task.FromResult<string?>("secret-key");
+        }
+
+        public Task SetAsync(string name, string value, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RemoveAsync(string name, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

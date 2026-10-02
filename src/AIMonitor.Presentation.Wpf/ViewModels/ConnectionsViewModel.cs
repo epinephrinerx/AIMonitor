@@ -28,8 +28,22 @@ public sealed class ConnectionsViewModel : ViewModelBase
         {
             if (SetProperty(ref _showAtStartup, value))
             {
-                LastSaveTask = _settingsSession.UpdateAsync(s => s with { ShowConnectionsAtStartup = value });
+                LastSaveTask = SaveShowAtStartupAsync(value);
             }
+        }
+    }
+
+    private async Task SaveShowAtStartupAsync(bool value)
+    {
+        try
+        {
+            await _settingsSession.UpdateAsync(s => s with { ShowConnectionsAtStartup = value }).ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            _showAtStartup = _settingsSession.Current.ShowConnectionsAtStartup;
+            OnPropertyChanged(nameof(ShowAtStartup));
+            SaveFailed?.Invoke("Failed to save startup preference.");
         }
     }
 
@@ -44,6 +58,7 @@ public sealed class ConnectionsViewModel : ViewModelBase
     public event Action<string>? ConnectRequested;
     public event Action<string?>? RedetectRequested;
     public event Action? OpenDashboardRequested;
+    public event Action<string>? SaveFailed;
 
     public ConnectionsViewModel(SettingsSession settingsSession)
     {
@@ -78,6 +93,9 @@ public sealed class ConnectionsViewModel : ViewModelBase
 
     /// <summary>
     /// Updates all provider cards with the latest detection outcome from each provider's snapshot.
+    /// If snapshot.Detection is null, preserves any previous detection on the card; if the card
+    /// never had one, marks it as Unavailable with "Could not check".
+    /// Only a card with no snapshot at all stays "Checking...".
     /// </summary>
     public void Update(IReadOnlyDictionary<string, ProviderSnapshot> snapshots)
     {
@@ -87,7 +105,16 @@ public sealed class ConnectionsViewModel : ViewModelBase
         {
             if (snapshots.TryGetValue(card.Meta.Id, out var snapshot))
             {
-                card.Update(snapshot.Detection);
+                if (snapshot.Detection is not null)
+                {
+                    card.Update(snapshot.Detection);
+                }
+                else if (card.Detection is null)
+                {
+                    card.SetUnavailable(snapshot.Error);
+                }
+                // if snapshot.Detection is null and card.Detection is not null:
+                // keep the card's previous detection.
             }
             else
             {
