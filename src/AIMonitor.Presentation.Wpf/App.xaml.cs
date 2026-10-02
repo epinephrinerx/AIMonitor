@@ -33,9 +33,14 @@ public partial class App : System.Windows.Application
     private JsonSettingsStore? _settingsStore;
     private SettingsSession? _settingsSession;
     private DpapiSecretStore? _secretStore;
+    private ProviderConnectionStore? _connectionStore;
+    private ReconfigurableQuotaClient? _openAiClient;
+    private ReconfigurableQuotaClient? _geminiClient;
     private WindowsStartupRegistrar? _startupRegistrar;
     private LiveSettingsApplier? _liveSettingsApplier;
     private DispatcherTimer? _refreshTimer;
+
+    public ProviderConnectionStore? ConnectionStore => _connectionStore;
 
     private MainWindow? _mainWindow;
     private WidgetWindow? _widgetWindow;
@@ -92,25 +97,35 @@ public partial class App : System.Windows.Application
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var clock = SystemClock.Instance;
 
-        var openAiKey = await _secretStore.GetAsync("providers/openai/key").ConfigureAwait(true);
-        var geminiKey = await _secretStore.GetAsync("providers/gemini/key").ConfigureAwait(true);
-
-        _settingsSession.Current.Providers.TryGetValue("openai", out var openAiPref);
-        _settingsSession.Current.Providers.TryGetValue("gemini", out var geminiPref);
-
-        double? monthlyBudget = double.TryParse(openAiPref?.Extra, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedBudget) && parsedBudget > 0
-            ? parsedBudget
-            : null;
+        _connectionStore = new ProviderConnectionStore(_secretStore!, _settingsSession);
 
         var claudeClient = new ClaudeLiveQuotaClient(_httpClient, Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"), userProfile, clock);
-        var openAiClient = new OpenAiLiveQuotaClient(_httpClient, userProfile, clock, savedAdminKey: openAiKey, monthlyBudgetUsd: monthlyBudget);
-        var geminiClient = new GeminiLiveQuotaClient(_httpClient, userProfile, clock, savedServiceAccountPath: geminiKey, projectOverride: string.IsNullOrWhiteSpace(geminiPref?.Extra) ? null : geminiPref.Extra);
+
+        _openAiClient = new ReconfigurableQuotaClient(
+            _connectionStore,
+            "openai",
+            conn =>
+            {
+                double? monthlyBudget = double.TryParse(conn.Extra, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedBudget) && parsedBudget > 0
+                    ? parsedBudget
+                    : null;
+                return new OpenAiLiveQuotaClient(_httpClient, userProfile, clock, savedAdminKey: conn.Key, monthlyBudgetUsd: monthlyBudget);
+            });
+
+        _geminiClient = new ReconfigurableQuotaClient(
+            _connectionStore,
+            "gemini",
+            conn =>
+            {
+                var projectOverride = string.IsNullOrWhiteSpace(conn.Extra) ? null : conn.Extra;
+                return new GeminiLiveQuotaClient(_httpClient, userProfile, clock, savedServiceAccountPath: conn.Key, projectOverride: projectOverride);
+            });
 
         var registrations = new[]
         {
             new ProviderClientRegistration("claude", claudeClient),
-            new ProviderClientRegistration("openai", openAiClient),
-            new ProviderClientRegistration("gemini", geminiClient)
+            new ProviderClientRegistration("openai", _openAiClient),
+            new ProviderClientRegistration("gemini", _geminiClient)
         };
 
         var refreshUseCase = new RefreshProvidersUseCase(registrations);
@@ -336,6 +351,8 @@ public partial class App : System.Windows.Application
         _refreshTimer?.Stop();
         _liveSettingsApplier?.Shutdown();
         _ = _refreshCoordinator?.DisposeAsync();
+        _openAiClient?.Dispose();
+        _geminiClient?.Dispose();
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();
         ThemeManager.Instance.Dispose();
