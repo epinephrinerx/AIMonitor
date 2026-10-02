@@ -1,5 +1,6 @@
 using System.Windows.Input;
 using System.Windows.Threading;
+using AIMonitor.Application.Settings;
 
 namespace AIMonitor.Presentation.Wpf.ViewModels;
 
@@ -56,6 +57,17 @@ public sealed class WidgetViewModel : ViewModelBase
     {
         get => _alwaysOnTop;
         set => SetProperty(ref _alwaysOnTop, value);
+    }
+
+    /// <summary>
+    /// Applies updated opacity and always-on-top settings to the widget.
+    /// Property-changed notifications are only raised when property values actually change.
+    /// </summary>
+    public void ApplySettings(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Opacity = settings.WidgetOpacity;
+        AlwaysOnTop = settings.WidgetAlwaysOnTop;
     }
 
     public ICommand NextProviderCommand { get; }

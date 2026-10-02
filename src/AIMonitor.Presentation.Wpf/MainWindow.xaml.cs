@@ -64,8 +64,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Minimize to tray if configured (PAR-025)
-        if (_session?.Current.MinimizeToTray == true)
+        // Minimize to tray if configured and tray is available (PAR-025)
+        if (_session is not null && TrayPolicy.ShouldHideOnClose(_session.Current))
         {
             e.Cancel = true;
             Hide();
