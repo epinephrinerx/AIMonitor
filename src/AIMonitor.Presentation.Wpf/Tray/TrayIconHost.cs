@@ -22,6 +22,7 @@ public sealed class TrayIconHost : ITrayHost
     private readonly List<TrayReading> _readings = [];
     private int _currentReadingIndex;
     private IntPtr _currentHicon = IntPtr.Zero;
+    private ContextMenuStrip? _contextMenu;
     private bool _disposed;
 
     public event Action? OpenDashboardRequested;
@@ -42,17 +43,17 @@ public sealed class TrayIconHost : ITrayHost
 
         _notifyIcon.DoubleClick += (s, e) => OpenDashboardRequested?.Invoke();
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Open Dashboard", null, (s, e) => OpenDashboardRequested?.Invoke());
-        menu.Items.Add("Open Widget", null, (s, e) => OpenWidgetRequested?.Invoke());
-        menu.Items.Add("Usage Log...", null, (s, e) => OpenLogRequested?.Invoke());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Refresh Now", null, (s, e) => RefreshRequested?.Invoke());
-        menu.Items.Add("Settings...", null, (s, e) => OpenSettingsRequested?.Invoke());
-        menu.Items.Add("About...", null, (s, e) => OpenAboutRequested?.Invoke());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (s, e) => ExitRequested?.Invoke());
-        _notifyIcon.ContextMenuStrip = menu;
+        _contextMenu = new ContextMenuStrip();
+        _contextMenu.Items.Add("Open Dashboard", null, (s, e) => OpenDashboardRequested?.Invoke());
+        _contextMenu.Items.Add("Open Widget", null, (s, e) => OpenWidgetRequested?.Invoke());
+        _contextMenu.Items.Add("Usage Log...", null, (s, e) => OpenLogRequested?.Invoke());
+        _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add("Refresh Now", null, (s, e) => RefreshRequested?.Invoke());
+        _contextMenu.Items.Add("Settings...", null, (s, e) => OpenSettingsRequested?.Invoke());
+        _contextMenu.Items.Add("About...", null, (s, e) => OpenAboutRequested?.Invoke());
+        _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add("Exit", null, (s, e) => ExitRequested?.Invoke());
+        _notifyIcon.ContextMenuStrip = _contextMenu;
 
         // 2-second rotation timer (PAR-022)
         _rotationTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -174,6 +175,12 @@ public sealed class TrayIconHost : ITrayHost
 
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+
+        if (_contextMenu is not null)
+        {
+            _contextMenu.Dispose();
+            _contextMenu = null;
+        }
 
         if (_currentHicon != IntPtr.Zero)
         {

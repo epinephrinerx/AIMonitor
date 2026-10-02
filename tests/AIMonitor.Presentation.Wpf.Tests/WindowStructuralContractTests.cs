@@ -59,20 +59,60 @@ public sealed class WindowStructuralContractTests
         Assert.True(File.Exists(mainWindowFile), $"Expected file does not exist: {mainWindowFile}");
         Assert.True(File.Exists(appFile), $"Expected file does not exist: {appFile}");
 
-        var inspectedCount = 0;
-
-        // 1. MainWindow.xaml.cs must route hide-on-close decisions through TrayPolicy.ShouldHideOnClose
+        // 1. MainWindow.xaml.cs must route hide-on-close decisions through TrayPolicy.ShouldHideOnClose,
+        // and within the extracted OnClosing body, ShouldHideOnClose must be followed by e.Cancel = true and Hide() in that order (T9).
         var mainWindowContent = File.ReadAllText(mainWindowFile);
-        Assert.Contains("TrayPolicy.ShouldHideOnClose", mainWindowContent, StringComparison.Ordinal);
-        inspectedCount++;
+        var cleanMainWindowContent = StripComments(mainWindowContent);
+
+        const string onClosingSignature = "void OnClosing(";
+        var onClosingIndex = cleanMainWindowContent.IndexOf(onClosingSignature, StringComparison.Ordinal);
+        Assert.True(onClosingIndex >= 0, "Method declaration 'void OnClosing(' was not found in MainWindow.xaml.cs");
+
+        var openBraceIndex = cleanMainWindowContent.IndexOf('{', onClosingIndex);
+        Assert.True(openBraceIndex >= 0, "Opening brace for OnClosing was not found in MainWindow.xaml.cs");
+
+        var braceDepth = 0;
+        var closeBraceIndex = -1;
+        for (var i = openBraceIndex; i < cleanMainWindowContent.Length; i++)
+        {
+            if (cleanMainWindowContent[i] == '{')
+            {
+                braceDepth++;
+            }
+            else if (cleanMainWindowContent[i] == '}')
+            {
+                braceDepth--;
+                if (braceDepth == 0)
+                {
+                    closeBraceIndex = i;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(closeBraceIndex > openBraceIndex, "Matching closing brace for OnClosing was not found in MainWindow.xaml.cs via brace matching");
+
+        var onClosingBody = cleanMainWindowContent.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
+
+        var shouldHideIndex = onClosingBody.IndexOf("ShouldHideOnClose", StringComparison.Ordinal);
+        Assert.True(shouldHideIndex >= 0, "OnClosing body must contain 'ShouldHideOnClose'.");
+
+        var cancelIndex = onClosingBody.IndexOf("e.Cancel = true", shouldHideIndex, StringComparison.Ordinal);
+        Assert.True(cancelIndex >= 0, "OnClosing body must contain 'e.Cancel = true' following 'ShouldHideOnClose'.");
+
+        var hideIndex = onClosingBody.IndexOf("Hide()", cancelIndex, StringComparison.Ordinal);
+        Assert.True(hideIndex >= 0, "OnClosing body must contain 'Hide()' following 'e.Cancel = true'.");
 
         // 2. App.xaml.cs must route startup hidden decisions through TrayPolicy, and invoke startup settings apply
         var appContent = File.ReadAllText(appFile);
-        Assert.Contains("TrayPolicy.ShouldStartHidden", appContent, StringComparison.Ordinal);
-        Assert.Contains("_liveSettingsApplier.Apply(_settingsSession.Current)", appContent, StringComparison.Ordinal);
-        inspectedCount++;
+        var cleanAppContent = StripComments(appContent);
+        Assert.Contains("TrayPolicy.ShouldStartHidden", cleanAppContent, StringComparison.Ordinal);
+        Assert.Contains("_liveSettingsApplier.Apply(_settingsSession.Current)", cleanAppContent, StringComparison.Ordinal);
+    }
 
-        Assert.True(inspectedCount >= 2, $"Expected at least 2 files inspected, but inspected {inspectedCount}");
+    private static string StripComments(string code)
+    {
+        return Regex.Replace(code, @"/\*[\s\S]*?\*/|//.*", string.Empty);
     }
 
     private static string FindSolutionRoot()

@@ -149,6 +149,9 @@ public class WidgetViewModelTests
         };
         vm.ApplySettings(initialSettings);
 
+        Assert.Equal(0.5, vm.Opacity);
+        Assert.False(vm.AlwaysOnTop);
+
         var changedProps = new List<string>();
         vm.PropertyChanged += (s, e) =>
         {

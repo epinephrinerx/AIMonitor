@@ -1,5 +1,6 @@
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
+using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Tray;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
@@ -11,7 +12,14 @@ public sealed class MainWindowViewModelTests
     [Fact]
     public async Task AttachTray_WithCachedReadings_ImmediatelyUpdatesSink()
     {
-        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var snapshot = new ProviderSnapshot(
+            providerId: "claude",
+            configured: true,
+            meters: [new Meter("session", "session", "Session Quota", "", 80.0)]);
+        var client = new TestQuotaClient((req, ct) => Task.FromResult(snapshot));
+        var registrations = new[] { new ProviderClientRegistration("claude", client) };
+
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
         var vm = new MainWindowViewModel(coordinator, session);
@@ -22,9 +30,11 @@ public sealed class MainWindowViewModelTests
         var sink = new FakeTrayReadingsSink();
         vm.AttachTray(sink);
 
-        // Acceptance criterion 3: AttachTray must immediately push cached readings to the new sink
-        Assert.Single(sink.RecordedUpdates);
-        Assert.NotEmpty(sink.RecordedUpdates[0]);
+        // Acceptance criterion 3 & T3: AttachTray must immediately push cached readings to the new sink with content asserted
+        var replayed = Assert.Single(sink.RecordedUpdates);
+        var reading = Assert.Single(replayed, r => r.HasData);
+        Assert.Equal("claude", reading.ProviderId);
+        Assert.Equal(80.0, reading.Percentage);
     }
 
     [Fact]
@@ -52,7 +62,14 @@ public sealed class MainWindowViewModelTests
     [Fact]
     public async Task AttachTray_ReplacingSink_TransfersReadingsToNewSink_AndStopsUpdatingOldSink()
     {
-        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var snapshot = new ProviderSnapshot(
+            providerId: "claude",
+            configured: true,
+            meters: [new Meter("session", "session", "Session Quota", "", 80.0)]);
+        var client = new TestQuotaClient((req, ct) => Task.FromResult(snapshot));
+        var registrations = new[] { new ProviderClientRegistration("claude", client) };
+
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
         var vm = new MainWindowViewModel(coordinator, session);
@@ -67,8 +84,11 @@ public sealed class MainWindowViewModelTests
         var sink2 = new FakeTrayReadingsSink();
         vm.AttachTray(sink2);
 
-        // sink2 immediately gets cached readings
-        Assert.Single(sink2.RecordedUpdates);
+        // sink2 immediately gets cached readings with content asserted (T3)
+        var replayed = Assert.Single(sink2.RecordedUpdates);
+        var reading = Assert.Single(replayed, r => r.HasData);
+        Assert.Equal("claude", reading.ProviderId);
+        Assert.Equal(80.0, reading.Percentage);
 
         // Next refresh updates sink2 only, sink1 remains untouched
         await vm.RefreshAsync();
@@ -94,6 +114,46 @@ public sealed class MainWindowViewModelTests
         Assert.Single(sink.RecordedUpdates);
     }
 
+    [Fact]
+    public async Task RefreshAsync_WhenSubsequentRefreshReturnsAllErrors_PreservesCachedReadingsWithDataForReplay()
+    {
+        var returnError = false;
+        var client = new TestQuotaClient((req, ct) =>
+        {
+            if (returnError)
+            {
+                return Task.FromResult(new ProviderSnapshot("claude", configured: false, error: "Provider error"));
+            }
+
+            return Task.FromResult(new ProviderSnapshot(
+                providerId: "claude",
+                configured: true,
+                meters: [new Meter("session", "session", "Session Quota", "", 80.0)]));
+        });
+
+        var registrations = new[] { new ProviderClientRegistration("claude", client) };
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var vm = new MainWindowViewModel(coordinator, session);
+
+        // 1. Initial refresh returns real data (80%)
+        await vm.RefreshAsync();
+
+        // 2. Second refresh returns errors for all providers
+        returnError = true;
+        await vm.RefreshAsync();
+
+        // 3. Attach a new sink and assert the replayed reading content equals the 80% reading (T3)
+        var sink = new FakeTrayReadingsSink();
+        vm.AttachTray(sink);
+
+        var replayed = Assert.Single(sink.RecordedUpdates);
+        var reading = Assert.Single(replayed, r => r.HasData);
+        Assert.Equal("claude", reading.ProviderId);
+        Assert.Equal(80.0, reading.Percentage);
+    }
+
     private sealed class FakeTrayReadingsSink : ITrayReadingsSink
     {
         public List<IReadOnlyList<TrayReading>> RecordedUpdates { get; } = [];
@@ -102,5 +162,18 @@ public sealed class MainWindowViewModelTests
         {
             RecordedUpdates.Add(readings.ToList());
         }
+    }
+
+    private sealed class TestQuotaClient : IProviderQuotaClient
+    {
+        public Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> Handler { get; set; }
+
+        public TestQuotaClient(Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> handler)
+        {
+            Handler = handler;
+        }
+
+        public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+            => Handler(request, cancellationToken);
     }
 }

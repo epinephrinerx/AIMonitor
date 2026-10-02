@@ -146,7 +146,11 @@ public sealed class MainWindowViewModel : ViewModelBase
                     tab.Status is "Connected" or "Limited"));
             }
 
-            _latestTrayReadings = trayReadings;
+            if (trayReadings.Any(r => r.HasData))
+            {
+                _latestTrayReadings = trayReadings;
+            }
+
             _traySink?.UpdateReadings(trayReadings);
 
             LastRefreshStatus = $"Updated at {DateTime.Now:HH:mm:ss}";

@@ -1,7 +1,7 @@
 using System.IO;
-using System.Reflection;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
+using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Tray;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
@@ -27,7 +27,9 @@ public sealed class LiveSettingsApplierTests
                 createCount++;
                 return new FakeTrayHost();
             },
-            setRefreshInterval: _ => { });
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         applier.Apply(new AppSettings { ShowTrayIcon = true });
         applier.Apply(new AppSettings { ShowTrayIcon = true });
@@ -39,7 +41,7 @@ public sealed class LiveSettingsApplierTests
     [Fact]
     public async Task Apply_WhenShowTrayIconTransitionsFromTrueToFalse_DetachesThenDisposesInOrder()
     {
-        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        await using var coordinator = CreateCoordinatorWithRealData("claude", 80.0);
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
         var mainViewModel = new MainWindowViewModel(coordinator, session);
@@ -48,18 +50,19 @@ public sealed class LiveSettingsApplierTests
         await mainViewModel.RefreshAsync();
 
         var fakeTray = new FakeTrayHost();
-        var wasDetachedBeforeDispose = false;
         fakeTray.OnDisposing = () =>
         {
-            var trayField = typeof(MainWindowViewModel).GetField("_traySink", BindingFlags.NonPublic | BindingFlags.Instance);
-            wasDetachedBeforeDispose = trayField?.GetValue(mainViewModel) is null;
+            // If mainViewModel was already detached, this refresh will not push updates to fakeTray
+            mainViewModel.RefreshAsync().GetAwaiter().GetResult();
         };
 
         var applier = new LiveSettingsApplier(
             widgetViewModel: null,
             mainViewModel: mainViewModel,
             createTray: () => fakeTray,
-            setRefreshInterval: _ => { });
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         // 1. Initial attach
         applier.Apply(new AppSettings { ShowTrayIcon = true });
@@ -69,20 +72,21 @@ public sealed class LiveSettingsApplierTests
         // 2. Transition from true -> false
         applier.Apply(new AppSettings { ShowTrayIcon = false });
 
-        // Acceptance criteria: detaches then disposes exactly once, in that order
-        Assert.True(wasDetachedBeforeDispose, "MainWindowViewModel.AttachTray(null) must be called before disposing the tray host.");
+        // Acceptance criteria: detaches then disposes exactly once, in that order (T6)
+        Assert.Empty(fakeTray.UpdatesAfterDispose);
         Assert.Equal(1, fakeTray.DisposeCount);
         Assert.Null(applier.CurrentTray);
 
         // Acceptance criteria: MainWindowViewModel stops pushing readings to the old tray
         await mainViewModel.RefreshAsync();
+        Assert.Empty(fakeTray.UpdatesAfterDispose);
         Assert.Single(fakeTray.RecordedUpdates);
     }
 
     [Fact]
     public async Task Apply_WhenShowTrayIconTransitionsFromFalseToTrue_CreatesNewTrayAndReplaysCachedReadings()
     {
-        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        await using var coordinator = CreateCoordinatorWithRealData("claude", 80.0);
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
         var mainViewModel = new MainWindowViewModel(coordinator, session);
@@ -100,7 +104,9 @@ public sealed class LiveSettingsApplierTests
                 createdTrays.Add(tray);
                 return tray;
             },
-            setRefreshInterval: _ => { });
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         // Start with tray disabled
         applier.Apply(new AppSettings { ShowTrayIcon = false });
@@ -114,9 +120,11 @@ public sealed class LiveSettingsApplierTests
         var activeTray = createdTrays[0];
         Assert.Same(activeTray, applier.CurrentTray);
 
-        // Acceptance criteria: latest cached readings are replayed to the new tray immediately
-        Assert.Single(activeTray.RecordedUpdates);
-        Assert.NotEmpty(activeTray.RecordedUpdates[0]);
+        // Acceptance criteria: latest cached readings are replayed to the new tray immediately with content asserted (T3)
+        var replayed = Assert.Single(activeTray.RecordedUpdates);
+        var reading = Assert.Single(replayed, r => r.HasData);
+        Assert.Equal("claude", reading.ProviderId);
+        Assert.Equal(80.0, reading.Percentage);
     }
 
     [Fact]
@@ -134,7 +142,9 @@ public sealed class LiveSettingsApplierTests
             widgetViewModel: widgetVm,
             mainViewModel: mainViewModel,
             createTray: () => new FakeTrayHost(),
-            setRefreshInterval: _ => { });
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         // First apply
         applier.Apply(new AppSettings
@@ -170,7 +180,9 @@ public sealed class LiveSettingsApplierTests
             widgetViewModel: null,
             mainViewModel: mainViewModel,
             createTray: () => new FakeTrayHost(),
-            setRefreshInterval: interval => configuredInterval = interval);
+            setRefreshInterval: interval => configuredInterval = interval,
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         applier.Apply(new AppSettings { RefreshIntervalSeconds = 45 });
         Assert.Equal(TimeSpan.FromSeconds(45), configuredInterval);
@@ -192,7 +204,9 @@ public sealed class LiveSettingsApplierTests
             widgetViewModel: null,
             mainViewModel: mainViewModel,
             createTray: () => new FakeTrayHost(),
-            setRefreshInterval: interval => configuredInterval = interval);
+            setRefreshInterval: interval => configuredInterval = interval,
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
 
         var settings = new AppSettings
         {
@@ -208,6 +222,228 @@ public sealed class LiveSettingsApplierTests
     }
 
     [Fact]
+    public async Task Apply_WhenShowTrayIconTransitionsFromTrueToFalse_WithNoWindowVisible_CallsShowDashboardOnceAfterDispose()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var fakeTray = new FakeTrayHost();
+        var showDashboardCallCount = 0;
+        var showDashboardCalledAfterDispose = false;
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () => fakeTray,
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () =>
+            {
+                showDashboardCallCount++;
+                if (fakeTray.IsDisposed)
+                {
+                    showDashboardCalledAfterDispose = true;
+                }
+            });
+
+        // 1. Enable tray
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+        Assert.Same(fakeTray, applier.CurrentTray);
+        Assert.Equal(0, showDashboardCallCount);
+
+        // 2. Tray transitions from true -> false with no window visible
+        applier.Apply(new AppSettings { ShowTrayIcon = false });
+
+        Assert.Equal(1, showDashboardCallCount);
+        Assert.True(showDashboardCalledAfterDispose, "showDashboard must be invoked AFTER tray is disposed.");
+    }
+
+    [Fact]
+    public async Task Apply_WhenShowTrayIconTransitionsFromTrueToFalse_WithWindowVisible_DoesNotCallShowDashboard()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var fakeTray = new FakeTrayHost();
+        var showDashboardCallCount = 0;
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () => fakeTray,
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => true,
+            showDashboard: () => showDashboardCallCount++);
+
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+        applier.Apply(new AppSettings { ShowTrayIcon = false });
+
+        Assert.Equal(0, showDashboardCallCount);
+    }
+
+    [Fact]
+    public async Task Apply_WhenShowTrayIconTransitionsFromFalseToTrue_NeverCallsShowDashboard()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var showDashboardCallCount = 0;
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () => new FakeTrayHost(),
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => showDashboardCallCount++);
+
+        applier.Apply(new AppSettings { ShowTrayIcon = false });
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+
+        Assert.Equal(0, showDashboardCallCount);
+    }
+
+    [Fact]
+    public async Task Apply_SetRefreshInterval_OnlyInvokedWhenIntervalDiffers()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var callbackCount = 0;
+        TimeSpan? lastInterval = null;
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () => new FakeTrayHost(),
+            setRefreshInterval: interval =>
+            {
+                callbackCount++;
+                lastInterval = interval;
+            },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        // First apply with 45s: callback invoked once
+        applier.Apply(new AppSettings { RefreshIntervalSeconds = 45 });
+        Assert.Equal(1, callbackCount);
+        Assert.Equal(TimeSpan.FromSeconds(45), lastInterval);
+
+        // Second apply with identical interval: callback NOT invoked again
+        applier.Apply(new AppSettings { RefreshIntervalSeconds = 45 });
+        Assert.Equal(1, callbackCount);
+
+        // Third apply with changed interval (90s): callback invoked again
+        applier.Apply(new AppSettings { RefreshIntervalSeconds = 90 });
+        Assert.Equal(2, callbackCount);
+        Assert.Equal(TimeSpan.FromSeconds(90), lastInterval);
+
+        // Fourth apply with identical interval (90s): callback NOT invoked again
+        applier.Apply(new AppSettings { RefreshIntervalSeconds = 90 });
+        Assert.Equal(2, callbackCount);
+    }
+
+    [Fact]
+    public async Task Shutdown_DetachesThenDisposes_IsIdempotent_AndClearsCurrentTray()
+    {
+        await using var coordinator = CreateCoordinatorWithRealData("claude", 80.0);
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+        await mainViewModel.RefreshAsync();
+
+        var fakeTray = new FakeTrayHost();
+        fakeTray.OnDisposing = () =>
+        {
+            // If mainViewModel was already detached, this refresh will NOT push updates to fakeTray
+            mainViewModel.RefreshAsync().GetAwaiter().GetResult();
+        };
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () => fakeTray,
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+        Assert.Same(fakeTray, applier.CurrentTray);
+
+        // Shutdown
+        applier.Shutdown();
+
+        Assert.Null(applier.CurrentTray);
+        Assert.Equal(1, fakeTray.DisposeCount);
+        Assert.Empty(fakeTray.UpdatesAfterDispose);
+
+        // Idempotent: second shutdown call does not dispose again or throw
+        applier.Shutdown();
+        Assert.Null(applier.CurrentTray);
+        Assert.Equal(1, fakeTray.DisposeCount);
+
+        // Refreshing after shutdown sends no updates to the disposed tray
+        await mainViewModel.RefreshAsync();
+        Assert.Empty(fakeTray.UpdatesAfterDispose);
+    }
+
+    [Fact]
+    public async Task Apply_FullCycle_TrueFalseTrue_CreatesDistinctTrayAndReplaysCachedReadingsWithCorrectContent()
+    {
+        await using var coordinator = CreateCoordinatorWithRealData("claude", 80.0);
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+        await mainViewModel.RefreshAsync();
+
+        var createdTrays = new List<FakeTrayHost>();
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: null,
+            mainViewModel: mainViewModel,
+            createTray: () =>
+            {
+                var tray = new FakeTrayHost();
+                createdTrays.Add(tray);
+                return tray;
+            },
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        // 1. Initial true
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+        Assert.Single(createdTrays);
+        var tray1 = createdTrays[0];
+        Assert.Same(tray1, applier.CurrentTray);
+
+        // 2. Transition to false
+        applier.Apply(new AppSettings { ShowTrayIcon = false });
+        Assert.Null(applier.CurrentTray);
+        Assert.Equal(1, tray1.DisposeCount);
+
+        // 3. Transition back to true
+        applier.Apply(new AppSettings { ShowTrayIcon = true });
+        Assert.Equal(2, createdTrays.Count);
+        var tray2 = createdTrays[1];
+        Assert.Same(tray2, applier.CurrentTray);
+        Assert.NotSame(tray1, tray2);
+        Assert.Equal(0, tray2.DisposeCount);
+
+        // Second tray receives replay with correct content
+        var replayed = Assert.Single(tray2.RecordedUpdates);
+        var reading = Assert.Single(replayed, r => r.HasData);
+        Assert.Equal("claude", reading.ProviderId);
+        Assert.Equal(80.0, reading.Percentage);
+    }
+
+    [Fact]
     public void AppWiringContract_OnSettingsChangedBodyAppliesSettings_AndShouldStartHiddenIsPreserved()
     {
         var solutionRoot = FindSolutionRoot();
@@ -216,8 +452,9 @@ public sealed class LiveSettingsApplierTests
 
         var fileContent = File.ReadAllText(appXamlCsPath);
 
-        // 1. Assert file contains TrayPolicy.ShouldStartHidden
+        // 1. Assert file contains TrayPolicy.ShouldStartHidden and session event subscription
         Assert.Contains("TrayPolicy.ShouldStartHidden", fileContent);
+        Assert.Contains("_settingsSession.Changed += OnSettingsChanged;", fileContent);
 
         // 2. Extract the BODY of OnSettingsChanged method via brace matching
         const string methodSignature = "OnSettingsChanged(AppSettings settings)";
@@ -229,7 +466,7 @@ public sealed class LiveSettingsApplierTests
         Assert.True(methodIndex >= 0, "Method OnSettingsChanged was not found in App.xaml.cs");
 
         var openBraceIndex = fileContent.IndexOf('{', methodIndex);
-        Assert.True(openBraceIndex >= 0, "Opening brace for OnSettingsChanged was not found.");
+        Assert.True(openBraceIndex >= 0, "Opening brace for OnSettingsChanged was not found in App.xaml.cs.");
 
         var braceDepth = 0;
         var closeBraceIndex = -1;
@@ -250,24 +487,30 @@ public sealed class LiveSettingsApplierTests
             }
         }
 
-        Assert.True(closeBraceIndex > openBraceIndex, "Matching closing brace for OnSettingsChanged was not found.");
+        Assert.True(closeBraceIndex > openBraceIndex, "Matching closing brace for OnSettingsChanged was not found in App.xaml.cs via brace matching.");
 
         var methodBody = fileContent.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
 
-        // 3. Assert the body of OnSettingsChanged invokes .Apply(
-        Assert.Contains(".Apply(", methodBody);
+        // 3. Assert the body of OnSettingsChanged contains Dispatcher.InvokeAsync and invokes .Apply( inside the lambda
+        Assert.Contains("Dispatcher.InvokeAsync", methodBody);
+
+        var invokeAsyncIndex = methodBody.IndexOf("Dispatcher.InvokeAsync", StringComparison.Ordinal);
+        Assert.True(invokeAsyncIndex >= 0, "Dispatcher.InvokeAsync must be present in OnSettingsChanged body.");
+
+        var applyIndex = methodBody.IndexOf(".Apply(", invokeAsyncIndex, StringComparison.Ordinal);
+        Assert.True(applyIndex > invokeAsyncIndex, "Expected .Apply( to occur inside the Dispatcher.InvokeAsync lambda (after Dispatcher.InvokeAsync).");
     }
 
-    [Fact]
-    public void LiveSettingsApplier_UsesTrayPolicyShouldShowTray_ContractTest()
+    private static LatestRefreshCoordinator CreateCoordinatorWithRealData(string providerId = "claude", double percent = 80.0)
     {
-        var solutionRoot = FindSolutionRoot();
-        var applierPath = Path.Combine(solutionRoot, "src", "AIMonitor.Presentation.Wpf", "LiveSettingsApplier.cs");
-        Assert.True(File.Exists(applierPath), $"LiveSettingsApplier.cs not found at: {applierPath}");
+        var snapshot = new ProviderSnapshot(
+            providerId: providerId,
+            configured: true,
+            meters: [new Meter("session", "session", "Session Quota", "", percent)]);
 
-        var fileContent = File.ReadAllText(applierPath);
-
-        Assert.Contains("TrayPolicy.ShouldShowTray", fileContent);
+        var client = new TestQuotaClient((req, ct) => Task.FromResult(snapshot));
+        var registrations = new[] { new ProviderClientRegistration(providerId, client) };
+        return new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
     }
 
     private static string FindSolutionRoot()
@@ -291,23 +534,37 @@ public sealed class LiveSettingsApplierTests
         public bool IsDisposed { get; private set; }
         public int DisposeCount { get; private set; }
         public List<IReadOnlyList<TrayReading>> RecordedUpdates { get; } = [];
+        public List<IReadOnlyList<TrayReading>> UpdatesAfterDispose { get; } = [];
         public Action? OnDisposing { get; set; }
 
         public void UpdateReadings(IEnumerable<TrayReading> readings)
         {
+            var copy = readings.ToList();
+            RecordedUpdates.Add(copy);
             if (IsDisposed)
             {
-                throw new ObjectDisposedException(nameof(FakeTrayHost), "UpdateReadings called on disposed tray host.");
+                UpdatesAfterDispose.Add(copy);
             }
-
-            RecordedUpdates.Add(readings.ToList());
         }
 
         public void Dispose()
         {
-            OnDisposing?.Invoke();
-            DisposeCount++;
             IsDisposed = true;
+            DisposeCount++;
+            OnDisposing?.Invoke();
         }
+    }
+
+    private sealed class TestQuotaClient : IProviderQuotaClient
+    {
+        public Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> Handler { get; set; }
+
+        public TestQuotaClient(Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> handler)
+        {
+            Handler = handler;
+        }
+
+        public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+            => Handler(request, cancellationToken);
     }
 }

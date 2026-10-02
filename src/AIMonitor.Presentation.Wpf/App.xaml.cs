@@ -138,7 +138,9 @@ public partial class App : System.Windows.Application
                 {
                     _refreshTimer.Interval = interval;
                 }
-            });
+            },
+            () => (_mainWindow?.IsVisible ?? false) || (_widgetWindow?.IsVisible ?? false),
+            SwitchToDashboardMode);
         _liveSettingsApplier.Apply(_settingsSession.Current);
 
         // 8. Initial Window
@@ -189,7 +191,15 @@ public partial class App : System.Windows.Application
 
             if (_mainWindow is null && _settingsSession is not null)
             {
-                _mainWindow = new MainWindow(_mainViewModel!, _settingsSession);
+                var window = new MainWindow(_mainViewModel!, _settingsSession);
+                window.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_mainWindow, window))
+                    {
+                        _mainWindow = null;
+                    }
+                };
+                _mainWindow = window;
             }
 
             _mainWindow?.Show();
@@ -212,7 +222,15 @@ public partial class App : System.Windows.Application
 
             if (_widgetWindow is null && _settingsSession is not null)
             {
-                _widgetWindow = new WidgetWindow(_widgetViewModel!, _settingsSession);
+                var window = new WidgetWindow(_widgetViewModel!, _settingsSession);
+                window.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_widgetWindow, window))
+                    {
+                        _widgetWindow = null;
+                    }
+                };
+                _widgetWindow = window;
             }
 
             _widgetWindow?.Show();
@@ -316,7 +334,7 @@ public partial class App : System.Windows.Application
         }
 
         _refreshTimer?.Stop();
-        _liveSettingsApplier?.CurrentTray?.Dispose();
+        _liveSettingsApplier?.Shutdown();
         _ = _refreshCoordinator?.DisposeAsync();
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();
