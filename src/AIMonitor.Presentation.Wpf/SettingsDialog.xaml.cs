@@ -1,3 +1,5 @@
+using System;
+using System.ComponentModel;
 using System.Windows;
 using AIMonitor.Presentation.Wpf.ViewModels;
 
@@ -5,22 +7,38 @@ namespace AIMonitor.Presentation.Wpf;
 
 public partial class SettingsDialog : Window
 {
+    private readonly SettingsViewModel? _viewModel;
+
     public SettingsDialog()
     {
         InitializeComponent();
+        Closing += OnClosing;
     }
 
     public SettingsDialog(SettingsViewModel viewModel)
         : this()
     {
+        _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.RequestClose += OnRequestClose;
         viewModel.SaveFailed += OnSaveFailed;
     }
 
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        (_viewModel ?? DataContext as SettingsViewModel)?.Discard();
+    }
+
     private void OnRequestClose(bool result)
     {
-        DialogResult = result;
+        try
+        {
+            DialogResult = result;
+        }
+        catch (InvalidOperationException)
+        {
+            // If window was not shown modally via ShowDialog() (e.g. in test hosts)
+        }
         Close();
     }
 
