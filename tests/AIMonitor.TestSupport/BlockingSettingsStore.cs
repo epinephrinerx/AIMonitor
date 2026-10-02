@@ -43,6 +43,11 @@ public sealed class BlockingSettingsStore : ISettingsStore
         _initialSettings = initialSettings ?? new AppSettings();
     }
 
+    /// <summary>
+    /// If non-null, <see cref="SaveAsync"/> will throw this exception instead of succeeding.
+    /// </summary>
+    public Exception? FailOnSave { get; set; }
+
     public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(_initialSettings);
 
@@ -50,6 +55,11 @@ public sealed class BlockingSettingsStore : ISettingsStore
     {
         SaveStarted.TrySetResult();
         await ReleaseSource.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        if (FailOnSave is not null)
+        {
+            throw FailOnSave;
+        }
 
         lock (_sync)
         {

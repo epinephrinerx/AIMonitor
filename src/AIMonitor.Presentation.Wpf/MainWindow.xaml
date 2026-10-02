@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:AIMonitor.Presentation.Wpf.Controls"
         xmlns:vm="clr-namespace:AIMonitor.Presentation.Wpf.ViewModels"
+        xmlns:local="clr-namespace:AIMonitor.Presentation.Wpf"
         mc:Ignorable="d"
         Title="AIMonitor 2.0"
         MinWidth="300" MinHeight="220"
@@ -39,6 +40,7 @@
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                <Button Content="Connections" Command="{Binding ShowConnectionsCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
                 <Button Content="Compact Widget" Command="{Binding SwitchToWidgetCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
                 <Button Content="Usage Log" Command="{Binding OpenLogCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
                 <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
@@ -48,7 +50,17 @@
         </DockPanel>
 
         <!-- Provider Tab Bar -->
-        <Border Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="4" Margin="0,0,0,16">
+        <Border x:Name="ProviderTabBar" Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="4" Margin="0,0,0,16">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsConnectionsPageVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <ListBox ItemsSource="{Binding ProviderTabs}" SelectedItem="{Binding SelectedTab}"
                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemsPanel>
@@ -70,7 +82,17 @@
         </Border>
 
         <!-- Selected Provider Content -->
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer x:Name="ProviderContentScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsConnectionsPageVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
             <StackPanel Margin="0,0,0,16">
                 <!-- Status & Account Card -->
                 <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,16">
@@ -123,6 +145,24 @@
                 </Border>
             </StackPanel>
         </ScrollViewer>
+ 
+        <!-- Connections Page Wrapper -->
+        <Grid x:Name="ConnectionsWrapper"
+              Grid.Row="1"
+              Grid.RowSpan="2">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsConnectionsPageVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <local:ConnectionsPage x:Name="ConnectionsPageControl"
+                                   DataContext="{Binding Connections}" />
+        </Grid>
 
         <!-- Bottom Status Bar -->
         <StatusBar Grid.Row="3" Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}">

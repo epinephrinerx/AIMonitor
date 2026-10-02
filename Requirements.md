@@ -100,7 +100,8 @@
 - [x] เฟส 0: `git log` มี baseline, ไม่มี `bin/obj/publish` ใน commit — ตรวจแล้ว: 5 commits, `git ls-files` 277 ไฟล์, ไฟล์ใต้ `publish/` `bin/` `obj/` = 0, `git status` สะอาด (🧪 รอคุณยืนยันรายการไฟล์)
 - [x] เฟส 1: test ที่แดงเมื่อย้อนโค้ด — บันทึก Settings แล้วปิดหน้าต่าง ค่าไม่ย้อนกลับ — ตรวจแล้ว: 966 tests ผ่าน, build 0 warning, format สะอาด, mutation 9 แบบแดงจริง, Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P1.md`); branch `agent/antigravity-settings-single-source` (🧪 รอคุณทดลองบนแอปจริง: บันทึก Settings แล้วปิดหน้าต่าง/Widget เปิดใหม่ ค่าต้องไม่ย้อนกลับ)
 - [x] เฟส 2: เปลี่ยน opacity/topmost/ShowTrayIcon/interval ใน Settings แล้วมีผลทันที — ตรวจแล้ว: build 0 warning, 1003 tests ผ่าน, format สะอาด, mutation แดงจริง (ยกเว้น 3 จุดที่ต้องตรวจมือ ระบุใน `Docs/REVIEW_R002_P2.md`), Reviewer 2 ตัวตรวจแล้ว; branch `agent/antigravity-widget-tray-live-settings` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อใน REVIEW_R002_P2)
-- [ ] เฟส 3–7: ตามตารางแผน
+- [x] เฟส 3: Connections page + ConnectDialog + เส้นทางเขียน secret; key ที่บันทึกมีผลทันที — ตรวจแล้ว: build 0 warning, tests ผ่านครบ, format สะอาด, mutation แดงจริง (ยกเว้นข้อ 7 ที่ต้องตรวจมือ), Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P3.md`); branch `agent/antigravity-connections` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อ)
+- [ ] เฟส 4–7: ตามตารางแผน
 - [ ] เฟส 8: ตามเกณฑ์ของ [[R-004]] (ฟังก์ชันและหน้าตาเกิน 95% พร้อมกัน)
 
 **ความคืบหน้า:**
@@ -109,6 +110,7 @@
 - 2026-10-01 — ภาพเทียบรอบแรก (ก่อนเฟส 1) หน้า Dashboard แท็บ Claude: 1.3.3 (ติดตั้งแล้ว) เทียบ 2.0 (`publish\win-x64` รันอยู่) ให้คะแนนเบื้องต้น 0–1 จาก 5 ข้อ (≤20%) ห่างจากเป้า R-004 มาก ต่างที่: ไม่มีเมนูบาร์/บรรทัดบัญชี/ตัวเลือก metric-range-interval, tab ไม่มีเปอร์เซ็นต์, เกจเล็กและไม่มีคำกำกับ Normal/สัญลักษณ์, ป้าย Weekly สองใบแยกไม่ออก (All models / Fable only), ไม่มีแถบสถิติ (tokens/output/cache/messages), กราฟไม่มีแกน legend และป้ายค่า, ไม่มีหมายเหตุราคาประมาณใต้ Equivalent API value; ภาพเก็บนอก repo (มีข้อมูลส่วนตัว); ข้อมูลสองฝั่งไม่ใช่ชุดเดียวกัน (ของ 1.3.3 เก่า 2 วัน) จึงใช้เทียบโครงเท่านั้น
 - 2026-10-01 — เฟส 1 เสร็จ (🧪): `SettingsSession` + `WindowPlacementRecorder` แหล่งเดียวของ settings; ผ่านวงจร Writing Owner → Reviewer 2 ตัว → Triage → Fix; รายละเอียดที่ `Docs/REVIEW_R002_P1.md`; ยังไม่ merge เข้า `feat/csharp-rewrite` ยังไม่ push
 - 2026-10-02 — เฟส 2 เสร็จ (🧪): `LiveSettingsApplier` + `TrayPolicy` ผูก settings เข้ากับ widget/tray/timer; Reviewer 2 ตัวพบ 7 ข้อ (จริงทั้งหมด) แก้แล้ว; รายละเอียด `Docs/REVIEW_R002_P2.md`; ยังไม่ push
+- 2026-10-02 — เฟส 3 เสร็จ (🧪): `ProviderConnectionStore` + `ReconfigurableQuotaClient` + หน้า Connections/ConnectDialog; Reviewer 2 ตัวพบประเด็นจริง 8 กลุ่ม แก้แล้ว 6 อีก 2 บันทึกเป็นข้อจำกัด; รายละเอียด `Docs/REVIEW_R002_P3.md`; ยังไม่ push
 
 ## R-003 · กติกาเมื่อ quota ของเครื่องมือเต็ม
 

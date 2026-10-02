@@ -26,6 +26,8 @@ public partial class MainWindow : Window
         viewModel.RequestSwitchToWidget += () => (System.Windows.Application.Current as App)?.SwitchToWidgetMode();
         viewModel.RequestOpenLog += () => (System.Windows.Application.Current as App)?.OpenUsageLogDialog();
         viewModel.RequestOpenAbout += () => (System.Windows.Application.Current as App)?.OpenAboutDialog();
+        viewModel.Connections.SaveFailed += msg =>
+            System.Windows.MessageBox.Show(this, msg, "Connections", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
 
         Loaded += OnLoaded;
         Closing += OnClosing;
