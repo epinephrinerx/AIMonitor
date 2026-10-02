@@ -37,6 +37,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         SwitchToWidgetCommand = new RelayCommand(() => RequestSwitchToWidget?.Invoke());
         OpenLogCommand = new RelayCommand(() => RequestOpenLog?.Invoke());
         OpenAboutCommand = new RelayCommand(() => RequestOpenAbout?.Invoke());
+
+        Connections = new ConnectionsViewModel(_settingsSession);
+        Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
+        Connections.RedetectRequested += async _ => await RefreshAsync();
+        Connections.OpenDashboardRequested += () => IsConnectionsPageVisible = false;
+
+        ShowConnectionsCommand = new RelayCommand(() => IsConnectionsPageVisible = true);
+        ShowDashboardCommand = new RelayCommand(() => IsConnectionsPageVisible = false);
+
+        _isConnectionsPageVisible = _settingsSession.Current.ShowConnectionsAtStartup;
     }
 
     public ProviderTabViewModel ClaudeTab { get; }
@@ -71,16 +81,28 @@ public sealed class MainWindowViewModel : ViewModelBase
         set => SetProperty(ref _lastRefreshStatus, value);
     }
 
+    public ConnectionsViewModel Connections { get; }
+
+    private bool _isConnectionsPageVisible;
+    public bool IsConnectionsPageVisible
+    {
+        get => _isConnectionsPageVisible;
+        set => SetProperty(ref _isConnectionsPageVisible, value);
+    }
+
     public ICommand RefreshCommand { get; }
     public ICommand OpenSettingsCommand { get; }
     public ICommand SwitchToWidgetCommand { get; }
     public ICommand OpenLogCommand { get; }
     public ICommand OpenAboutCommand { get; }
+    public ICommand ShowConnectionsCommand { get; }
+    public ICommand ShowDashboardCommand { get; }
 
     public event Action? RequestOpenSettings;
     public event Action? RequestSwitchToWidget;
     public event Action? RequestOpenLog;
     public event Action? RequestOpenAbout;
+    public event Action<string>? RequestConnect;
 
     /// <summary>
     /// Attaches or detaches a tray readings sink. When a non-null sink is attached,
@@ -119,6 +141,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (result.Snapshots.TryGetValue("claude", out var claudeSnap)) ClaudeTab.UpdateFromSnapshot(claudeSnap);
             if (result.Snapshots.TryGetValue("openai", out var openAiSnap)) OpenAiTab.UpdateFromSnapshot(openAiSnap);
             if (result.Snapshots.TryGetValue("gemini", out var geminiSnap)) GeminiTab.UpdateFromSnapshot(geminiSnap);
+
+            // Update connections page view model with latest snapshot detections.
+            // In AIMonitor, re-detect triggers a unified refresh across all providers in a single pass.
+            Connections.Update(result.Snapshots);
 
             // Update tray readings
             var trayReadings = new List<TrayReading>();

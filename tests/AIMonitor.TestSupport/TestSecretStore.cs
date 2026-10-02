@@ -27,6 +27,16 @@ public sealed class TestSecretStore : ISecretStore
     public Exception? FailOnRemove { get; set; }
 
     /// <summary>
+    /// Optional hook invoked whenever <see cref="SetAsync"/> is called.
+    /// </summary>
+    public Action<string, string>? OnSet { get; set; }
+
+    /// <summary>
+    /// Optional hook invoked whenever <see cref="RemoveAsync"/> is called.
+    /// </summary>
+    public Action<string>? OnRemove { get; set; }
+
+    /// <summary>
     /// Number of times <see cref="GetAsync"/> was called.
     /// </summary>
     public int GetCalls { get; private set; }
@@ -82,6 +92,7 @@ public sealed class TestSecretStore : ISecretStore
         }
 
         _secrets[name] = value;
+        OnSet?.Invoke(name, value);
         return Task.CompletedTask;
     }
 
@@ -97,6 +108,7 @@ public sealed class TestSecretStore : ISecretStore
         }
 
         _secrets.Remove(name);
+        OnRemove?.Invoke(name);
         return Task.CompletedTask;
     }
 }
