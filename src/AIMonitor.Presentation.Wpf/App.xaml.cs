@@ -263,14 +263,7 @@ public partial class App : System.Windows.Application
             var applier = new AppearanceApplier(
                 ThemeManager.Instance.ApplyTheme,
                 _widgetViewModel,
-                (width, height) =>
-                {
-                    if (_mainWindow is not null && _mainWindow.IsVisible && _mainWindow.WindowState == System.Windows.WindowState.Normal)
-                    {
-                        _mainWindow.Width = width;
-                        _mainWindow.Height = height;
-                    }
-                },
+                new DashboardPreviewResizer(() => _mainWindow).Resize,
                 _settingsSession.Current.DashboardWidth,
                 _settingsSession.Current.DashboardHeight);
 

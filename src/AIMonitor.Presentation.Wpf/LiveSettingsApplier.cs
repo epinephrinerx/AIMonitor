@@ -18,6 +18,9 @@ public sealed class LiveSettingsApplier
     private readonly Action _showDashboard;
     private TimeSpan? _lastAppliedRefreshInterval;
     private ITrayHost? _currentTray;
+    private double? _lastAppliedWidgetOpacity;
+    private bool? _lastAppliedWidgetAlwaysOnTop;
+    private bool _hasAppliedWidgetSettings;
 
     public LiveSettingsApplier(
         WidgetViewModel? widgetViewModel,
@@ -55,7 +58,17 @@ public sealed class LiveSettingsApplier
             _lastAppliedRefreshInterval = refreshInterval;
         }
 
-        _widgetViewModel?.ApplySettings(settings);
+        var widgetSettingsChanged = !_hasAppliedWidgetSettings
+            || _lastAppliedWidgetOpacity != settings.WidgetOpacity
+            || _lastAppliedWidgetAlwaysOnTop != settings.WidgetAlwaysOnTop;
+
+        if (widgetSettingsChanged)
+        {
+            _widgetViewModel?.ApplySettings(settings);
+            _lastAppliedWidgetOpacity = settings.WidgetOpacity;
+            _lastAppliedWidgetAlwaysOnTop = settings.WidgetAlwaysOnTop;
+            _hasAppliedWidgetSettings = true;
+        }
 
         var shouldShowTray = TrayPolicy.ShouldShowTray(settings);
         if (shouldShowTray && _currentTray is null)

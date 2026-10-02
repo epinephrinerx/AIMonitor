@@ -28,6 +28,13 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private bool _discarded;
     private bool _saved;
+    private bool _isSaving;
+
+    public bool IsSaving
+    {
+        get => _isSaving;
+        private set => SetProperty(ref _isSaving, value);
+    }
 
     public SettingsViewModel(
         SettingsSession session,
@@ -173,41 +180,49 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public async Task SaveAsync()
     {
-        await _session.UpdateAsync(s => s with
-        {
-            Theme = Theme,
-            StartWithWindows = StartWithWindows,
-            MinimizeToTray = MinimizeToTray,
-            ShowTrayIcon = ShowTrayIcon,
-            RefreshIntervalSeconds = RefreshIntervalSeconds,
-            WidgetOpacity = WidgetOpacity,
-            WidgetAlwaysOnTop = WidgetAlwaysOnTop,
-            ChartRangeDays = ChartRangeDays,
-            DashboardWidth = SelectedWindowSize.Width,
-            DashboardHeight = SelectedWindowSize.Height
-        }).ConfigureAwait(true);
-
-        _saved = true;
-
-        // Update Windows startup entry only on Save (PAR-024, PAR-027)
+        IsSaving = true;
         try
         {
-            if (StartWithWindows)
+            await _session.UpdateAsync(s => s with
             {
-                var exePath = Environment.ProcessPath ?? "";
-                if (!string.IsNullOrEmpty(exePath))
+                Theme = Theme,
+                StartWithWindows = StartWithWindows,
+                MinimizeToTray = MinimizeToTray,
+                ShowTrayIcon = ShowTrayIcon,
+                RefreshIntervalSeconds = RefreshIntervalSeconds,
+                WidgetOpacity = WidgetOpacity,
+                WidgetAlwaysOnTop = WidgetAlwaysOnTop,
+                ChartRangeDays = ChartRangeDays,
+                DashboardWidth = SelectedWindowSize.Width,
+                DashboardHeight = SelectedWindowSize.Height
+            }).ConfigureAwait(true);
+
+            _saved = true;
+
+            // Update Windows startup entry only on Save (PAR-024, PAR-027)
+            try
+            {
+                if (StartWithWindows)
                 {
-                    _startupRegistrar.Register(exePath, "--tray");
+                    var exePath = Environment.ProcessPath ?? "";
+                    if (!string.IsNullOrEmpty(exePath))
+                    {
+                        _startupRegistrar.Register(exePath, "--tray");
+                    }
+                }
+                else
+                {
+                    _startupRegistrar.Unregister();
                 }
             }
-            else
+            catch
             {
-                _startupRegistrar.Unregister();
+                // Non-fatal if startup registration fails (e.g. registry restricted)
             }
         }
-        catch
+        finally
         {
-            // Non-fatal if startup registration fails (e.g. registry restricted)
+            IsSaving = false;
         }
 
         RequestClose?.Invoke(true);
@@ -215,7 +230,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public void Discard()
     {
-        if (_saved || _discarded)
+        if (IsSaving || _saved || _discarded)
         {
             return;
         }

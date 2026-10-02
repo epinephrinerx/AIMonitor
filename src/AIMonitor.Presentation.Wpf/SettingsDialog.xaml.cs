@@ -26,7 +26,14 @@ public partial class SettingsDialog : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        (_viewModel ?? DataContext as SettingsViewModel)?.Discard();
+        var vm = _viewModel ?? DataContext as SettingsViewModel;
+        if (vm is not null && vm.IsSaving)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        vm?.Discard();
     }
 
     private void OnRequestClose(bool result)

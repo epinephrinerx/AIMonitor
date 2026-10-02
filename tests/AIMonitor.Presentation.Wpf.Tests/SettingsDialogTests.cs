@@ -10,6 +10,7 @@ using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
 using AIMonitor.Presentation.Wpf;
 using AIMonitor.Presentation.Wpf.ViewModels;
+using AIMonitor.TestSupport;
 using Xunit;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
@@ -101,6 +102,49 @@ public sealed class SettingsDialogTests
             Assert.Equal(countBeforeSave, recordedCallbacks.Count);
             Assert.Equal("dark", recordedCallbacks[^1].Theme);
             Assert.Equal(0.5, recordedCallbacks[^1].WidgetOpacity);
+        });
+    }
+
+    [Fact]
+    public async Task SettingsDialog_WhenClosingWhileSaving_ClosingIsCancelled_AndDialogStaysOpen()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var initial = new AppSettings
+            {
+                Theme = "light",
+                WidgetOpacity = 0.9,
+                WidgetAlwaysOnTop = false,
+                DashboardWidth = 1120,
+                DashboardHeight = 820
+            };
+
+            var store = new BlockingSettingsStore(initial);
+            var registrar = new FakeStartupRegistrar();
+            using var session = new SettingsSession(store, initial);
+
+            var vm = new SettingsViewModel(session, registrar);
+            var dialog = new SettingsDialog(vm);
+            using var offscreen = WpfTestHost.ShowOffscreen(dialog);
+
+            Assert.True(dialog.IsVisible);
+
+            // Start saving
+            var saveTask = vm.SaveAsync();
+            await store.SaveStarted.Task;
+
+            Assert.True(vm.IsSaving);
+
+            // Closing while saving must be cancelled (dialog remains open)
+            dialog.Close();
+            Assert.True(dialog.IsVisible);
+
+            // Release the store and allow Save to complete
+            store.Release();
+            await saveTask;
+
+            // When save completes, dialog closes via RequestClose(true)
+            Assert.False(dialog.IsVisible);
         });
     }
 
@@ -199,6 +243,11 @@ public sealed class SettingsDialogTests
         Assert.True(
             Regex.IsMatch(methodBody, @"new\s+AppearanceApplier\s*\("),
             "OpenSettingsDialog method body does not construct AppearanceApplier ('new AppearanceApplier(' was not found).");
+
+        // and constructs DashboardPreviewResizer
+        Assert.True(
+            Regex.IsMatch(methodBody, @"new\s+DashboardPreviewResizer\s*\("),
+            "OpenSettingsDialog method body does not construct DashboardPreviewResizer ('new DashboardPreviewResizer(' was not found).");
 
         // and passes an Apply callback to SettingsViewModel
         Assert.True(

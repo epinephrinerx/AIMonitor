@@ -101,6 +101,7 @@
 - [x] เฟส 1: test ที่แดงเมื่อย้อนโค้ด — บันทึก Settings แล้วปิดหน้าต่าง ค่าไม่ย้อนกลับ — ตรวจแล้ว: 966 tests ผ่าน, build 0 warning, format สะอาด, mutation 9 แบบแดงจริง, Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P1.md`); branch `agent/antigravity-settings-single-source` (🧪 รอคุณทดลองบนแอปจริง: บันทึก Settings แล้วปิดหน้าต่าง/Widget เปิดใหม่ ค่าต้องไม่ย้อนกลับ)
 - [x] เฟส 2: เปลี่ยน opacity/topmost/ShowTrayIcon/interval ใน Settings แล้วมีผลทันที — ตรวจแล้ว: build 0 warning, 1003 tests ผ่าน, format สะอาด, mutation แดงจริง (ยกเว้น 3 จุดที่ต้องตรวจมือ ระบุใน `Docs/REVIEW_R002_P2.md`), Reviewer 2 ตัวตรวจแล้ว; branch `agent/antigravity-widget-tray-live-settings` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อใน REVIEW_R002_P2)
 - [x] เฟส 3: Connections page + ConnectDialog + เส้นทางเขียน secret; key ที่บันทึกมีผลทันที — ตรวจแล้ว: build 0 warning, tests ผ่านครบ, format สะอาด, mutation แดงจริง (ยกเว้นข้อ 7 ที่ต้องตรวจมือ), Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P3.md`); branch `agent/antigravity-connections` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อ)
+- [x] เฟส 4: Settings live preview (theme/opacity/on-top/ขนาดหน้าต่าง) + Cancel/X/Esc คืนค่า — ตรวจแล้ว: build 0 warning, tests ผ่านครบ, format สะอาด, mutation แดงจริง, Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P4.md`); branch `agent/antigravity-settings-preview` (🧪 รอคุณทดลองบนแอปจริง)
 - [ ] เฟส 4–7: ตามตารางแผน
 - [ ] เฟส 8: ตามเกณฑ์ของ [[R-004]] (ฟังก์ชันและหน้าตาเกิน 95% พร้อมกัน)
 
@@ -170,3 +171,4 @@
 - [ ] ทุกรายการที่ไม่ผ่านหรือยกเว้น มีเหตุผลหนึ่งบรรทัดและคุณรับรอง
 - [ ] ภาพเทียบถูกถ่ายจากแอปจริงทั้งสองรุ่นด้วยข้อมูลจำลองชุดเดียวกัน
 - [ ] คุณตรวจรับเอง (agent ตั้งได้ถึง 🧪)
+- 2026-10-02 — เฟส 4 เสร็จ (🧪): พรีวิวสดใน Settings + Discard; Reviewer 2 ตัวพบประเด็นจริง 4 กลุ่ม แก้แล้ว, 3 เบาเก็บเข้าเฟส 5/8; รายละเอียด `Docs/REVIEW_R002_P4.md`; ยังไม่ push

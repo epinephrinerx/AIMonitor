@@ -60,12 +60,19 @@ public sealed class WidgetViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets the number of times <see cref="ApplySettings"/> has been called.
+    /// Used for verification that settings are forwarded on every apply.
+    /// </summary>
+    public int ApplySettingsCallCount { get; private set; }
+
+    /// <summary>
     /// Applies updated opacity and always-on-top settings to the widget.
     /// Property-changed notifications are only raised when property values actually change.
     /// </summary>
     public void ApplySettings(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ApplySettingsCallCount++;
         Opacity = settings.WidgetOpacity;
         AlwaysOnTop = settings.WidgetAlwaysOnTop;
     }

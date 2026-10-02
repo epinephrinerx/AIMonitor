@@ -439,6 +439,78 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task SaveAsync_WhileAwaitingUpdate_DiscardDoesNotRevert_AndSaveCompletesWithDarkTheme()
+    {
+        var initial = new AppSettings { Theme = "system" };
+        var store = new BlockingSettingsStore(initial);
+        var registrar = new FakeStartupRegistrar();
+        using var session = new SettingsSession(store, initial);
+
+        var previewCallbacks = new List<AppSettings>();
+        var vm = new SettingsViewModel(session, registrar, s => previewCallbacks.Add(s));
+
+        // 1. Preview theme dark
+        vm.Theme = "dark";
+        Assert.Single(previewCallbacks);
+        Assert.Equal("dark", previewCallbacks[0].Theme);
+
+        // 2. Start Save (SaveStarted awaited)
+        var saveTask = vm.SaveAsync();
+        await store.SaveStarted.Task;
+
+        Assert.True(vm.IsSaving);
+
+        // 3. Call Discard while saving -> callback NOT invoked with entry (must be a no-op)
+        vm.Discard();
+        Assert.Single(previewCallbacks);
+        Assert.Equal("dark", previewCallbacks[^1].Theme);
+
+        // 4. Release store and await save
+        store.Release();
+        await saveTask;
+
+        // 5. Verification: Current.Theme == "dark", last preview callback is dark, IsSaving is false
+        Assert.Equal("dark", session.Current.Theme);
+        Assert.Equal("dark", previewCallbacks[^1].Theme);
+        Assert.False(vm.IsSaving);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WhenSaveFails_DiscardStillReverts()
+    {
+        var initial = new AppSettings { Theme = "system" };
+        var store = new BlockingSettingsStore(initial)
+        {
+            FailOnSave = new IOException("Disk failure during save")
+        };
+        var registrar = new FakeStartupRegistrar();
+        using var session = new SettingsSession(store, initial);
+
+        var previewCallbacks = new List<AppSettings>();
+        var vm = new SettingsViewModel(session, registrar, s => previewCallbacks.Add(s));
+
+        vm.Theme = "dark";
+        Assert.Equal("dark", previewCallbacks[^1].Theme);
+
+        var saveTask = vm.SaveAsync();
+        await store.SaveStarted.Task;
+        Assert.True(vm.IsSaving);
+
+        // Discard while saving is a no-op
+        vm.Discard();
+        Assert.Equal("dark", previewCallbacks[^1].Theme);
+
+        // Release the failing save
+        store.Release();
+        await Assert.ThrowsAsync<IOException>(() => saveTask);
+
+        // After failed save, IsSaving must be false, _saved must be false, and Discard works as before
+        Assert.False(vm.IsSaving);
+        vm.Discard();
+        Assert.Equal("system", previewCallbacks[^1].Theme);
+    }
+
+    [Fact]
     public async Task SaveAsync_WhenStoreThrows_LeavesSavedFalse_SoDiscardCanStillRevert()
     {
         var initial = new AppSettings { Theme = "system" };

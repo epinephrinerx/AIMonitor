@@ -8,7 +8,7 @@ namespace AIMonitor.Presentation.Wpf;
 /// Conforms to PAR-027 and 1.3.3 parity:
 /// - Invokes theme callback on first apply and when theme changes thereafter.
 /// - Forwards settings to WidgetViewModel on every apply.
-/// - Invokes dashboard resize callback only when dimensions change and are not (0, 0).
+/// - Invokes dashboard resize callback when dimensions change (including back to (0, 0)).
 /// </summary>
 public sealed class AppearanceApplier
 {
@@ -50,10 +50,7 @@ public sealed class AppearanceApplier
         if (_lastWindowSize != currentSize)
         {
             _lastWindowSize = currentSize;
-            if (currentSize != (0, 0))
-            {
-                _resizeDashboard(settings.DashboardWidth, settings.DashboardHeight);
-            }
+            _resizeDashboard(settings.DashboardWidth, settings.DashboardHeight);
         }
     }
 }

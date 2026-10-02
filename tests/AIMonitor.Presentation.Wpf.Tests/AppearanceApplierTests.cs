@@ -54,25 +54,25 @@ public sealed class AppearanceApplierTests
             initialWidth: 1120,
             initialHeight: 820);
 
-        // First apply
-        applier.Apply(new AppSettings
+        var settings = new AppSettings
         {
             WidgetOpacity = 0.55,
             WidgetAlwaysOnTop = false
-        });
+        };
+
+        // First apply
+        applier.Apply(settings);
 
         Assert.Equal(0.55, widgetVm.Opacity);
         Assert.False(widgetVm.AlwaysOnTop);
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
 
-        // Second apply
-        applier.Apply(new AppSettings
-        {
-            WidgetOpacity = 0.85,
-            WidgetAlwaysOnTop = true
-        });
+        // Second apply with IDENTICAL settings: widget must still receive the call
+        applier.Apply(settings);
 
-        Assert.Equal(0.85, widgetVm.Opacity);
-        Assert.True(widgetVm.AlwaysOnTop);
+        Assert.Equal(0.55, widgetVm.Opacity);
+        Assert.False(widgetVm.AlwaysOnTop);
+        Assert.Equal(2, widgetVm.ApplySettingsCallCount);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class AppearanceApplierTests
     }
 
     [Fact]
-    public void Apply_ResizeDashboard_OnlyWhenChangedAndNotZeroByZero()
+    public void Apply_ResizeDashboard_OnlyWhenChanged_IncludingZeroByZero()
     {
         var resizeCalls = new List<(int Width, int Height)>();
         var applier = new AppearanceApplier(
@@ -116,18 +116,19 @@ public sealed class AppearanceApplierTests
         Assert.Equal(2, resizeCalls.Count);
         Assert.Equal((1400, 900), resizeCalls[1]);
 
-        // 4. Fourth apply with (0, 0): must NOT be called (is 0x0)
+        // 4. Fourth apply with (0, 0): must be called (changed from 1400x900 to 0x0)
         applier.Apply(new AppSettings { DashboardWidth = 0, DashboardHeight = 0 });
-        Assert.Equal(2, resizeCalls.Count);
+        Assert.Equal(3, resizeCalls.Count);
+        Assert.Equal((0, 0), resizeCalls[2]);
 
-        // 5. Fifth apply with identical (0, 0): must NOT be called
+        // 5. Fifth apply with identical (0, 0): must NOT be called again
         applier.Apply(new AppSettings { DashboardWidth = 0, DashboardHeight = 0 });
-        Assert.Equal(2, resizeCalls.Count);
+        Assert.Equal(3, resizeCalls.Count);
 
         // 6. Sixth apply with changed non-zero size (1400, 900): must be called
         applier.Apply(new AppSettings { DashboardWidth = 1400, DashboardHeight = 900 });
-        Assert.Equal(3, resizeCalls.Count);
-        Assert.Equal((1400, 900), resizeCalls[2]);
+        Assert.Equal(4, resizeCalls.Count);
+        Assert.Equal((1400, 900), resizeCalls[3]);
     }
 
     [Fact]
@@ -259,7 +260,7 @@ public sealed class AppearanceApplierTests
     }
 
     [Fact]
-    public void Apply_ChangeToZeroZeroRememberLastSize_NotCalled_AndFollowingChangeBackToStandard_Called()
+    public void Apply_ChangeToZeroZeroRememberLastSize_ForwardsZeroZero_AndFollowingChangeBackToStandard_Called()
     {
         var resizeCalls = new List<(int Width, int Height)>();
         var applier = new AppearanceApplier(
@@ -276,15 +277,17 @@ public sealed class AppearanceApplierTests
             DashboardWidth = 1120,
             DashboardHeight = 820
         });
+        Assert.Empty(resizeCalls);
 
-        // (4) Change to (0,0) "Remember last size" -> not called
+        // (4) Change to (0,0) "Remember last size" -> forwarded to resizeDashboard
         applier.Apply(new AppSettings
         {
             Theme = "dark",
             DashboardWidth = 0,
             DashboardHeight = 0
         });
-        Assert.Empty(resizeCalls);
+        Assert.Single(resizeCalls);
+        Assert.Equal((0, 0), resizeCalls[0]);
 
         // Following change back to Standard -> called
         applier.Apply(new AppSettings
@@ -294,8 +297,8 @@ public sealed class AppearanceApplierTests
             DashboardHeight = 820
         });
 
-        Assert.Single(resizeCalls);
-        Assert.Equal((1120, 820), resizeCalls[0]);
+        Assert.Equal(2, resizeCalls.Count);
+        Assert.Equal((1120, 820), resizeCalls[1]);
     }
 
     [Fact]
@@ -322,12 +325,36 @@ public sealed class AppearanceApplierTests
         applier.Apply(new AppSettings { Theme = "dark", DashboardWidth = 1400, DashboardHeight = 900 });
         Assert.Single(resizeCalls);
 
-        // (4) Change to (0,0) "Remember last size" -> not called, and a following change back to Standard -> called
+        // (4) Change to (0,0) "Remember last size" -> called with (0,0)
         applier.Apply(new AppSettings { Theme = "dark", DashboardWidth = 0, DashboardHeight = 0 });
-        Assert.Single(resizeCalls);
-
-        applier.Apply(new AppSettings { Theme = "dark", DashboardWidth = 1120, DashboardHeight = 820 });
         Assert.Equal(2, resizeCalls.Count);
-        Assert.Equal((1120, 820), resizeCalls[1]);
+        Assert.Equal((0, 0), resizeCalls[1]);
+
+        // (5) Following change back to Standard -> called
+        applier.Apply(new AppSettings { Theme = "dark", DashboardWidth = 1120, DashboardHeight = 820 });
+        Assert.Equal(3, resizeCalls.Count);
+        Assert.Equal((1120, 820), resizeCalls[2]);
+    }
+
+    [Fact]
+    public void Apply_ResizeDashboard_ForwardsZeroZero_AfterNonZeroSize()
+    {
+        var resizeCalls = new List<(int Width, int Height)>();
+        var applier = new AppearanceApplier(
+            applyTheme: _ => { },
+            widget: null,
+            resizeDashboard: (w, h) => resizeCalls.Add((w, h)),
+            initialWidth: 0,
+            initialHeight: 0);
+
+        // Transition from initial (0,0) to Wide (1400, 900)
+        applier.Apply(new AppSettings { DashboardWidth = 1400, DashboardHeight = 900 });
+        Assert.Single(resizeCalls);
+        Assert.Equal((1400, 900), resizeCalls[0]);
+
+        // Transition back to (0, 0) ("Remember last size" on Discard)
+        applier.Apply(new AppSettings { DashboardWidth = 0, DashboardHeight = 0 });
+        Assert.Equal(2, resizeCalls.Count);
+        Assert.Equal((0, 0), resizeCalls[1]);
     }
 }
