@@ -128,7 +128,39 @@ public sealed class LiveSettingsApplierTests
     }
 
     [Fact]
-    public async Task Apply_UpdatesWidgetOpacityAndAlwaysOnTop_OnEveryCall()
+    public async Task Apply_Widget_FirstCallAlwaysApplies()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var tab = new ProviderTabViewModel("claude", "Claude");
+        var widgetVm = new WidgetViewModel([tab]);
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: widgetVm,
+            mainViewModel: mainViewModel,
+            createTray: () => new FakeTrayHost(),
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        Assert.Equal(0, widgetVm.ApplySettingsCallCount);
+
+        applier.Apply(new AppSettings
+        {
+            WidgetOpacity = 0.55,
+            WidgetAlwaysOnTop = false
+        });
+
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
+        Assert.Equal(0.55, widgetVm.Opacity);
+        Assert.False(widgetVm.AlwaysOnTop);
+    }
+
+    [Fact]
+    public async Task Apply_Widget_GeometryOnlySecondApply_DoesNotCallWidget()
     {
         await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
         var store = new BlockingSettingsStore(new AppSettings());
@@ -152,18 +184,101 @@ public sealed class LiveSettingsApplierTests
             WidgetOpacity = 0.55,
             WidgetAlwaysOnTop = false
         });
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
 
-        Assert.Equal(0.55, widgetVm.Opacity);
-        Assert.False(widgetVm.AlwaysOnTop);
+        // Simulate preview in settings dialog changing widget preview values
+        widgetVm.Opacity = 0.35;
+        widgetVm.AlwaysOnTop = true;
 
-        // Second apply with updated settings
+        // Second apply with geometry-only update (WidgetOpacity and WidgetAlwaysOnTop unchanged in settings)
+        applier.Apply(new AppSettings
+        {
+            WidgetOpacity = 0.55,
+            WidgetAlwaysOnTop = false,
+            DashboardWidth = 1400,
+            DashboardHeight = 900,
+            LegacyGeometry = new Dictionary<string, string> { ["window"] = "100,200" }
+        });
+
+        // Widget must NOT be called again, so preview values are NOT reset
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
+        Assert.Equal(0.35, widgetVm.Opacity);
+        Assert.True(widgetVm.AlwaysOnTop);
+    }
+
+    [Fact]
+    public async Task Apply_Widget_OpacityChange_CallsWidget()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var tab = new ProviderTabViewModel("claude", "Claude");
+        var widgetVm = new WidgetViewModel([tab]);
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: widgetVm,
+            mainViewModel: mainViewModel,
+            createTray: () => new FakeTrayHost(),
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        // First apply
+        applier.Apply(new AppSettings
+        {
+            WidgetOpacity = 0.55,
+            WidgetAlwaysOnTop = false
+        });
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
+
+        // Second apply with changed opacity
         applier.Apply(new AppSettings
         {
             WidgetOpacity = 0.85,
+            WidgetAlwaysOnTop = false
+        });
+
+        Assert.Equal(2, widgetVm.ApplySettingsCallCount);
+        Assert.Equal(0.85, widgetVm.Opacity);
+    }
+
+    [Fact]
+    public async Task Apply_Widget_AlwaysOnTopChange_CallsWidget()
+    {
+        await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var mainViewModel = new MainWindowViewModel(coordinator, session);
+
+        var tab = new ProviderTabViewModel("claude", "Claude");
+        var widgetVm = new WidgetViewModel([tab]);
+
+        var applier = new LiveSettingsApplier(
+            widgetViewModel: widgetVm,
+            mainViewModel: mainViewModel,
+            createTray: () => new FakeTrayHost(),
+            setRefreshInterval: _ => { },
+            isAnyWindowVisible: () => false,
+            showDashboard: () => { });
+
+        // First apply
+        applier.Apply(new AppSettings
+        {
+            WidgetOpacity = 0.55,
+            WidgetAlwaysOnTop = false
+        });
+        Assert.Equal(1, widgetVm.ApplySettingsCallCount);
+
+        // Second apply with changed always-on-top
+        applier.Apply(new AppSettings
+        {
+            WidgetOpacity = 0.55,
             WidgetAlwaysOnTop = true
         });
 
-        Assert.Equal(0.85, widgetVm.Opacity);
+        Assert.Equal(2, widgetVm.ApplySettingsCallCount);
         Assert.True(widgetVm.AlwaysOnTop);
     }
 

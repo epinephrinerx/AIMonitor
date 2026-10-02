@@ -260,7 +260,14 @@ public partial class App : System.Windows.Application
         {
             if (_settingsSession is null) return;
 
-            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!);
+            var applier = new AppearanceApplier(
+                ThemeManager.Instance.ApplyTheme,
+                _widgetViewModel,
+                new DashboardPreviewResizer(() => _mainWindow).Resize,
+                _settingsSession.Current.DashboardWidth,
+                _settingsSession.Current.DashboardHeight);
+
+            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!, applier.Apply);
             var dialog = new SettingsDialog(vm)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
