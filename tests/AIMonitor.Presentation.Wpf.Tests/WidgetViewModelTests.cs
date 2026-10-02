@@ -1,4 +1,5 @@
 using AIMonitor.Application.Settings;
+using AIMonitor.Presentation.Wpf;
 using AIMonitor.Presentation.Wpf.ViewModels;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
@@ -170,5 +171,138 @@ public class WidgetViewModelTests
         vm.ApplySettings(duplicateSettings);
 
         Assert.Empty(changedProps);
+    }
+
+    [Fact]
+    public void UpdateLayout_WideWidth_ShowsAllValidMeters()
+    {
+        var tab = new ProviderTabViewModel("claude", "Claude")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "M1", ValueText = "10%" },
+                new MeterDisplayItem { Title = "M2", ValueText = "20%" },
+                new MeterDisplayItem { Title = "M3", ValueText = "30%" }
+            ]
+        };
+
+        var vm = new WidgetViewModel([tab]);
+        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.Equal(3, vm.VisibleMeters.Count);
+        Assert.True(vm.ArcSize >= WidgetLayout.ArcMin);
+        Assert.True(vm.ShowSubtitle);
+        Assert.True(vm.InlineValue);
+        Assert.False(vm.IsTooSmall);
+    }
+
+    [Fact]
+    public void UpdateLayout_NarrowWidth_TruncatesVisibleMetersToComputedCount()
+    {
+        var tab = new ProviderTabViewModel("claude", "Claude")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "M1", ValueText = "10%" },
+                new MeterDisplayItem { Title = "M2", ValueText = "20%" },
+                new MeterDisplayItem { Title = "M3", ValueText = "30%" }
+            ]
+        };
+
+        var vm = new WidgetViewModel([tab]);
+        // Narrow width 100px can only fit 1 meter
+        vm.UpdateLayout(width: 100.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.Single(vm.VisibleMeters);
+        Assert.Equal("M1", vm.VisibleMeters[0].Title);
+        Assert.Equal("10%", vm.VisibleMeters[0].ValueText);
+    }
+
+    [Fact]
+    public void CurrentProvider_Changed_RecalculatesLayoutWithLatestDimensions()
+    {
+        var tab1 = new ProviderTabViewModel("claude", "Claude")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "C1", ValueText = "10%" },
+                new MeterDisplayItem { Title = "C2", ValueText = "20%" },
+                new MeterDisplayItem { Title = "C3", ValueText = "30%" }
+            ]
+        };
+
+        var tab2 = new ProviderTabViewModel("openai", "OpenAI")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "O1", ValueText = "50%" }
+            ]
+        };
+
+        var vm = new WidgetViewModel([tab1, tab2]);
+        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.Equal(3, vm.VisibleMeters.Count);
+
+        // NextProvider rotates to tab2 with 1 meter
+        vm.NextProvider();
+        Assert.Same(tab2, vm.CurrentProvider);
+        Assert.Single(vm.VisibleMeters);
+        Assert.Equal("O1", vm.VisibleMeters[0].Title);
+
+        // PreviousProvider returns to tab1 with 3 meters
+        vm.PreviousProvider();
+        Assert.Same(tab1, vm.CurrentProvider);
+        Assert.Equal(3, vm.VisibleMeters.Count);
+    }
+
+    [Fact]
+    public void CurrentProvider_MetersWithoutValue_AreNotCountedOrDisplayed()
+    {
+        var tab = new ProviderTabViewModel("claude", "Claude")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "Valid", ValueText = "45%" },
+                new MeterDisplayItem { Title = "NoValuePlaceholder", ValueText = "--" },
+                new MeterDisplayItem { Title = "EmptyValue", ValueText = "" },
+                new MeterDisplayItem { Title = "WhitespaceValue", ValueText = "   " }
+            ]
+        };
+
+        var vm = new WidgetViewModel([tab]);
+        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        // Only "Valid" (ValueText = "45%") must be counted and shown
+        Assert.Single(vm.VisibleMeters);
+        Assert.Equal("Valid", vm.VisibleMeters[0].Title);
+        Assert.Equal("45%", vm.VisibleMeters[0].ValueText);
+    }
+
+    [Fact]
+    public void CurrentProvider_MetersPropertyUpdate_TriggersRecalculation()
+    {
+        var tab = new ProviderTabViewModel("claude", "Claude")
+        {
+            Meters =
+            [
+                new MeterDisplayItem { Title = "M1", ValueText = "10%" }
+            ]
+        };
+
+        var vm = new WidgetViewModel([tab]);
+        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.Single(vm.VisibleMeters);
+
+        // Simulate snapshot update updating Meters collection
+        tab.Meters =
+        [
+            new MeterDisplayItem { Title = "M1", ValueText = "10%" },
+            new MeterDisplayItem { Title = "M2", ValueText = "20%" },
+            new MeterDisplayItem { Title = "M3", ValueText = "30%" }
+        ];
+
+        Assert.Equal(3, vm.VisibleMeters.Count);
     }
 }
