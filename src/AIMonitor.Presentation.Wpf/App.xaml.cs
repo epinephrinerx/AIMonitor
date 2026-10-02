@@ -135,6 +135,7 @@ public partial class App : System.Windows.Application
         _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
+        _mainViewModel.RequestConnect += OpenConnectDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
 
         // 6. Periodic Refresh Timer
@@ -302,6 +303,60 @@ public partial class App : System.Windows.Application
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
             };
             dialog.ShowDialog();
+        });
+    }
+
+    public void OpenConnectDialog(string providerId)
+    {
+        Dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                if (ConnectionStore is null || _mainViewModel is null) return;
+
+                var meta = ProviderMeta.TryGet(providerId);
+                if (meta is null) return;
+
+                ProviderConnection connection;
+                try
+                {
+                    connection = await ConnectionStore.GetAsync(providerId);
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show(
+                        _mainWindow?.IsVisible == true ? _mainWindow : null,
+                        $"Failed to load connection settings: {ex.Message}",
+                        "Connection Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+
+                _mainViewModel.LatestSnapshots.TryGetValue(providerId, out var snapshot);
+                var detection = snapshot?.Detection;
+
+                var vm = new ConnectDialogViewModel(meta, detection, connection, ConnectionStore);
+                var dialog = new ConnectDialog(vm)
+                {
+                    Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
+                };
+
+                var result = dialog.ShowDialog();
+                if (result == true)
+                {
+                    await _mainViewModel.RefreshAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(
+                    _mainWindow?.IsVisible == true ? _mainWindow : null,
+                    $"An error occurred: {ex.Message}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         });
     }
 

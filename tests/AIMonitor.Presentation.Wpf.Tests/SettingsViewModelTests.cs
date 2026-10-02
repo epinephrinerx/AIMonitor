@@ -5,6 +5,7 @@ using AIMonitor.Presentation.Wpf.ViewModels;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
+[Collection("Wpf")]
 public class SettingsViewModelTests
 {
     [Fact]
