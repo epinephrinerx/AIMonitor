@@ -138,6 +138,10 @@ public partial class App : System.Windows.Application
         _mainViewModel.RequestExit += ShutdownApp;
         _mainViewModel.RequestConnect += OpenConnectDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
+        _widgetViewModel.ActiveProviderSource = () => _mainViewModel.SelectedTab?.ProviderId;
+        _widgetViewModel.RequestExpand += SwitchToDashboardMode;
+        _widgetViewModel.RequestRefresh += async () => await _mainViewModel.RefreshAsync();
+        _widgetViewModel.RequestQuit += ShutdownApp;
 
         // 6. Periodic Refresh Timer
         _refreshTimer = new DispatcherTimer();

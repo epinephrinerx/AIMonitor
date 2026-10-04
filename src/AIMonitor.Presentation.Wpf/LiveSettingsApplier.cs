@@ -20,6 +20,7 @@ public sealed class LiveSettingsApplier
     private ITrayHost? _currentTray;
     private double? _lastAppliedWidgetOpacity;
     private bool? _lastAppliedWidgetAlwaysOnTop;
+    private bool? _lastAppliedWidgetRotation;
     private bool _hasAppliedWidgetSettings;
 
     public LiveSettingsApplier(
@@ -60,13 +61,15 @@ public sealed class LiveSettingsApplier
 
         var widgetSettingsChanged = !_hasAppliedWidgetSettings
             || _lastAppliedWidgetOpacity != settings.WidgetOpacity
-            || _lastAppliedWidgetAlwaysOnTop != settings.WidgetAlwaysOnTop;
+            || _lastAppliedWidgetAlwaysOnTop != settings.WidgetAlwaysOnTop
+            || _lastAppliedWidgetRotation != settings.WidgetRotationEnabled;
 
         if (widgetSettingsChanged)
         {
             _widgetViewModel?.ApplySettings(settings);
             _lastAppliedWidgetOpacity = settings.WidgetOpacity;
             _lastAppliedWidgetAlwaysOnTop = settings.WidgetAlwaysOnTop;
+            _lastAppliedWidgetRotation = settings.WidgetRotationEnabled;
             _hasAppliedWidgetSettings = true;
         }
 

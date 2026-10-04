@@ -179,6 +179,7 @@ public class WidgetViewModelTests
         var tab = new ProviderTabViewModel("claude", "Claude")
         {
             Status = "Connected",
+            LastUpdated = DateTimeOffset.UtcNow,
             Meters =
             [
                 new MeterDisplayItem { Title = "M1", ValueText = "10%" },
@@ -210,8 +211,8 @@ public class WidgetViewModelTests
         Assert.True(vm.InlineValue);
         Assert.False(vm.IsTooSmall);
 
-        // When status is empty -> FooterRowHeight must be 0
-        tab.Status = string.Empty;
+        // With no reading yet there is no "updated … ago" line -> FooterRowHeight must be 0
+        tab.LastUpdated = null;
         Assert.Equal(0.0, vm.FooterRowHeight);
 
         // Widen to non-default width 300 -> fits 3 meters

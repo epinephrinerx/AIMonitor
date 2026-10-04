@@ -1,12 +1,16 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
 using AIMonitor.Presentation.Wpf.ViewModels;
+using Orientation = System.Windows.Controls.Orientation;
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace AIMonitor.Presentation.Wpf;
 
@@ -15,6 +19,7 @@ public partial class WidgetWindow : Window
     private readonly WidgetViewModel? _viewModel;
     private readonly SettingsSession? _session;
     private readonly DispatcherTimer _resizeSaveTimer;
+    private readonly DispatcherTimer _statusTimer;
     private Task _lastSaveTask = Task.CompletedTask;
 
     public WidgetWindow()
@@ -24,8 +29,15 @@ public partial class WidgetWindow : Window
         _resizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _resizeSaveTimer.Tick += OnResizeSaveTimerTick;
 
+        // The "updated … ago" footer ticks while the widget is on screen.
+        _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _statusTimer.Tick += (_, _) => (_viewModel ?? DataContext as WidgetViewModel)?.RefreshStatus();
+
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
+        LocationChanged += OnLocationChanged;
+        IsVisibleChanged += OnIsVisibleChanged;
+        MouseRightButtonUp += OnWindowRightClick;
         Closing += OnClosing;
 
         DataContextChanged += (s, e) =>
@@ -173,6 +185,164 @@ public partial class WidgetWindow : Window
             _resizeSaveTimer.Stop();
             _resizeSaveTimer.Start();
         }
+    }
+
+    private void OnLocationChanged(object? sender, EventArgs e)
+    {
+        if (_session is not null && IsLoaded)
+        {
+            _resizeSaveTimer.Stop();
+            _resizeSaveTimer.Start();
+        }
+    }
+
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        var vm = _viewModel ?? DataContext as WidgetViewModel;
+        var visible = IsVisible;
+        vm?.SetActive(visible);
+        if (visible)
+        {
+            vm?.RefreshStatus();
+            _statusTimer.Start();
+            return;
+        }
+
+        // Leaving widget mode (expand, tray) keeps the position the user dragged it to.
+        _statusTimer.Stop();
+        if (IsLoaded)
+        {
+            _resizeSaveTimer.Stop();
+            SaveGeometry();
+        }
+    }
+
+    private void OnWindowRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!IsPointInResizeBand(e.GetPosition(this)))
+        {
+            ShowOptionsMenu();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>The right-click menu of 1.3.3: Expand, Refresh, Show, Always on top, Opacity, Quit.</summary>
+    private void ShowOptionsMenu()
+    {
+        var vm = _viewModel ?? DataContext as WidgetViewModel;
+        if (vm is null)
+        {
+            return;
+        }
+
+        var menu = new ContextMenu { PlacementTarget = this, Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        menu.Items.Add(MenuEntry("Expand to dashboard", vm.Expand));
+        menu.Items.Add(MenuEntry("Refresh now", vm.Refresh));
+        menu.Items.Add(new Separator());
+
+        if (vm.Providers.Count > 1)
+        {
+            var show = new MenuItem { Header = "Show" };
+            var all = new MenuItem { Header = "All services (rotate)", IsCheckable = true, IsChecked = vm.IsRotatingAll };
+            all.Click += (_, _) =>
+            {
+                vm.ShowAllProviders();
+                Persist(session => WidgetPreferenceRecorder.SetRotationAsync(session, true));
+            };
+            show.Items.Add(all);
+            show.Items.Add(new Separator());
+
+            var showing = vm.CurrentProvider?.ProviderId;
+            foreach (var provider in vm.Providers)
+            {
+                var id = provider.ProviderId;
+                var entry = new MenuItem
+                {
+                    Header = provider.DisplayName,
+                    IsCheckable = true,
+                    IsChecked = !vm.IsRotatingAll && id == showing,
+                };
+                entry.Click += (_, _) =>
+                {
+                    vm.ShowProvider(id);
+                    Persist(session => WidgetPreferenceRecorder.SetRotationAsync(session, false));
+                };
+                show.Items.Add(entry);
+            }
+
+            menu.Items.Add(show);
+        }
+
+        var onTop = new MenuItem { Header = "Always on top", IsCheckable = true, IsChecked = vm.AlwaysOnTop };
+        onTop.Click += (_, _) =>
+        {
+            var enabled = onTop.IsChecked;
+            vm.AlwaysOnTop = enabled;
+            Persist(session => WidgetPreferenceRecorder.SetAlwaysOnTopAsync(session, enabled));
+        };
+        menu.Items.Add(onTop);
+        menu.Items.Add(BuildOpacityRow(vm, menu));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MenuEntry("Quit", vm.Quit));
+        menu.IsOpen = true;
+    }
+
+    private static MenuItem MenuEntry(string header, Action action)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) => action();
+        return item;
+    }
+
+    /// <summary>A live slider rather than fixed steps: opacity is judged by eye, so it applies while dragging.</summary>
+    private FrameworkElement BuildOpacityRow(WidgetViewModel vm, ContextMenu menu)
+    {
+        var caption = new TextBlock { Text = "Opacity", VerticalAlignment = VerticalAlignment.Center };
+        var readout = new TextBlock
+        {
+            Text = $"{Math.Round(vm.Opacity * 100)}%",
+            Width = 36,
+            TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontWeight = FontWeights.SemiBold,
+        };
+        var slider = new Slider
+        {
+            Minimum = 25,
+            Maximum = 100,
+            SmallChange = 5,
+            LargeChange = 10,
+            Value = Math.Round(vm.Opacity * 100),
+            Width = 140,
+            Margin = new Thickness(8, 0, 8, 0),
+        };
+        slider.ValueChanged += (_, args) =>
+        {
+            readout.Text = $"{Math.Round(args.NewValue)}%";
+            vm.Opacity = Math.Round(args.NewValue) / 100.0;
+        };
+        // Persist once, when the menu closes, rather than on every tick of the drag.
+        menu.Closed += (_, _) =>
+        {
+            var value = vm.Opacity;
+            Persist(session => WidgetPreferenceRecorder.SetOpacityAsync(session, value));
+        };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(12, 4, 12, 4) };
+        row.Children.Add(caption);
+        row.Children.Add(slider);
+        row.Children.Add(readout);
+        return row;
+    }
+
+    private void Persist(Func<SettingsSession, Task> write)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _ = FireAndForgetAsync(write(_session));
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

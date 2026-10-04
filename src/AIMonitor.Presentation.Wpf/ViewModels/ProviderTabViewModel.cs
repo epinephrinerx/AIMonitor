@@ -19,6 +19,12 @@ public sealed class MeterDisplayItem : ViewModelBase
 
     /// <summary>"Resets in 2h 5m · 17:50", "No reset scheduled", or the server's lock reason.</summary>
     public string ResetText { get; init; } = "";
+
+    /// <summary>The five-hour (session) window, which the widget caption and tray speak for.</summary>
+    public bool IsFiveHour { get; init; }
+
+    /// <summary>Widget wording: "resets in 2h 5m  ·  17:50", "no reset scheduled", "resetting now".</summary>
+    public string ResetCompact { get; init; } = "";
 }
 
 /// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
@@ -48,6 +54,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _tabTitle;
     private string _accountLabel = "";
     private bool _showSetupCard;
+    private bool _isConfigured;
+    private bool _hasSnapshot;
+    private DateTimeOffset? _lastUpdated;
 
     public ProviderTabViewModel(string providerId, string displayName)
     {
@@ -81,6 +90,27 @@ public sealed class ProviderTabViewModel : ViewModelBase
     {
         get => _showSetupCard;
         private set => SetProperty(ref _showSetupCard, value);
+    }
+
+    /// <summary>True once the service is set up (connected, limited or expired).</summary>
+    public bool IsConfigured
+    {
+        get => _isConfigured;
+        private set => SetProperty(ref _isConfigured, value);
+    }
+
+    /// <summary>True once any snapshot has been received; before that every service counts as showable.</summary>
+    public bool HasSnapshot
+    {
+        get => _hasSnapshot;
+        private set => SetProperty(ref _hasSnapshot, value);
+    }
+
+    /// <summary>When the last reading was taken, for the widget's "updated … ago" line.</summary>
+    public DateTimeOffset? LastUpdated
+    {
+        get => _lastUpdated;
+        set => SetProperty(ref _lastUpdated, value);
     }
 
     public bool HasError => !string.IsNullOrEmpty(_errorMessage);
@@ -297,6 +327,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 GaugeBrush = brush,
                 SeverityText = $"{glyph} {word}",
                 ResetText = FormatResetText(m, reference),
+                ResetCompact = FormatResetCompact(m, reference),
+                IsFiveHour = m.Percent.HasValue && (m.Kind == "session"
+                    || string.Equals(m.Subtitle.Trim(), "5-hour window", StringComparison.OrdinalIgnoreCase)),
             });
         }
         Meters = meterList;
@@ -329,6 +362,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
             ? $"{DisplayName} {lead.ValueText}"
             : DisplayName;
 
+        LastUpdated = snapshot.FetchedAt;
+        IsConfigured = configuredNow;
+        HasSnapshot = true;
         ShowSetupCard = !configuredNow && meterList.Count == 0;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
@@ -340,6 +376,22 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             StatsSummary = string.Join("  |  ", snapshot.Stats.Select(s => $"{s.Label}: {s.Value}"));
         }
+    }
+
+    private static string FormatResetCompact(Meter meter, DateTimeOffset now)
+    {
+        if (!string.IsNullOrEmpty(meter.LockedReason))
+        {
+            return meter.LockedReason;
+        }
+
+        var display = ResetDisplayFormatter.Format(meter.ResetsAt, now, TimeZoneInfo.Local);
+        if (display is null)
+        {
+            return "no reset scheduled";
+        }
+
+        return display.Countdown == "now" ? "resetting now" : $"resets in {display.Countdown}  ·  {display.LocalTime}";
     }
 
     private static string FormatResetText(Meter meter, DateTimeOffset now)

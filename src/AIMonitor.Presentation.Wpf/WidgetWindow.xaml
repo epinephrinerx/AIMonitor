@@ -15,9 +15,14 @@
         Opacity="{Binding Opacity}"
         MinWidth="150" MinHeight="96" MaxWidth="300" MaxHeight="300"
         Width="230" Height="175"
-        MouseDown="OnWindowMouseDown">
+        MouseDown="OnWindowMouseDown"
+        ToolTip="Drag to move · drag an edge to resize · double-click to expand · right-click for options">
     <!-- Per-pixel-alpha layered windows pass clicks through alpha-0 pixels, so the rounded-corner slivers inside the 7px resize band would not resize; alpha 1 keeps them hit-testable and is visually invisible. -->
     
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="0"
                       ResizeBorderThickness="7"
@@ -40,27 +45,42 @@
                 <RowDefinition x:Name="FooterRowDefinition" Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Top Header with Chevrons and Title -->
-            <DockPanel Grid.Row="0" VerticalAlignment="Top" Height="{Binding HeaderHeight}">
-                <Button Content="&#x25C0;" Command="{Binding PreviousProviderCommand}" DockPanel.Dock="Left"
-                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
-                        FontSize="11" Cursor="Hand" Padding="4,0" ToolTip="Previous provider" />
-                
-                <Button Content="&#x25B6;" Command="{Binding NextProviderCommand}" DockPanel.Dock="Right"
-                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
-                        FontSize="11" Cursor="Hand" Padding="4,0" ToolTip="Next provider" />
-
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <TextBlock Text="{Binding CurrentProvider.DisplayName}" FontWeight="Bold" FontSize="13"
-                               Foreground="{DynamicResource TextPrimaryBrush}" HorizontalAlignment="Center" />
-                    <Button Content="&#x1F4CC;" Command="{Binding TogglePinCommand}" Margin="6,0,0,0"
-                            Background="Transparent" BorderThickness="0" FontSize="10" Cursor="Hand"
-                            Opacity="{Binding IsPinned, Converter={x:Null}}" ToolTip="Toggle rotation pin" />
+            <!-- Top Header: service name left, chevrons right (only when there is somewhere to go) -->
+            <DockPanel Grid.Row="0" VerticalAlignment="Top" Height="{Binding HeaderHeight}" LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            Visibility="{Binding CanPage, Converter={StaticResource BoolToVisibility}}">
+                    <Button Content="&#x2039;" Command="{Binding PreviousProviderCommand}"
+                            Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
+                            FontSize="16" FontWeight="Bold" Cursor="Hand" Padding="5,0" ToolTip="Previous service" />
+                    <Button Content="&#x203A;" Command="{Binding NextProviderCommand}"
+                            Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
+                            FontSize="16" FontWeight="Bold" Cursor="Hand" Padding="5,0" ToolTip="Next service" />
                 </StackPanel>
+                <TextBlock Text="{Binding CurrentProvider.DisplayName}" FontWeight="SemiBold" FontSize="13"
+                           Foreground="{DynamicResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             </DockPanel>
 
             <!-- Center Gauge Display / Too Small Message -->
             <Grid Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <TextBlock x:Name="EmptyMessageTextBlock"
+                           Text="{Binding EmptyMessage}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           HorizontalAlignment="Left"
+                           VerticalAlignment="Top">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasMeters}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <TextBlock x:Name="TooSmallTextBlock"
                            Text="Too small to show the meters."
                            Foreground="{DynamicResource TextSecondaryBrush}"
@@ -81,6 +101,7 @@
                     </TextBlock.Style>
                 </TextBlock>
 
+                <StackPanel VerticalAlignment="Top">
                 <ItemsControl x:Name="MetersItemsControl"
                               ItemsSource="{Binding VisibleMeters}"
                               HorizontalAlignment="Stretch"
@@ -123,11 +144,19 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                    <TextBlock x:Name="LeadHeadTextBlock" Text="{Binding LeadHeadText}" FontSize="10" Margin="0,4,0,0"
+                               Foreground="{Binding LeadHeadBrush}" TextTrimming="CharacterEllipsis"
+                               Visibility="{Binding ShowLeadHead, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock x:Name="ResetLineTextBlock" Text="{Binding ResetLineText}" FontSize="10"
+                               Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis"
+                               Visibility="{Binding ShowResetLine, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
             </Grid>
 
             <!-- Footer: Status -->
-            <TextBlock Grid.Row="2" Text="{Binding CurrentProvider.Status}" FontSize="10"
-                       Foreground="{DynamicResource TextSecondaryBrush}"
+            <TextBlock x:Name="FooterTextBlock" Grid.Row="2" Text="{Binding StatusText}" FontSize="10"
+                       Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis"
+                       Visibility="{Binding ShowFooter, Converter={StaticResource BoolToVisibility}}"
                        VerticalAlignment="Bottom" />
         </Grid>
     </Border>
