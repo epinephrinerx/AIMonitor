@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using AIMonitor.Domain;
+using AIMonitor.Presentation.Wpf.Theme;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 using Pen = System.Windows.Media.Pen;
@@ -35,7 +37,11 @@ public sealed class GaugeControl : FrameworkElement
 
     public static readonly DependencyProperty GaugeBrushProperty =
         DependencyProperty.Register(nameof(GaugeBrush), typeof(Brush), typeof(GaugeControl),
-            new FrameworkPropertyMetadata(Brushes.Teal, FrameworkPropertyMetadataOptions.AffectsRender));
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty SeverityProperty =
+        DependencyProperty.Register(nameof(Severity), typeof(Severity), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(Severity.Normal, FrameworkPropertyMetadataOptions.AffectsRender));
 
     public static readonly DependencyProperty ShowSubtitleProperty =
         DependencyProperty.Register(nameof(ShowSubtitle), typeof(bool), typeof(GaugeControl),
@@ -81,11 +87,28 @@ public sealed class GaugeControl : FrameworkElement
         set => SetValue(SubtitleProperty, value);
     }
 
-    public Brush GaugeBrush
+    /// <summary>Explicit fill override. When null the fill follows <see cref="Severity"/> and the active theme.</summary>
+    public Brush? GaugeBrush
     {
-        get => (Brush)GetValue(GaugeBrushProperty);
+        get => (Brush?)GetValue(GaugeBrushProperty);
         set => SetValue(GaugeBrushProperty, value);
     }
+
+    public Severity Severity
+    {
+        get => (Severity)GetValue(SeverityProperty);
+        set => SetValue(SeverityProperty, value);
+    }
+
+    private Brush FillBrush => GaugeBrush ?? ThemeManager.SeverityBrush(Severity);
+
+    public GaugeControl()
+    {
+        Loaded += (_, _) => ThemeManager.Instance.ThemeChanged += OnThemeChanged;
+        Unloaded += (_, _) => ThemeManager.Instance.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged() => Dispatcher.InvokeAsync(InvalidateVisual);
 
     public bool ShowSubtitle
     {
@@ -191,7 +214,7 @@ public sealed class GaugeControl : FrameworkElement
         var radius = Math.Min(width, height) * 0.38;
         var strokeThickness = Math.Max(4, radius * 0.16);
 
-        var trackBrush = (System.Windows.Application.Current?.Resources["BorderBrush"] as Brush) ?? Brushes.LightGray;
+        var trackBrush = (System.Windows.Application.Current?.Resources["TrackBrush"] as Brush) ?? Brushes.LightGray;
         var trackPen = new Pen(trackBrush, strokeThickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
 
         // Gauge arc spans from 140° to 400° (260° sweep)
@@ -206,7 +229,7 @@ public sealed class GaugeControl : FrameworkElement
         if (pct > 0.001)
         {
             var fillSweep = totalSweep * pct;
-            var fillPen = new Pen(GaugeBrush ?? Brushes.Teal, strokeThickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+            var fillPen = new Pen(FillBrush, strokeThickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
             DrawArc(dc, center, radius, startAngle, fillSweep, fillPen);
         }
 
@@ -288,7 +311,7 @@ public sealed class GaugeControl : FrameworkElement
         const double startAngle = 135.0;
         const double totalSweep = 270.0;
 
-        var trackBrush = (System.Windows.Application.Current?.Resources["BorderBrush"] as Brush) ?? Brushes.LightGray;
+        var trackBrush = (System.Windows.Application.Current?.Resources["TrackBrush"] as Brush) ?? Brushes.LightGray;
         var trackPen = new Pen(trackBrush, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
         DrawArc(dc, center, radius, startAngle, totalSweep, trackPen);
 
@@ -296,7 +319,7 @@ public sealed class GaugeControl : FrameworkElement
         if (pct > 0.001)
         {
             var fillSweep = totalSweep * pct;
-            var fillPen = new Pen(GaugeBrush ?? Brushes.Teal, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+            var fillPen = new Pen(FillBrush, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
             DrawArc(dc, center, radius, startAngle, fillSweep, fillPen);
         }
 

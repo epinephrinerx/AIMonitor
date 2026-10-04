@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using Brush = System.Windows.Media.Brush;
 using Color = System.Windows.Media.Color;
 
 namespace AIMonitor.Presentation.Wpf.Theme;
@@ -84,27 +85,59 @@ public sealed class ThemeManager : IDisposable
         if (app is null) return;
 
         var dict = app.Resources;
+        var p = ThemePalette.For(_isDark);
 
         // Background & Surface
-        dict["AppBackgroundBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(20, 22, 26) : Color.FromRgb(245, 247, 250));
-        dict["CardBackgroundBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(30, 34, 42) : Color.FromRgb(255, 255, 255));
-        dict["CardHoverBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(38, 43, 54) : Color.FromRgb(240, 243, 246));
-        dict["BorderBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(48, 54, 66) : Color.FromRgb(226, 232, 240));
+        dict["AppBackgroundBrush"] = Solid(p.Plane);
+        dict["CardBackgroundBrush"] = Solid(p.Surface);
+        dict["CardHoverBrush"] = Solid(p.SurfaceHover);
+        dict["BorderBrush"] = Solid(p.Border);
+        dict["TrackBrush"] = Solid(p.Track);
+        dict["GridBrush"] = Solid(p.Grid);
+        dict["BaselineBrush"] = Solid(p.Baseline);
 
         // Text & Foreground
-        dict["TextPrimaryBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(243, 244, 246) : Color.FromRgb(17, 24, 39));
-        dict["TextSecondaryBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(156, 163, 175) : Color.FromRgb(107, 114, 128));
-        dict["TextMutedBrush"] = new SolidColorBrush(_isDark ? Color.FromRgb(107, 114, 128) : Color.FromRgb(156, 163, 175));
+        dict["TextPrimaryBrush"] = Solid(p.Ink);
+        dict["TextSecondaryBrush"] = Solid(p.InkSecondary);
+        dict["TextMutedBrush"] = Solid(p.InkMuted);
 
         // Brand / Accent
-        dict["AccentBrush"] = new SolidColorBrush(Color.FromRgb(59, 130, 246)); // Blue
-        dict["AccentHoverBrush"] = new SolidColorBrush(Color.FromRgb(37, 99, 235));
+        dict["AccentBrush"] = Solid(p.Accent);
+        dict["AccentHoverBrush"] = Solid(p.AccentHover);
 
-        // Severities (PAR-016, PAR-028)
-        dict["SeverityNormalBrush"] = new SolidColorBrush(Color.FromRgb(16, 185, 129));   // Emerald Green
-        dict["SeverityWarningBrush"] = new SolidColorBrush(Color.FromRgb(245, 158, 11));  // Amber (75%+)
-        dict["SeverityCriticalBrush"] = new SolidColorBrush(Color.FromRgb(239, 68, 68));  // Red (90%+)
-        dict["SeverityInactiveBrush"] = new SolidColorBrush(Color.FromRgb(156, 163, 175)); // Gray
+        // Severities (PAR-016, PAR-028): fixed traffic light, never themed
+        dict["SeverityNormalBrush"] = Solid(ThemePalette.StatusGood);
+        dict["SeverityWarningBrush"] = Solid(ThemePalette.StatusWarning);
+        dict["SeverityVeryHighBrush"] = Solid(ThemePalette.StatusSerious);
+        dict["SeverityCriticalBrush"] = Solid(ThemePalette.StatusCritical);
+        dict["SeverityInactiveBrush"] = Solid(p.InkMuted);
+
+        // Categorical series (model / project colours)
+        for (var i = 0; i < p.Categorical.Count; i++)
+        {
+            dict[$"Series{i + 1}Brush"] = Solid(p.Categorical[i]);
+        }
+    }
+
+    /// <summary>Resolves the current traffic-light brush for a severity from application resources.</summary>
+    public static Brush SeverityBrush(AIMonitor.Domain.Severity severity)
+    {
+        var key = severity switch
+        {
+            AIMonitor.Domain.Severity.High => "SeverityWarningBrush",
+            AIMonitor.Domain.Severity.VeryHigh => "SeverityVeryHighBrush",
+            AIMonitor.Domain.Severity.Critical => "SeverityCriticalBrush",
+            _ => "SeverityNormalBrush",
+        };
+        return System.Windows.Application.Current?.Resources[key] as Brush
+            ?? Solid(ThemePalette.StatusFor(severity));
+    }
+
+    private static SolidColorBrush Solid(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 
     public void Dispose()

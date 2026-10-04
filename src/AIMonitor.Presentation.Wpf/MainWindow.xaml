@@ -126,7 +126,7 @@
                                                                ValueText="{Binding ValueText}"
                                                                Title="{Binding Title}"
                                                                Subtitle="{Binding Subtitle}"
-                                                               GaugeBrush="{Binding GaugeBrush}" />
+                                                               Severity="{Binding Severity}" />
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

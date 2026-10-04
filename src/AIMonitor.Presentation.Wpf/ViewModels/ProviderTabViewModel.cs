@@ -116,12 +116,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
         foreach (var m in snapshot.Meters)
         {
             var effSev = m.EffectiveSeverity;
-            var brush = effSev switch
-            {
-                Severity.Critical => (System.Windows.Application.Current?.Resources["SeverityCriticalBrush"] as Brush) ?? Brushes.Red,
-                Severity.VeryHigh or Severity.High => (System.Windows.Application.Current?.Resources["SeverityWarningBrush"] as Brush) ?? Brushes.Orange,
-                _ => (System.Windows.Application.Current?.Resources["SeverityNormalBrush"] as Brush) ?? Brushes.Teal
-            };
+            var brush = AIMonitor.Presentation.Wpf.Theme.ThemeManager.SeverityBrush(effSev);
 
             var valText = m.Percent.HasValue ? $"{m.Percent.Value:F0}%" : "--";
             var sub = m.ResetsAt.HasValue ? $"Resets in {FormatReset(m.ResetsAt.Value)}" : m.Subtitle;

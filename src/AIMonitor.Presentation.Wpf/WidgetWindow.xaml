@@ -111,7 +111,7 @@
                                                    ValueText="{Binding ValueText}"
                                                    Title="{Binding Title}"
                                                    Subtitle="{Binding Subtitle}"
-                                                   GaugeBrush="{Binding GaugeBrush}"
+                                                   Severity="{Binding Severity}"
                                                    Width="{Binding DataContext.Cell, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                                    CaptionLines="{Binding DataContext.CaptionLines, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                                    ArcSize="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
