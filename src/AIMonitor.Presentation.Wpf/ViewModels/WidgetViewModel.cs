@@ -29,6 +29,12 @@ public sealed class WidgetViewModel : ViewModelBase
 
     private IReadOnlyList<MeterDisplayItem> _visibleMeters = [];
     private double _arcSize;
+    private double _cell;
+    private int _captionLines = 2;
+    private double _lineHeight;
+    private double _headerHeight;
+    private double _headerRowHeight;
+    private double _footerRowHeight;
     private bool _showSubtitle = true;
     private bool _inlineValue = true;
     private bool _isTooSmall;
@@ -98,6 +104,42 @@ public sealed class WidgetViewModel : ViewModelBase
         private set => SetProperty(ref _arcSize, value);
     }
 
+    public double Cell
+    {
+        get => _cell;
+        private set => SetProperty(ref _cell, value);
+    }
+
+    public int CaptionLines
+    {
+        get => _captionLines;
+        private set => SetProperty(ref _captionLines, value);
+    }
+
+    public double LineHeight
+    {
+        get => _lineHeight;
+        private set => SetProperty(ref _lineHeight, value);
+    }
+
+    public double HeaderHeight
+    {
+        get => _headerHeight;
+        private set => SetProperty(ref _headerHeight, value);
+    }
+
+    public double HeaderRowHeight
+    {
+        get => _headerRowHeight;
+        private set => SetProperty(ref _headerRowHeight, value);
+    }
+
+    public double FooterRowHeight
+    {
+        get => _footerRowHeight;
+        private set => SetProperty(ref _footerRowHeight, value);
+    }
+
     public bool ShowSubtitle
     {
         get => _showSubtitle;
@@ -163,11 +205,23 @@ public sealed class WidgetViewModel : ViewModelBase
             _lastLineHeight,
             hasStatus);
 
-        VisibleMeters = validMeters.Take(layout.Count).ToList();
+        var newVisibleMeters = validMeters.Take(layout.Count).ToList();
+        if (!VisibleMeters.SequenceEqual(newVisibleMeters, ReferenceEqualityComparer.Instance))
+        {
+            VisibleMeters = newVisibleMeters;
+        }
+
+        Cell = layout.Cell;
+        CaptionLines = layout.CaptionLines;
         ArcSize = layout.Arc;
         ShowSubtitle = layout.CaptionLines == 2;
         InlineValue = layout.InlineValue;
         IsTooSmall = layout.TooSmall;
+
+        LineHeight = _lastLineHeight;
+        HeaderHeight = _lastHeaderHeight;
+        HeaderRowHeight = _lastHeaderHeight + 5.0;
+        FooterRowHeight = hasStatus ? _lastLineHeight + 4.0 : 0.0;
     }
 
     /// <summary>

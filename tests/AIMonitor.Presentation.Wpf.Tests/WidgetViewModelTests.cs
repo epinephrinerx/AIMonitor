@@ -174,10 +174,11 @@ public class WidgetViewModelTests
     }
 
     [Fact]
-    public void UpdateLayout_WideWidth_ShowsAllValidMeters()
+    public void UpdateLayout_NonDefaultDimensions_RecalculatesVisibleMetersAndNewProperties()
     {
         var tab = new ProviderTabViewModel("claude", "Claude")
         {
+            Status = "Connected",
             Meters =
             [
                 new MeterDisplayItem { Title = "M1", ValueText = "10%" },
@@ -187,17 +188,39 @@ public class WidgetViewModelTests
         };
 
         var vm = new WidgetViewModel([tab]);
-        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
 
-        Assert.Equal(3, vm.VisibleMeters.Count);
+        // Default layout (230x175) fits 3 meters.
+        // Update to non-default narrow width 150: fits at most 2 meters.
+        double width = 150.0;
+        double height = 180.0;
+        double headerHeight = 15.0;
+        double lineHeight = 12.0;
+
+        vm.UpdateLayout(width, height, headerHeight, lineHeight);
+
+        Assert.Equal(2, vm.VisibleMeters.Count);
         Assert.True(vm.ArcSize >= WidgetLayout.ArcMin);
+        Assert.True(vm.Cell > 0);
+        Assert.Equal(2, vm.CaptionLines);
+        Assert.Equal(lineHeight, vm.LineHeight);
+        Assert.Equal(headerHeight, vm.HeaderHeight);
+        Assert.Equal(headerHeight + 5.0, vm.HeaderRowHeight);
+        Assert.Equal(lineHeight + 4.0, vm.FooterRowHeight);
         Assert.True(vm.ShowSubtitle);
         Assert.True(vm.InlineValue);
         Assert.False(vm.IsTooSmall);
+
+        // When status is empty -> FooterRowHeight must be 0
+        tab.Status = string.Empty;
+        Assert.Equal(0.0, vm.FooterRowHeight);
+
+        // Widen to non-default width 300 -> fits 3 meters
+        vm.UpdateLayout(width: 300.0, height: 200.0, headerHeight, lineHeight);
+        Assert.Equal(3, vm.VisibleMeters.Count);
     }
 
     [Fact]
-    public void UpdateLayout_NarrowWidth_TruncatesVisibleMetersToComputedCount()
+    public void UpdateLayout_IdenticalInputs_PreservesVisibleMetersInstanceWithoutRaisingPropertyChanged()
     {
         var tab = new ProviderTabViewModel("claude", "Claude")
         {
@@ -210,16 +233,36 @@ public class WidgetViewModelTests
         };
 
         var vm = new WidgetViewModel([tab]);
-        // Narrow width 100px can only fit 1 meter
-        vm.UpdateLayout(width: 100.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
+        vm.UpdateLayout(width: 300.0, height: 200.0, headerHeight: 15.0, lineHeight: 12.0);
 
-        Assert.Single(vm.VisibleMeters);
-        Assert.Equal("M1", vm.VisibleMeters[0].Title);
-        Assert.Equal("10%", vm.VisibleMeters[0].ValueText);
+        var firstVisibleMeters = vm.VisibleMeters;
+        Assert.Equal(3, firstVisibleMeters.Count);
+
+        var changedProps = new List<string>();
+        vm.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName is not null)
+            {
+                changedProps.Add(e.PropertyName);
+            }
+        };
+
+        // Second call with identical inputs must keep the same instance and raise no VisibleMeters PropertyChanged
+        vm.UpdateLayout(width: 300.0, height: 200.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.Same(firstVisibleMeters, vm.VisibleMeters);
+        Assert.DoesNotContain(nameof(WidgetViewModel.VisibleMeters), changedProps);
+
+        // Changing width so meter count drops to 2 must create a new instance and raise PropertyChanged
+        vm.UpdateLayout(width: 150.0, height: 200.0, headerHeight: 15.0, lineHeight: 12.0);
+
+        Assert.NotSame(firstVisibleMeters, vm.VisibleMeters);
+        Assert.Equal(2, vm.VisibleMeters.Count);
+        Assert.Contains(nameof(WidgetViewModel.VisibleMeters), changedProps);
     }
 
     [Fact]
-    public void CurrentProvider_Changed_RecalculatesLayoutWithLatestDimensions()
+    public void CurrentProvider_Changed_RecalculatesLayoutWithRememberedNonDefaultDimensions()
     {
         var tab1 = new ProviderTabViewModel("claude", "Claude")
         {
@@ -235,25 +278,33 @@ public class WidgetViewModelTests
         {
             Meters =
             [
-                new MeterDisplayItem { Title = "O1", ValueText = "50%" }
+                new MeterDisplayItem { Title = "O1", ValueText = "40%" },
+                new MeterDisplayItem { Title = "O2", ValueText = "50%" },
+                new MeterDisplayItem { Title = "O3", ValueText = "60%" }
             ]
         };
 
         var vm = new WidgetViewModel([tab1, tab2]);
-        vm.UpdateLayout(width: 230.0, height: 175.0, headerHeight: 15.0, lineHeight: 12.0);
 
-        Assert.Equal(3, vm.VisibleMeters.Count);
+        // At width 150, fits only 2 of 3 meters
+        vm.UpdateLayout(width: 150.0, height: 180.0, headerHeight: 15.0, lineHeight: 12.0);
+        Assert.Equal(2, vm.VisibleMeters.Count);
 
-        // NextProvider rotates to tab2 with 1 meter
+        // NextProvider rotates to tab2 (which has 3 meters):
+        // Must still show at most 2 of 3 meters because remembered width 150 is preserved!
         vm.NextProvider();
         Assert.Same(tab2, vm.CurrentProvider);
-        Assert.Single(vm.VisibleMeters);
+        Assert.Equal(2, vm.VisibleMeters.Count);
         Assert.Equal("O1", vm.VisibleMeters[0].Title);
+        Assert.Equal("O2", vm.VisibleMeters[1].Title);
 
-        // PreviousProvider returns to tab1 with 3 meters
+        // PreviousProvider returns to tab1 (which has 3 meters):
+        // Still shows at most 2 of 3 meters
         vm.PreviousProvider();
         Assert.Same(tab1, vm.CurrentProvider);
-        Assert.Equal(3, vm.VisibleMeters.Count);
+        Assert.Equal(2, vm.VisibleMeters.Count);
+        Assert.Equal("C1", vm.VisibleMeters[0].Title);
+        Assert.Equal("C2", vm.VisibleMeters[1].Title);
     }
 
     [Fact]

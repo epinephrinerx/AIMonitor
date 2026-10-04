@@ -9,6 +9,8 @@ using Size = System.Windows.Size;
 
 namespace AIMonitor.Presentation.Wpf.Controls;
 
+internal readonly record struct CompactGaugeLayout(Rect Ring, Rect Title, Rect Subtitle, double Height);
+
 /// <summary>
 /// A lightweight, custom-drawn vector gauge control implemented via DrawingContext.
 /// Satisfies ADR-0001: custom-drawn gauge control with native DPI scaling and theme awareness.
@@ -42,6 +44,18 @@ public sealed class GaugeControl : FrameworkElement
     public static readonly DependencyProperty ShowInlineValueProperty =
         DependencyProperty.Register(nameof(ShowInlineValue), typeof(bool), typeof(GaugeControl),
             new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty CaptionLinesProperty =
+        DependencyProperty.Register(nameof(CaptionLines), typeof(int), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(0, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ArcSizeProperty =
+        DependencyProperty.Register(nameof(ArcSize), typeof(double), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty CaptionLineHeightProperty =
+        DependencyProperty.Register(nameof(CaptionLineHeight), typeof(double), typeof(GaugeControl),
+            new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
 
     public double Value
     {
@@ -85,6 +99,43 @@ public sealed class GaugeControl : FrameworkElement
         set => SetValue(ShowInlineValueProperty, value);
     }
 
+    public int CaptionLines
+    {
+        get => (int)GetValue(CaptionLinesProperty);
+        set => SetValue(CaptionLinesProperty, value);
+    }
+
+    public double ArcSize
+    {
+        get => (double)GetValue(ArcSizeProperty);
+        set => SetValue(ArcSizeProperty, value);
+    }
+
+    public double CaptionLineHeight
+    {
+        get => (double)GetValue(CaptionLineHeightProperty);
+        set => SetValue(CaptionLineHeightProperty, value);
+    }
+
+    private static double NonNegative(double value) =>
+        double.IsFinite(value) && value > 0.0 ? value : 0.0;
+
+    internal static CompactGaugeLayout ComputeCompactLayout(double width, double arc, int captionLines, double lineHeight)
+    {
+        double safeWidth = NonNegative(width);
+        double safeArc = NonNegative(arc);
+        int safeLines = captionLines < 0 ? 0 : captionLines;
+        double safeLineHeight = NonNegative(lineHeight);
+
+        var ring = new Rect((safeWidth / 2.0) - (safeArc / 2.0), 0.0, safeArc, safeArc);
+        var title = new Rect(0.0, safeArc + 2.0, safeWidth, safeLineHeight);
+        var subtitle = safeLines >= 2
+            ? new Rect(0.0, safeArc + 2.0 + safeLineHeight, safeWidth, safeLineHeight)
+            : Rect.Empty;
+        var height = safeArc + 2.0 + (safeLines * safeLineHeight);
+        return new CompactGaugeLayout(ring, title, subtitle, height);
+    }
+
     internal static string FormatCaptionText(string title, string valueText, bool showInlineValue)
     {
         if (showInlineValue)
@@ -102,6 +153,19 @@ public sealed class GaugeControl : FrameworkElement
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        if (CaptionLines > 0)
+        {
+            double safeArc = NonNegative(ArcSize);
+            double safeLineHeight = NonNegative(CaptionLineHeight);
+            int safeLines = CaptionLines < 0 ? 0 : CaptionLines;
+
+            bool isFiniteW = double.IsFinite(availableSize.Width);
+            double widthForLayout = isFiniteW ? NonNegative(availableSize.Width) : safeArc;
+            var layout = ComputeCompactLayout(widthForLayout, safeArc, safeLines, safeLineHeight);
+            double desiredW = (isFiniteW && availableSize.Width > 0) ? availableSize.Width : safeArc;
+            return new Size(NonNegative(desiredW), layout.Height);
+        }
+
         double w = !double.IsNaN(Width) ? Width : availableSize.Width;
         double h = !double.IsNaN(Height) ? Height : availableSize.Height;
         var side = Math.Min(w, h);
@@ -112,6 +176,12 @@ public sealed class GaugeControl : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         base.OnRender(dc);
+
+        if (CaptionLines > 0)
+        {
+            RenderCompact(dc);
+            return;
+        }
 
         var width = ActualWidth;
         var height = ActualHeight;
@@ -191,6 +261,116 @@ public sealed class GaugeControl : FrameworkElement
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
             dc.DrawText(subFormatted, new Point(center.X - subFormatted.Width / 2.0, height - subFormatted.Height - 4));
+        }
+    }
+
+    private void RenderCompact(DrawingContext dc)
+    {
+        double width = NonNegative(ActualWidth);
+        double arc = NonNegative(ArcSize);
+        if (width <= 0.0 || arc <= 0.0) return;
+
+        int captionLines = CaptionLines < 0 ? 0 : CaptionLines;
+        double lineHeight = NonNegative(CaptionLineHeight);
+
+        var layout = ComputeCompactLayout(width, arc, captionLines, lineHeight);
+
+        double thickness = Math.Max(4.0, arc * 0.11);
+        double inset = (thickness / 2.0) + 1.0;
+        var box = new Rect(
+            layout.Ring.X + inset,
+            layout.Ring.Y + inset,
+            Math.Max(0.0, layout.Ring.Width - (2.0 * inset)),
+            Math.Max(0.0, layout.Ring.Height - (2.0 * inset)));
+        double radius = box.Width / 2.0;
+        var center = new Point(layout.Ring.X + (layout.Ring.Width / 2.0), layout.Ring.Y + (layout.Ring.Height / 2.0));
+
+        const double startAngle = 135.0;
+        const double totalSweep = 270.0;
+
+        var trackBrush = (System.Windows.Application.Current?.Resources["BorderBrush"] as Brush) ?? Brushes.LightGray;
+        var trackPen = new Pen(trackBrush, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        DrawArc(dc, center, radius, startAngle, totalSweep, trackPen);
+
+        var pct = Math.Clamp(Value, 0.0, 100.0) / 100.0;
+        if (pct > 0.001)
+        {
+            var fillSweep = totalSweep * pct;
+            var fillPen = new Pen(GaugeBrush ?? Brushes.Teal, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+            DrawArc(dc, center, radius, startAngle, fillSweep, fillPen);
+        }
+
+        double ppd = 1.0;
+        try
+        {
+            ppd = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        }
+        catch
+        {
+            // Fall back when visual is not attached to a presentation source
+        }
+
+        var textPrimaryBrush = (System.Windows.Application.Current?.Resources["TextPrimaryBrush"] as Brush) ?? Brushes.Black;
+        var textSecondaryBrush = (System.Windows.Application.Current?.Resources["TextSecondaryBrush"] as Brush) ?? Brushes.Gray;
+        var fontFamily = System.Windows.SystemFonts.MessageFontFamily;
+
+        if (ShowInlineValue && !string.IsNullOrEmpty(ValueText))
+        {
+            var valueTypeface = new Typeface(fontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+            var valFormatted = new FormattedText(
+                ValueText,
+                CultureInfo.CurrentCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                valueTypeface,
+                Math.Max(8.0, arc * 0.267),
+                textPrimaryBrush,
+                ppd);
+
+            dc.DrawText(valFormatted, new Point(center.X - (valFormatted.Width / 2.0), center.Y - (valFormatted.Height / 2.0)));
+        }
+
+        var captionTypeface = new Typeface(fontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        double maxTextWidth = Math.Max(1.0, width);
+
+        var captionText = FormatCaptionText(Title, ValueText, ShowInlineValue);
+        if (!string.IsNullOrEmpty(captionText))
+        {
+            var titleFormatted = new FormattedText(
+                captionText,
+                CultureInfo.CurrentCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                captionTypeface,
+                10.0,
+                textPrimaryBrush,
+                ppd)
+            {
+                MaxTextWidth = maxTextWidth,
+                MaxLineCount = 1,
+                Trimming = TextTrimming.CharacterEllipsis,
+                TextAlignment = TextAlignment.Center
+            };
+
+            dc.DrawText(titleFormatted, new Point(0.0, layout.Title.Top));
+        }
+
+        if (ShowSubtitle && captionLines >= 2 && !string.IsNullOrEmpty(Subtitle))
+        {
+            var subFormatted = new FormattedText(
+                Subtitle,
+                CultureInfo.CurrentCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                captionTypeface,
+                10.0,
+                textSecondaryBrush,
+                ppd)
+            {
+                MaxTextWidth = maxTextWidth,
+                MaxLineCount = 1,
+                Trimming = TextTrimming.CharacterEllipsis,
+                TextAlignment = TextAlignment.Center
+            };
+
+            dc.DrawText(subFormatted, new Point(0.0, layout.Subtitle.Top));
         }
     }
 

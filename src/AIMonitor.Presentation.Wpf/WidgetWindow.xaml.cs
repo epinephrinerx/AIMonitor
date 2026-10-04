@@ -27,6 +27,19 @@ public partial class WidgetWindow : Window
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         Closing += OnClosing;
+
+        DataContextChanged += (s, e) =>
+        {
+            if (e.OldValue is WidgetViewModel oldVm)
+            {
+                oldVm.PropertyChanged -= OnViewModelPropertyChanged;
+            }
+            if (e.NewValue is WidgetViewModel newVm)
+            {
+                newVm.PropertyChanged += OnViewModelPropertyChanged;
+                UpdateRowHeights();
+            }
+        };
     }
 
     public WidgetWindow(WidgetViewModel viewModel, SettingsSession session)
@@ -63,6 +76,10 @@ public partial class WidgetWindow : Window
                 var (clampedW, clampedH) = WidgetLayout.Clamp(placement.Width, placement.Height, minUsefulH);
                 Width = clampedW;
                 Height = clampedH;
+
+                var vm = _viewModel ?? DataContext as WidgetViewModel;
+                vm?.UpdateLayout(clampedW, clampedH, h, l);
+                UpdateRowHeights();
                 return;
             }
         }
@@ -70,6 +87,10 @@ public partial class WidgetWindow : Window
         var (defaultW, defaultH) = WidgetLayout.Clamp(WidgetLayout.DefaultWidth, WidgetLayout.DefaultHeight, minUsefulH);
         Width = defaultW;
         Height = defaultH;
+
+        var defaultVm = _viewModel ?? DataContext as WidgetViewModel;
+        defaultVm?.UpdateLayout(defaultW, defaultH, h, l);
+        UpdateRowHeights();
     }
 
     /// <summary>
@@ -134,6 +155,7 @@ public partial class WidgetWindow : Window
 
         var vm = _viewModel ?? DataContext as WidgetViewModel;
         vm?.UpdateLayout(clampedW, clampedH, h, l);
+        UpdateRowHeights();
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -144,6 +166,7 @@ public partial class WidgetWindow : Window
         double w = e.NewSize.Width > 0 ? e.NewSize.Width : (ActualWidth > 0 ? ActualWidth : Width);
         double height = e.NewSize.Height > 0 ? e.NewSize.Height : (ActualHeight > 0 ? ActualHeight : Height);
         vm?.UpdateLayout(w, height, h, l);
+        UpdateRowHeights();
 
         if (_session is not null && IsLoaded)
         {
@@ -152,7 +175,27 @@ public partial class WidgetWindow : Window
         }
     }
 
-    private void OnResizeSaveTimerTick(object? sender, EventArgs e)
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(WidgetViewModel.HeaderRowHeight) or nameof(WidgetViewModel.FooterRowHeight))
+        {
+            UpdateRowHeights();
+        }
+    }
+
+    private void UpdateRowHeights()
+    {
+        var vm = _viewModel ?? DataContext as WidgetViewModel;
+        if (vm is not null && HeaderRowDefinition is not null && FooterRowDefinition is not null)
+        {
+            HeaderRowDefinition.Height = new GridLength(vm.HeaderRowHeight);
+            FooterRowDefinition.Height = new GridLength(vm.FooterRowHeight);
+        }
+    }
+
+    internal bool IsResizeSavePending => _resizeSaveTimer.IsEnabled;
+
+    internal void OnResizeSaveTimerTick(object? sender, EventArgs e)
     {
         _resizeSaveTimer.Stop();
         SaveGeometry();
@@ -160,6 +203,10 @@ public partial class WidgetWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (DataContext is WidgetViewModel vm)
+        {
+            vm.PropertyChanged -= OnViewModelPropertyChanged;
+        }
         _resizeSaveTimer.Stop();
         SaveGeometry();
     }
@@ -240,10 +287,5 @@ public partial class WidgetWindow : Window
         {
             DragMove();
         }
-    }
-
-    private void OnOpenDashboardClick(object sender, RoutedEventArgs e)
-    {
-        (System.Windows.Application.Current as App)?.SwitchToDashboardMode();
     }
 }

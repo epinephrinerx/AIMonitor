@@ -10,12 +10,13 @@
         WindowStyle="None"
         ResizeMode="CanResize"
         AllowsTransparency="True"
-        Background="Transparent"
+        Background="#01000000"
         Topmost="{Binding AlwaysOnTop}"
         Opacity="{Binding Opacity}"
         MinWidth="150" MinHeight="96" MaxWidth="300" MaxHeight="300"
         Width="230" Height="175"
         MouseDown="OnWindowMouseDown">
+    <!-- Per-pixel-alpha layered windows pass clicks through alpha-0 pixels, so the rounded-corner slivers inside the 7px resize band would not resize; alpha 1 keeps them hit-testable and is visually invisible. -->
     
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="0"
@@ -28,22 +29,19 @@
     <Border Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1"
-            CornerRadius="16"
-            Padding="12"
-            Margin="6">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="12" Direction="270" Opacity="0.3" ShadowDepth="4" />
-        </Border.Effect>
+            CornerRadius="10"
+            Padding="10"
+            Margin="0">
 
-        <Grid>
+        <Grid x:Name="RootGrid">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="HeaderRowDefinition" Height="Auto" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="FooterRowDefinition" Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Top Header with Chevrons and Title -->
-            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+            <DockPanel Grid.Row="0" VerticalAlignment="Top" Height="{Binding HeaderHeight}">
                 <Button Content="&#x25C0;" Command="{Binding PreviousProviderCommand}" DockPanel.Dock="Left"
                         Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextSecondaryBrush}"
                         FontSize="11" Cursor="Hand" Padding="4,0" ToolTip="Previous provider" />
@@ -62,7 +60,7 @@
             </DockPanel>
 
             <!-- Center Gauge Display / Too Small Message -->
-            <Grid Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+            <Grid Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                 <TextBlock x:Name="TooSmallTextBlock"
                            Text="Too small to show the meters."
                            Foreground="{DynamicResource TextSecondaryBrush}"
@@ -86,7 +84,7 @@
                 <ItemsControl x:Name="MetersItemsControl"
                               ItemsSource="{Binding VisibleMeters}"
                               HorizontalAlignment="Stretch"
-                              VerticalAlignment="Center">
+                              VerticalAlignment="Top">
                     <ItemsControl.Style>
                         <Style TargetType="ItemsControl">
                             <Setter Property="Visibility" Value="Visible" />
@@ -99,9 +97,14 @@
                     </ItemsControl.Style>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <UniformGrid Rows="1" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,-6,0" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="Margin" Value="0,0,6,0" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <controls:GaugeControl Value="{Binding Value}"
@@ -109,25 +112,23 @@
                                                    Title="{Binding Title}"
                                                    Subtitle="{Binding Subtitle}"
                                                    GaugeBrush="{Binding GaugeBrush}"
-                                                   Width="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                                                   Height="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   Width="{Binding DataContext.Cell, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   CaptionLines="{Binding DataContext.CaptionLines, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   ArcSize="{Binding DataContext.ArcSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                   CaptionLineHeight="{Binding DataContext.LineHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                                    ShowSubtitle="{Binding DataContext.ShowSubtitle, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                                    ShowInlineValue="{Binding DataContext.InlineValue, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" />
+                                                   HorizontalAlignment="Left"
+                                                   VerticalAlignment="Top" />
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </Grid>
 
-            <!-- Footer: Switch to Dashboard & Status -->
-            <DockPanel Grid.Row="2" Margin="0,4,0,0">
-                <TextBlock Text="{Binding CurrentProvider.Status}" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}"
-                           VerticalAlignment="Center" DockPanel.Dock="Left" />
-                <Button Content="Dashboard" Click="OnOpenDashboardClick" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                        Background="Transparent" BorderThickness="0" Foreground="{DynamicResource AccentBrush}"
-                        FontSize="11" Cursor="Hand" FontWeight="SemiBold" />
-            </DockPanel>
+            <!-- Footer: Status -->
+            <TextBlock Grid.Row="2" Text="{Binding CurrentProvider.Status}" FontSize="10"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       VerticalAlignment="Bottom" />
         </Grid>
     </Border>
 </Window>
