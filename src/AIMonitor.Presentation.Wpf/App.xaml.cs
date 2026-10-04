@@ -135,6 +135,7 @@ public partial class App : System.Windows.Application
         _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
+        _mainViewModel.RequestExit += ShutdownApp;
         _mainViewModel.RequestConnect += OpenConnectDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
 

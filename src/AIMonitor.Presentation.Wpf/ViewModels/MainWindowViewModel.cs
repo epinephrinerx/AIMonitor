@@ -20,6 +20,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private DashboardOption<int> _selectedRange;
     private DashboardOption<int> _selectedInterval;
     private bool _syncingFromSettings;
+    private DateTimeOffset? _lastSuccess;
+    private bool _showComposedStatus;
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
@@ -52,6 +54,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
         Connections.RedetectRequested += async _ => await RefreshAsync();
         Connections.OpenDashboardRequested += () => IsConnectionsPageVisible = false;
+
+        ExitCommand = new RelayCommand(() => RequestExit?.Invoke());
+        SetThemeCommand = new RelayCommand<string>(theme =>
+        {
+            if (theme is "system" or "light" or "dark")
+            {
+                Theme.ThemeManager.Instance.ApplyTheme(theme);
+                _ = SaveAsync(s => s with { Theme = theme });
+            }
+        });
 
         ShowConnectionsCommand = new RelayCommand(() => IsConnectionsPageVisible = true);
         ShowDashboardCommand = new RelayCommand(() => IsConnectionsPageVisible = false);
@@ -127,6 +139,24 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Re-renders the footer ("Updated 12s ago (14:03:22) · auto-refresh …") while it is showing
+    /// the normal status; a refresh in progress or a failure message is left alone.
+    /// </summary>
+    public void RefreshStatusText(DateTimeOffset now, double? workingSetMb)
+    {
+        if (!_showComposedStatus)
+        {
+            return;
+        }
+
+        _lastWorkingSetMb = workingSetMb ?? _lastWorkingSetMb;
+        LastRefreshStatus = StatusBarText.Compose(
+            _lastSuccess, now, _settingsSession.Current.RefreshIntervalSeconds, _lastWorkingSetMb, TimeZoneInfo.Local);
+    }
+
+    private double? _lastWorkingSetMb;
+
     private async Task ApplyViewChangeAsync(Func<AppSettings, AppSettings> change)
     {
         await SaveAsync(change).ConfigureAwait(true);
@@ -147,6 +177,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnSettingsChanged(AppSettings settings)
     {
+        OnPropertyChanged(nameof(IsThemeSystem));
+        OnPropertyChanged(nameof(IsThemeLight));
+        OnPropertyChanged(nameof(IsThemeDark));
         _syncingFromSettings = true;
         try
         {
@@ -194,12 +227,23 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand OpenAboutCommand { get; }
     public ICommand ShowConnectionsCommand { get; }
     public ICommand ShowDashboardCommand { get; }
+    public ICommand ExitCommand { get; }
+
+    /// <summary>Parameter is "system", "light" or "dark"; applies the theme immediately and saves it.</summary>
+    public ICommand SetThemeCommand { get; }
+
+    public bool IsThemeSystem => ThemePreference == "system";
+    public bool IsThemeLight => ThemePreference == "light";
+    public bool IsThemeDark => ThemePreference == "dark";
+
+    private string ThemePreference => _settingsSession.Current.Theme;
 
     public event Action? RequestOpenSettings;
     public event Action? RequestSwitchToWidget;
     public event Action? RequestOpenLog;
     public event Action? RequestOpenAbout;
     public event Action<string>? RequestConnect;
+    public event Action? RequestExit;
 
     /// <summary>
     /// Attaches or detaches a tray readings sink. When a non-null sink is attached,
@@ -226,6 +270,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         IsRefreshing = true;
+        _showComposedStatus = false;
         LastRefreshStatus = "Refreshing providers...";
 
         try
@@ -281,10 +326,13 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             _traySink?.UpdateReadings(trayReadings);
 
-            LastRefreshStatus = $"Updated at {DateTime.Now:HH:mm:ss}";
+            _lastSuccess = DateTimeOffset.UtcNow;
+            _showComposedStatus = true;
+            RefreshStatusText(_lastSuccess.Value, null);
         }
         catch (Exception ex)
         {
+            _showComposedStatus = false;
             LastRefreshStatus = $"Refresh failed: {ex.Message}";
         }
         finally

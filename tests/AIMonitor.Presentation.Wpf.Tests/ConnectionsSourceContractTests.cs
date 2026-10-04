@@ -115,8 +115,8 @@ public sealed class ConnectionsSourceContractTests
         var rawXaml = ReadSourceFile("src/AIMonitor.Presentation.Wpf/MainWindow.xaml");
         var xaml = StripComments(rawXaml);
 
-        // Header button must bind ShowConnectionsCommand
-        Assert.Matches(@"<Button\s+[^>]*(?:Content=""Connections""[^>]*Command=""\{\s*Binding\s+ShowConnectionsCommand\s*\}""|Command=""\{\s*Binding\s+ShowConnectionsCommand\s*\}""[^>]*Content=""Connections"")", xaml);
+        // A visible control must bind ShowConnectionsCommand (1.3.3 reaches it from File > Sign-in)
+        Assert.Matches(@"<(?:Button|MenuItem)\s+[^>]*Command=""\{\s*Binding\s+ShowConnectionsCommand\s*\}""", xaml);
 
         // Provider navigation and content areas must react to IsConnectionsPageVisible
         Assert.Contains("Binding=\"{Binding IsConnectionsPageVisible}\"", xaml);

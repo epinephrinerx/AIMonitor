@@ -10,6 +10,8 @@ public partial class MainWindow : Window
 {
     private readonly SettingsSession? _session;
     private bool _isExplicitExit;
+    private readonly System.Windows.Threading.DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private int _statusTicks;
 
     public MainWindow()
     {
@@ -31,6 +33,22 @@ public partial class MainWindow : Window
 
         Loaded += OnLoaded;
         Closing += OnClosing;
+
+        // Keep "Updated 12s ago" and the memory figure live, as 1.3.3's one-second tick does.
+        _statusTimer.Tick += (_, _) =>
+        {
+            double? workingSet = null;
+            if (_statusTicks++ % 5 == 0)
+            {
+                workingSet = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / (1024.0 * 1024.0);
+            }
+
+            viewModel.RefreshStatusText(DateTimeOffset.UtcNow, workingSet);
+        };
+        IsVisibleChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue) _statusTimer.Start(); else _statusTimer.Stop();
+        };
     }
 
     public void RequestExplicitExit()

@@ -146,4 +146,34 @@ public sealed class DashboardHeaderTests
 
         Assert.Equal("openai", session.Current.ActiveProvider);
     }
+
+    [Fact]
+    public void StatusBar_BeforeFirstFetch_SaysSo()
+    {
+        var text = StatusBarText.Compose(null, Now, 180, null, TimeZoneInfo.Utc);
+
+        Assert.Equal("No successful fetch yet  ·  auto-refresh every 3 minutes · default", text);
+    }
+
+    [Fact]
+    public void StatusBar_ShowsAgeClockIntervalAndMemory()
+    {
+        var text = StatusBarText.Compose(Now.AddMinutes(-90), Now, 180, 70.4, TimeZoneInfo.Utc);
+
+        Assert.Equal("Updated 1h 30m ago (07:30:00)  ·  auto-refresh every 3 minutes · default  ·  70 MB resident", text);
+    }
+
+    [Fact]
+    public void StatusBar_RecentFetchIsJustNow_AndManualOnlyIsNamed()
+    {
+        var text = StatusBarText.Compose(Now.AddSeconds(-2), Now, 0, null, TimeZoneInfo.Utc);
+
+        Assert.Equal("Updated just now (08:59:58)  ·  manual refresh", text);
+    }
+
+    [Fact]
+    public void StatusBar_UnlistedInterval_IsSpelledOutInSeconds()
+    {
+        Assert.Contains("auto-refresh every 45 seconds", StatusBarText.Compose(Now, Now, 45, null, TimeZoneInfo.Utc));
+    }
 }

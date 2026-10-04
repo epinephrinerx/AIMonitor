@@ -16,11 +16,40 @@
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
         <KeyBinding Key="F1" Command="{Binding OpenAboutCommand}" />
         <KeyBinding Key="L" Modifiers="Control" Command="{Binding OpenLogCommand}" />
-        <KeyBinding Key="P" Modifiers="Control" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Key="P" Modifiers="Control" Command="{Binding OpenLogCommand}" />
         <KeyBinding Key="W" Modifiers="Control" Command="{Binding SwitchToWidgetCommand}" />
+        <KeyBinding Key="Q" Modifiers="Control" Command="{Binding ExitCommand}" />
     </Window.InputBindings>
     
-    <Grid Margin="16">
+    <DockPanel>
+    <Menu DockPanel.Dock="Top" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}">
+        <MenuItem Header="_File">
+            <MenuItem Header="_Refresh" InputGestureText="F5" Command="{Binding RefreshCommand}" />
+            <MenuItem Header="Sign-in / _Connections…" Command="{Binding ShowConnectionsCommand}" />
+            <Separator />
+            <MenuItem Header="Save to _Log…" InputGestureText="Ctrl+L" Command="{Binding OpenLogCommand}" />
+            <MenuItem Header="_Print Report…" InputGestureText="Ctrl+P" Command="{Binding OpenLogCommand}" />
+            <Separator />
+            <MenuItem Header="E_xit" InputGestureText="Ctrl+Q" Command="{Binding ExitCommand}" />
+        </MenuItem>
+        <MenuItem Header="_Settings">
+            <MenuItem Header="_Themes">
+                <MenuItem Header="Follow Windows" IsCheckable="True" IsChecked="{Binding IsThemeSystem, Mode=OneWay}"
+                          Command="{Binding SetThemeCommand}" CommandParameter="system" />
+                <MenuItem Header="Light" IsCheckable="True" IsChecked="{Binding IsThemeLight, Mode=OneWay}"
+                          Command="{Binding SetThemeCommand}" CommandParameter="light" />
+                <MenuItem Header="Dark" IsCheckable="True" IsChecked="{Binding IsThemeDark, Mode=OneWay}"
+                          Command="{Binding SetThemeCommand}" CommandParameter="dark" />
+            </MenuItem>
+            <MenuItem Header="_Widget mode" InputGestureText="Ctrl+W" Command="{Binding SwitchToWidgetCommand}" />
+            <Separator />
+            <MenuItem Header="_Settings…" Command="{Binding OpenSettingsCommand}" />
+        </MenuItem>
+        <MenuItem Header="_About">
+            <MenuItem Header="_About AIMonitor…" InputGestureText="F1" Command="{Binding OpenAboutCommand}" />
+        </MenuItem>
+    </Menu>
+    <Grid Margin="20,16,20,12">
         <Grid.RowDefinitions>
             <!-- Header -->
             <RowDefinition Height="Auto" />
@@ -33,24 +62,42 @@
         </Grid.RowDefinitions>
 
         <!-- Top Header Bar -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,16">
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                <TextBlock Text="AIMonitor" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                <TextBlock Text="2.0" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="6,4,0,0" />
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="AIMonitor" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="2.0" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="6,3,0,0" />
+                </StackPanel>
+                <TextBlock x:Name="AccountLabelText" Text="{Binding SelectedTab.AccountLabel}" FontSize="11"
+                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0" />
             </StackPanel>
 
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                <Button Content="Connections" Command="{Binding ShowConnectionsCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
-                <Button Content="Compact Widget" Command="{Binding SwitchToWidgetCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
-                <Button Content="Usage Log" Command="{Binding OpenLogCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
-                <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
-                <Button Content="About" Command="{Binding OpenAboutCommand}" Padding="12,6" Margin="0,0,8,0" Cursor="Hand" />
-                <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="14,6" FontWeight="SemiBold" Cursor="Hand" />
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <ComboBox x:Name="MetricCombo" ItemsSource="{Binding MetricOptions}" SelectedItem="{Binding SelectedMetric}"
+                          DisplayMemberPath="Label" MinWidth="120" Margin="0,0,8,0" />
+                <ComboBox x:Name="RangeCombo" ItemsSource="{Binding RangeOptions}" SelectedItem="{Binding SelectedRange}"
+                          DisplayMemberPath="Label" MinWidth="90" Margin="0,0,8,0" />
+                <ComboBox x:Name="IntervalCombo" ItemsSource="{Binding IntervalOptions}" SelectedItem="{Binding SelectedInterval}"
+                          DisplayMemberPath="Label" MinWidth="170" Margin="0,0,8,0" />
+                <Button Content="Widget" Command="{Binding SwitchToWidgetCommand}" ToolTip="Collapse to the desk widget (Ctrl+W)"
+                        Padding="14,5" Margin="0,0,8,0" Cursor="Hand" />
+                <Button x:Name="RefreshButton" Command="{Binding RefreshCommand}" Padding="14,5" FontWeight="SemiBold" Cursor="Hand">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Content" Value="Refresh" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsRefreshing}" Value="True">
+                                    <Setter Property="Content" Value="Refreshing…" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
             </StackPanel>
         </DockPanel>
 
         <!-- Provider Tab Bar -->
-        <Border x:Name="ProviderTabBar" Grid.Row="1" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="4" Margin="0,0,0,16">
+        <Border x:Name="ProviderTabBar" Grid.Row="1" Background="Transparent" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Margin="0,0,0,12">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Visibility" Value="Visible" />
@@ -68,14 +115,31 @@
                         <StackPanel Orientation="Horizontal" />
                     </ItemsPanelTemplate>
                 </ListBox.ItemsPanel>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Underline" Padding="14,8" BorderThickness="0,0,0,2" BorderBrush="Transparent" Background="Transparent">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Underline" Property="Background" Value="{DynamicResource CardHoverBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Underline" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Border Padding="16,8" CornerRadius="6" Cursor="Hand">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                                <TextBlock Text="{Binding Status}" FontSize="11" Margin="8,2,0,0" Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </StackPanel>
-                        </Border>
+                        <TextBlock Text="{Binding TabTitle}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -94,44 +158,98 @@
                 </Style>
             </ScrollViewer.Style>
             <StackPanel Margin="0,0,0,16">
-                <!-- Status & Account Card -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,16">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Left">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Status: " FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                                <TextBlock Text="{Binding SelectedTab.Status}" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
-                                <TextBlock Text="{Binding SelectedTab.StatusDetail, StringFormat=' ({0})'}" Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </StackPanel>
-                            <TextBlock Text="{Binding SelectedTab.AccountInfo}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0" />
-                        </StackPanel>
-                        <TextBlock Text="{Binding SelectedTab.StatsSummary}" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                    </DockPanel>
+                <!-- Error banner -->
+                <Border x:Name="ErrorBanner" CornerRadius="8" Padding="12,8" Margin="0,0,0,12"
+                        Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SeverityWarningBrush}" BorderThickness="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasError}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding SelectedTab.ErrorMessage, StringFormat=⚠ {0}}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
                 </Border>
 
-                <!-- Gauges Section -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                <!-- Setup card (service not configured) -->
+                <Border x:Name="SetupCard" CornerRadius="10" Padding="20" Margin="0,0,0,12"
+                        Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.ShowSetupCard}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Quota Usage" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,12" />
-                        <ItemsControl ItemsSource="{Binding SelectedTab.Meters}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Margin="8" Width="160" Height="170" Background="{DynamicResource CardHoverBrush}" CornerRadius="8" Padding="8">
-                                        <controls:GaugeControl Value="{Binding Value}"
-                                                               ValueText="{Binding ValueText}"
-                                                               Title="{Binding Title}"
-                                                               Subtitle="{Binding Subtitle}"
-                                                               Severity="{Binding Severity}" />
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <TextBlock Text="{Binding SelectedTab.SetupTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="{Binding SelectedTab.SetupHint}" TextWrapping="Wrap" Margin="0,8,0,12" Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <Button Content="{Binding SelectedTab.DisplayName}" ContentStringFormat="Configure {0}…"
+                                Command="{Binding ShowConnectionsCommand}" HorizontalAlignment="Left" Padding="14,5" Cursor="Hand" />
                     </StackPanel>
+                </Border>
+
+                <!-- Gauges row: equal-width cards, one row -->
+                <ItemsControl x:Name="GaugeRow" ItemsSource="{Binding SelectedTab.Meters}" Margin="0,0,0,12">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Rows="1" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="10" Padding="12,10">
+                                <StackPanel>
+                                    <controls:GaugeControl Value="{Binding Value}" ValueText="{Binding ValueText}"
+                                                           Title="{Binding Title}" Subtitle="{Binding Subtitle}"
+                                                           Severity="{Binding Severity}" Height="190" />
+                                    <TextBlock Text="{Binding SeverityText}" HorizontalAlignment="Center" FontWeight="SemiBold"
+                                               Foreground="{Binding GaugeBrush}" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding ResetText}" HorizontalAlignment="Center" FontSize="11"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0" TextWrapping="Wrap" TextAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Stat tiles -->
+                <Border x:Name="StatsRow" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="10" Padding="16,12" Margin="0,0,0,12">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.StatTiles.Count}" Value="0">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <ItemsControl ItemsSource="{Binding SelectedTab.StatTiles}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock Text="{Binding Label}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </Border>
 
                 <!-- Daily Usage Chart Section -->
@@ -171,4 +289,5 @@
             </StatusBarItem>
         </StatusBar>
     </Grid>
+    </DockPanel>
 </Window>
