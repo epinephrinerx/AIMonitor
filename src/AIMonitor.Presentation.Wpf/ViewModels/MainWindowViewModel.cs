@@ -16,6 +16,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _pendingRefresh;
     private string _lastRefreshStatus = "Ready";
     private ProviderTabViewModel _selectedTab;
+    private DashboardOption<string> _selectedMetric;
+    private DashboardOption<int> _selectedRange;
+    private DashboardOption<int> _selectedInterval;
+    private bool _syncingFromSettings;
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
@@ -31,7 +35,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         GeminiTab = new ProviderTabViewModel("gemini", "Gemini");
 
         ProviderTabs = [ClaudeTab, OpenAiTab, GeminiTab];
-        _selectedTab = ClaudeTab;
+        var settings = _settingsSession.Current;
+        _selectedTab = ProviderTabs.FirstOrDefault(t => t.ProviderId == settings.ActiveProvider) ?? ClaudeTab;
+        _selectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
+        _selectedRange = DashboardOptions.Find(DashboardOptions.Ranges, settings.ChartRangeDays, 1);
+        _selectedInterval = DashboardOptions.Find(DashboardOptions.Intervals, settings.RefreshIntervalSeconds, 2);
+        _settingsSession.Changed += OnSettingsChanged;
 
         RefreshCommand = new RelayCommand(async () => await RefreshAsync(), () => !IsRefreshing);
         OpenSettingsCommand = new RelayCommand(() => RequestOpenSettings?.Invoke());
@@ -61,7 +70,94 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ProviderTabViewModel SelectedTab
     {
         get => _selectedTab;
-        set => SetProperty(ref _selectedTab, value);
+        set
+        {
+            if (value is null || !SetProperty(ref _selectedTab, value))
+            {
+                return;
+            }
+
+            if (!_syncingFromSettings)
+            {
+                _ = SaveAsync(s => s with { ActiveProvider = value.ProviderId });
+            }
+        }
+    }
+
+    public IReadOnlyList<DashboardOption<string>> MetricOptions => DashboardOptions.Metrics;
+    public IReadOnlyList<DashboardOption<int>> RangeOptions => DashboardOptions.Ranges;
+    public IReadOnlyList<DashboardOption<int>> IntervalOptions => DashboardOptions.Intervals;
+
+    /// <summary>Chart metric; changing it saves the setting and refreshes straight away (1.3.3 <c>_on_view_changed</c>).</summary>
+    public DashboardOption<string> SelectedMetric
+    {
+        get => _selectedMetric;
+        set
+        {
+            if (value is not null && SetProperty(ref _selectedMetric, value) && !_syncingFromSettings)
+            {
+                _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+            }
+        }
+    }
+
+    /// <summary>History range in days; changing it saves the setting and refreshes straight away.</summary>
+    public DashboardOption<int> SelectedRange
+    {
+        get => _selectedRange;
+        set
+        {
+            if (value is not null && SetProperty(ref _selectedRange, value) && !_syncingFromSettings)
+            {
+                _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+            }
+        }
+    }
+
+    /// <summary>Auto-refresh interval; the live settings applier re-arms the timer. Zero means manual only.</summary>
+    public DashboardOption<int> SelectedInterval
+    {
+        get => _selectedInterval;
+        set
+        {
+            if (value is not null && SetProperty(ref _selectedInterval, value) && !_syncingFromSettings)
+            {
+                _ = SaveAsync(s => s with { RefreshIntervalSeconds = value.Value });
+            }
+        }
+    }
+
+    private async Task ApplyViewChangeAsync(Func<AppSettings, AppSettings> change)
+    {
+        await SaveAsync(change).ConfigureAwait(true);
+        await RefreshAsync().ConfigureAwait(true);
+    }
+
+    private async Task SaveAsync(Func<AppSettings, AppSettings> change)
+    {
+        try
+        {
+            await _settingsSession.UpdateAsync(change).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            LastRefreshStatus = $"Could not save setting: {ex.Message}";
+        }
+    }
+
+    private void OnSettingsChanged(AppSettings settings)
+    {
+        _syncingFromSettings = true;
+        try
+        {
+            SelectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
+            SelectedRange = DashboardOptions.Find(DashboardOptions.Ranges, settings.ChartRangeDays, 1);
+            SelectedInterval = DashboardOptions.Find(DashboardOptions.Intervals, settings.RefreshIntervalSeconds, 2);
+        }
+        finally
+        {
+            _syncingFromSettings = false;
+        }
     }
 
     public bool IsRefreshing

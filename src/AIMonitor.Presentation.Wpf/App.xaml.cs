@@ -150,10 +150,20 @@ public partial class App : System.Windows.Application
             CreateTrayHost,
             interval =>
             {
-                if (_refreshTimer is not null)
+                if (_refreshTimer is null)
                 {
-                    _refreshTimer.Interval = interval;
+                    return;
                 }
+
+                // A zero interval is "Manual only": no periodic refresh.
+                if (interval <= TimeSpan.Zero)
+                {
+                    _refreshTimer.Stop();
+                    return;
+                }
+
+                _refreshTimer.Interval = interval;
+                _refreshTimer.Start();
             },
             () => (_mainWindow?.IsVisible ?? false) || (_widgetWindow?.IsVisible ?? false),
             SwitchToDashboardMode);

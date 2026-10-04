@@ -60,7 +60,8 @@ public sealed record AppSettings
             Theme = theme,
             DashboardWidth = rememberSize ? 0 : Math.Max(760, DashboardWidth),
             DashboardHeight = rememberSize ? 0 : Math.Max(560, DashboardHeight),
-            RefreshIntervalSeconds = Math.Clamp(RefreshIntervalSeconds, 30, 86_400),
+            // 0 means "Manual only" (1.3.3 INTERVAL_OPTIONS); anything else is clamped.
+            RefreshIntervalSeconds = RefreshIntervalSeconds == 0 ? 0 : Math.Clamp(RefreshIntervalSeconds, 30, 86_400),
             WidgetOpacity = Math.Clamp(WidgetOpacity, 0.25, 1.0),
             ChartRangeDays = range,
             ChartMetric = metric,

@@ -14,7 +14,16 @@ public sealed class MeterDisplayItem : ViewModelBase
     public string ValueText { get; init; } = "0%";
     public Severity Severity { get; init; } = Severity.Normal;
     public Brush GaugeBrush { get; init; } = Brushes.Teal;
+
+    /// <summary>Glyph plus word ("✓ Normal", "⚠ High") so colour never carries severity alone.</summary>
+    public string SeverityText { get; init; } = "";
+
+    /// <summary>"Resets in 2h 5m · 17:50", "No reset scheduled", or the server's lock reason.</summary>
+    public string ResetText { get; init; } = "";
 }
+
+/// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
+public sealed record StatTile(string Label, string Value, string Detail);
 
 public sealed class ProviderTabViewModel : ViewModelBase
 {
@@ -26,12 +35,50 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statsSummary = "";
     private string _accountInfo = "";
     private string _errorMessage = "";
+    private IReadOnlyList<StatTile> _statTiles = [];
+    private string _tabTitle;
+    private string _accountLabel = "";
+    private bool _showSetupCard;
 
     public ProviderTabViewModel(string providerId, string displayName)
     {
         ProviderId = providerId;
         DisplayName = displayName;
+        _tabTitle = displayName;
     }
+
+    /// <summary>Tab caption: the name plus the lead meter's percentage, e.g. "Claude 12%".</summary>
+    public string TabTitle
+    {
+        get => _tabTitle;
+        private set => SetProperty(ref _tabTitle, value);
+    }
+
+    /// <summary>Header line under the app title: the account, or why there is none.</summary>
+    public string AccountLabel
+    {
+        get => _accountLabel;
+        private set => SetProperty(ref _accountLabel, value);
+    }
+
+    public IReadOnlyList<StatTile> StatTiles
+    {
+        get => _statTiles;
+        private set => SetProperty(ref _statTiles, value);
+    }
+
+    /// <summary>True when the service is not set up and has nothing to show yet.</summary>
+    public bool ShowSetupCard
+    {
+        get => _showSetupCard;
+        private set => SetProperty(ref _showSetupCard, value);
+    }
+
+    public bool HasError => !string.IsNullOrEmpty(_errorMessage);
+
+    public string SetupTitle => $"{DisplayName} is not set up yet";
+
+    public string SetupHint => ProviderMeta.TryGet(ProviderId)?.SetupHint ?? "";
 
     public string ProviderId { get; }
     public string DisplayName { get; }
@@ -81,12 +128,19 @@ public sealed class ProviderTabViewModel : ViewModelBase
     public string ErrorMessage
     {
         get => _errorMessage;
-        set => SetProperty(ref _errorMessage, value);
+        set
+        {
+            if (SetProperty(ref _errorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasError));
+            }
+        }
     }
 
-    public void UpdateFromSnapshot(ProviderSnapshot snapshot)
+    public void UpdateFromSnapshot(ProviderSnapshot snapshot, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var reference = now ?? DateTimeOffset.UtcNow;
 
         if (snapshot.Detection is not null)
         {
@@ -119,16 +173,18 @@ public sealed class ProviderTabViewModel : ViewModelBase
             var brush = AIMonitor.Presentation.Wpf.Theme.ThemeManager.SeverityBrush(effSev);
 
             var valText = m.Percent.HasValue ? $"{m.Percent.Value:F0}%" : "--";
-            var sub = m.ResetsAt.HasValue ? $"Resets in {FormatReset(m.ResetsAt.Value)}" : m.Subtitle;
+            var (glyph, word) = SeverityLabels.Describe(effSev);
 
             meterList.Add(new MeterDisplayItem
             {
                 Title = m.Title,
-                Subtitle = sub,
+                Subtitle = m.Subtitle,
                 Value = m.Percent ?? 0.0,
                 ValueText = valText,
                 Severity = effSev,
-                GaugeBrush = brush
+                GaugeBrush = brush,
+                SeverityText = $"{glyph} {word}",
+                ResetText = FormatResetText(m, reference),
             });
         }
         Meters = meterList;
@@ -151,6 +207,19 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 .ToList();
         }
 
+        TabTitle = meterList.FirstOrDefault(m => m.ValueText != "--") is { } lead
+            ? $"{DisplayName} {lead.ValueText}"
+            : DisplayName;
+
+        var configured = snapshot.Detection is null
+            ? snapshot.Ok
+            : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired;
+        ShowSetupCard = !configured && meterList.Count == 0;
+        AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
+            ? snapshot.Account
+            : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
+        StatTiles = snapshot.Stats.Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
+
         // Stats summary
         if (snapshot.Stats.Count > 0)
         {
@@ -158,11 +227,16 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
-    private static string FormatReset(DateTimeOffset resetTime)
+    private static string FormatResetText(Meter meter, DateTimeOffset now)
     {
-        var diff = resetTime - DateTimeOffset.UtcNow;
-        if (diff <= TimeSpan.Zero) return "now";
-        if (diff.TotalHours >= 24) return $"{(int)diff.TotalDays}d {diff.Hours}h";
-        return $"{diff.Hours}h {diff.Minutes}m";
+        var display = ResetDisplayFormatter.Format(meter.ResetsAt, now, TimeZoneInfo.Local);
+        if (display is null)
+        {
+            return string.IsNullOrEmpty(meter.LockedReason) ? "No reset scheduled" : meter.LockedReason;
+        }
+
+        return display.Countdown == "now"
+            ? "Resetting now"
+            : $"Resets in {display.Countdown} · {display.LocalTime}";
     }
 }
