@@ -1,6 +1,5 @@
 using System.Windows.Media;
 using AIMonitor.Domain;
-using AIMonitor.Presentation.Wpf.Controls;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 
@@ -31,7 +30,17 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statusDetail = "";
     private Severity _severity = Severity.Normal;
     private IReadOnlyList<MeterDisplayItem> _meters = [];
-    private IReadOnlyList<DailyChartBar> _dailyUsage = [];
+    private IReadOnlyList<UsageHistoryBucket> _chartBuckets = [];
+    private IReadOnlyList<string> _chartSeries = [];
+    private IReadOnlyList<UsageHistoryBreakdown> _modelRows = [];
+    private IReadOnlyList<UsageHistoryBreakdown> _projectRows = [];
+    private string _chartMetric = "Total tokens";
+    private string _chartTitle = "Usage per day";
+    private string _modelTitle = "By model";
+    private string _projectTitle = "By project";
+    private string _historyNote = "";
+    private string _valueNote = "";
+    private bool _hasHistory;
     private string _statsSummary = "";
     private string _accountInfo = "";
     private string _errorMessage = "";
@@ -107,11 +116,108 @@ public sealed class ProviderTabViewModel : ViewModelBase
         set => SetProperty(ref _meters, value);
     }
 
-    public IReadOnlyList<DailyChartBar> DailyUsage
+    /// <summary>Day buckets for the stacked chart (oldest first).</summary>
+    public IReadOnlyList<UsageHistoryBucket> ChartBuckets
     {
-        get => _dailyUsage;
-        set => SetProperty(ref _dailyUsage, value);
+        get => _chartBuckets;
+        private set => SetProperty(ref _chartBuckets, value);
     }
+
+    public IReadOnlyList<string> ChartSeries
+    {
+        get => _chartSeries;
+        private set => SetProperty(ref _chartSeries, value);
+    }
+
+    public string ChartMetric
+    {
+        get => _chartMetric;
+        private set => SetProperty(ref _chartMetric, value);
+    }
+
+    /// <summary>"Usage per day · last 14 days".</summary>
+    public string ChartTitle
+    {
+        get => _chartTitle;
+        private set => SetProperty(ref _chartTitle, value);
+    }
+
+    public IReadOnlyList<UsageHistoryBreakdown> ModelRows
+    {
+        get => _modelRows;
+        private set
+        {
+            if (SetProperty(ref _modelRows, value))
+            {
+                OnPropertyChanged(nameof(HasModelRows));
+            }
+        }
+    }
+
+    public IReadOnlyList<UsageHistoryBreakdown> ProjectRows
+    {
+        get => _projectRows;
+        private set
+        {
+            if (SetProperty(ref _projectRows, value))
+            {
+                OnPropertyChanged(nameof(HasProjectRows));
+            }
+        }
+    }
+
+    public string ModelTitle
+    {
+        get => _modelTitle;
+        private set => SetProperty(ref _modelTitle, value);
+    }
+
+    public string ProjectTitle
+    {
+        get => _projectTitle;
+        private set => SetProperty(ref _projectTitle, value);
+    }
+
+    /// <summary>True when there is a history to chart; hides the three chart cards otherwise.</summary>
+    public bool HasHistory
+    {
+        get => _hasHistory;
+        private set => SetProperty(ref _hasHistory, value);
+    }
+
+    public bool HasModelRows => _modelRows.Count > 0;
+
+    public bool HasProjectRows => _projectRows.Count > 0;
+
+    /// <summary>A history-only problem, shown above the charts rather than in the top error banner.</summary>
+    public string HistoryNote
+    {
+        get => _historyNote;
+        private set
+        {
+            if (SetProperty(ref _historyNote, value))
+            {
+                OnPropertyChanged(nameof(HasHistoryNote));
+            }
+        }
+    }
+
+    public bool HasHistoryNote => !string.IsNullOrEmpty(_historyNote);
+
+    /// <summary>Provider footnote under the charts (e.g. Gemini reports request counts, not tokens).</summary>
+    public string ValueNote
+    {
+        get => _valueNote;
+        private set
+        {
+            if (SetProperty(ref _valueNote, value))
+            {
+                OnPropertyChanged(nameof(HasValueNote));
+            }
+        }
+    }
+
+    public bool HasValueNote => !string.IsNullOrEmpty(_valueNote);
 
     public string StatsSummary
     {
@@ -163,7 +269,13 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
 
         AccountInfo = !string.IsNullOrEmpty(snapshot.Account) ? $"Account: {snapshot.Account}" : "";
-        ErrorMessage = snapshot.Error ?? snapshot.HistoryError ?? "";
+        var configuredNow = snapshot.Detection is null
+            ? snapshot.Ok
+            : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired;
+        // 1.3.3: the banner is for a failing, configured service; a history gap is reported where the charts would be.
+        ErrorMessage = snapshot.Error ?? "";
+        HistoryNote = string.IsNullOrEmpty(snapshot.HistoryError) ? "" : $"⚠ {snapshot.HistoryError}";
+        ValueNote = snapshot.ValueNote;
 
         // Meters
         var meterList = new List<MeterDisplayItem>();
@@ -189,32 +301,35 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
         Meters = meterList;
 
-        // Daily chart items (PAR-015: metrics and date ranges)
-        if (snapshot.History is not null && snapshot.History.Buckets.Count > 0)
+        // History charts: stacked daily usage plus the by-model / by-project breakdowns.
+        var history = snapshot.History;
+        if (history is not null && history.Buckets.Count > 0)
         {
-            var days = snapshot.History.Days > 0 ? snapshot.History.Days : 14;
-            var isCurrency = snapshot.History.Metric.Contains("value", StringComparison.OrdinalIgnoreCase) ||
-                             snapshot.History.Metric.Contains("cost", StringComparison.OrdinalIgnoreCase) ||
-                             snapshot.History.Metric.Contains("$", StringComparison.OrdinalIgnoreCase);
-
-            DailyUsage = snapshot.History.Buckets
-                .OrderBy(b => b.Day)
-                .TakeLast(days)
-                .Select(b => new DailyChartBar(
-                    b.Day.ToString("MM/dd", System.Globalization.CultureInfo.InvariantCulture),
-                    b.Total,
-                    isCurrency ? $"${b.Total:N2}" : $"{b.Total:N0}"))
-                .ToList();
+            var suffix = $" · last {history.Days} days";
+            ChartBuckets = history.Buckets.OrderBy(b => b.Day).TakeLast(history.Days).ToList();
+            ChartSeries = history.Series;
+            ChartMetric = history.Metric;
+            ChartTitle = "Usage per day" + suffix;
+            ModelRows = history.ByModel;
+            ModelTitle = "By model" + suffix;
+            ProjectRows = history.ByProject;
+            ProjectTitle = history.ProjectLabel + suffix;
+            HasHistory = true;
+        }
+        else
+        {
+            ChartBuckets = [];
+            ChartSeries = [];
+            ModelRows = [];
+            ProjectRows = [];
+            HasHistory = false;
         }
 
         TabTitle = meterList.FirstOrDefault(m => m.ValueText != "--") is { } lead
             ? $"{DisplayName} {lead.ValueText}"
             : DisplayName;
 
-        var configured = snapshot.Detection is null
-            ? snapshot.Ok
-            : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired;
-        ShowSetupCard = !configured && meterList.Count == 0;
+        ShowSetupCard = !configuredNow && meterList.Count == 0;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";

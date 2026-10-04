@@ -252,15 +252,110 @@
                     </ItemsControl>
                 </Border>
 
-                <!-- Daily Usage Chart Section -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="16">
+                <!-- History problem: reported where the charts would be, not in the top banner -->
+                <TextBlock x:Name="HistoryNote" Text="{Binding SelectedTab.HistoryNote}" TextWrapping="Wrap" Margin="2,0,2,12"
+                           Foreground="{DynamicResource TextSecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasHistoryNote}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <!-- Usage per day (stacked by model) -->
+                <Border x:Name="DailyChartCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="10" Padding="18,14" Margin="0,0,0,12">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasHistory}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Daily Usage (Tokens)" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,12" />
-                        <controls:DailyChartControl Items="{Binding SelectedTab.DailyUsage}"
-                                                    BarBrush="{DynamicResource AccentBrush}"
-                                                    Height="180" />
+                        <TextBlock Text="{Binding SelectedTab.ChartTitle}" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,10" />
+                        <controls:StackedColumnChartControl Buckets="{Binding SelectedTab.ChartBuckets}"
+                                                            Series="{Binding SelectedTab.ChartSeries}"
+                                                            Metric="{Binding SelectedTab.ChartMetric}"
+                                                            Height="260" />
                     </StackPanel>
                 </Border>
+
+                <!-- By model / By project -->
+                <UniformGrid x:Name="BreakdownRow" Rows="1" Margin="0,0,0,12">
+                    <UniformGrid.Style>
+                        <Style TargetType="UniformGrid">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasHistory}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </UniformGrid.Style>
+                    <Border x:Name="ModelCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="10" Padding="18,14" Margin="0,0,6,0" VerticalAlignment="Top">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedTab.HasModelRows}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding SelectedTab.ModelTitle}" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,10" />
+                            <controls:HorizontalBarChartControl Rows="{Binding SelectedTab.ModelRows}"
+                                                                Metric="{Binding SelectedTab.ChartMetric}" Coloured="True" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="ProjectCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="10" Padding="18,14" Margin="6,0,0,0" VerticalAlignment="Top">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedTab.HasProjectRows}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding SelectedTab.ProjectTitle}" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,10" />
+                            <controls:HorizontalBarChartControl Rows="{Binding SelectedTab.ProjectRows}"
+                                                                Metric="{Binding SelectedTab.ChartMetric}" />
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <!-- Provider footnote -->
+                <TextBlock x:Name="ValueNote" Text="{Binding SelectedTab.ValueNote}" TextWrapping="Wrap" FontSize="11" Margin="2,0,2,0"
+                           Foreground="{DynamicResource TextMutedBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasValueNote}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </ScrollViewer>
  

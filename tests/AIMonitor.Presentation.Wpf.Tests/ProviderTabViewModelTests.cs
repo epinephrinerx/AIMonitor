@@ -14,7 +14,7 @@ public class ProviderTabViewModelTests
         Assert.Equal("Claude", vm.DisplayName);
         Assert.Equal("Checking...", vm.Status);
         Assert.Empty(vm.Meters);
-        Assert.Empty(vm.DailyUsage);
+        Assert.Empty(vm.ChartBuckets);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class ProviderTabViewModelTests
     }
 
     [Fact]
-    public void UpdateFromSnapshot_WithHistoryBuckets_PopulatesDailyUsage()
+    public void UpdateFromSnapshot_WithHistoryBuckets_PopulatesChartData()
     {
         var vm = new ProviderTabViewModel("openai", "OpenAI");
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -79,9 +79,11 @@ public class ProviderTabViewModelTests
 
         vm.UpdateFromSnapshot(snapshot);
 
-        Assert.Single(vm.DailyUsage);
-        Assert.Equal(today.ToString("MM/dd"), vm.DailyUsage[0].DateLabel);
-        Assert.Equal(2500, vm.DailyUsage[0].Value);
+        Assert.True(vm.HasHistory);
+        var day = Assert.Single(vm.ChartBuckets);
+        Assert.Equal(today, day.Day);
+        Assert.Equal(2500, day.Total);
+        Assert.Equal("Usage per day · last 14 days", vm.ChartTitle);
     }
 
     [Fact]

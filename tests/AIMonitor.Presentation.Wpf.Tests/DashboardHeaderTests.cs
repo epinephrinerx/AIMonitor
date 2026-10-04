@@ -101,13 +101,13 @@ public sealed class DashboardHeaderTests
         var vm = new ProviderTabViewModel("claude", "Claude");
         var snapshot = new ProviderSnapshot("claude", configured: true,
             stats: [new Stat("Tokens in range", "2.3B", "2.3B all time")],
-            historyError: "history unavailable",
+            error: "service failed",
             meters: [new Meter("session", "session", "Session", "", 1)]);
 
         vm.UpdateFromSnapshot(snapshot, Now);
 
         Assert.True(vm.HasError);
-        Assert.Equal("history unavailable", vm.ErrorMessage);
+        Assert.Equal("service failed", vm.ErrorMessage);
         var tile = Assert.Single(vm.StatTiles);
         Assert.Equal(new StatTile("Tokens in range", "2.3B", "2.3B all time"), tile);
     }
