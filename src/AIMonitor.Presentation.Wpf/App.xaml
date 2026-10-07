@@ -3,6 +3,27 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:AIMonitor.Presentation.Wpf">
     <Application.Resources>
-         
+        <!-- WPF's Control default is VerticalContentAlignment=Top, which pins the text of combo boxes, menu items and
+             single-line fields to the top-left corner; these controls read as centred-left everywhere else. -->
+        <Style TargetType="ComboBox">
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="MenuItem">
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Style.Triggers>
+                <!-- Only single-line fields: a wrapped, multi-line reader keeps its text at the top. -->
+                <Trigger Property="TextWrapping" Value="NoWrap">
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Application.Resources>
 </Application>
