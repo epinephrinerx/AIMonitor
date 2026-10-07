@@ -65,7 +65,7 @@ AllowNoIcons=yes
 
 ; Output
 OutputDir=..\installer_out
-OutputBaseFilename={#AppShortName}-Setup-{#AppVersion}
+OutputBaseFilename=AIUsageMonitor Setup {#AppVersion}
 SetupIconFile=..\assets\icon.ico
 LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}

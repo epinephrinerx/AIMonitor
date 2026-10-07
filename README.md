@@ -10,7 +10,7 @@ filled tile with the percentage written across it.
 
 ## Installing
 
-Run `AIUsageMonitor2-Setup-2.0.0.exe`. It installs per user, so no administrator rights are needed. The first launch
+Run `AIUsageMonitor Setup 2.0.0.exe` (installs per user, no administrator rights needed), or run `AIUsageMonitor 2.0.0.exe` directly without installing. The first launch
 imports the settings of a Python 1.3.x install if there is one; nothing in the old registry keys is deleted.
 
 ## What each service can report
