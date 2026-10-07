@@ -4,34 +4,70 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Settings — AIMonitor"
-        Width="480" Height="580"
+        Title="Settings"
+        Width="600" Height="720"
+        MinWidth="580" MinHeight="420"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         Background="{DynamicResource AppBackgroundBrush}">
-    
+
+    <Window.Resources>
+        <Style x:Key="GroupCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="GroupTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Settings" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,16" />
-
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <!-- The dialog carries General, one group per service and Widget mode, which overflows a short screen: scroll. -->
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,12,0">
-                <!-- Theme Option and Window Size -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+
+                <!-- General -->
+                <Border Style="{StaticResource GroupCard}">
                     <StackPanel>
-                        <TextBlock Text="Appearance Theme" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
+                        <TextBlock Text="General" Style="{StaticResource GroupTitle}" />
+                        <CheckBox Content="Start with Windows" IsChecked="{Binding StartWithWindows}" Margin="0,0,0,8"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  ToolTip="Adds a per-user entry under Run. Windows' own Startup Apps page edits the same entry, and whatever you set there wins on the next launch." />
+                        <CheckBox Content="Minimize to tray when closed" IsChecked="{Binding MinimizeToTray}" Margin="0,0,0,8"
+                                  Foreground="{DynamicResource TextPrimaryBrush}"
+                                  ToolTip="Closing the window parks it in the notification area and keeps watching. Exit in the tray menu quits for real." />
+                        <CheckBox Content="Show icon in System Tray" IsChecked="{Binding ShowTrayIcon}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}" />
+
+                        <TextBlock Text="Theme" Style="{StaticResource FieldLabel}" />
                         <ComboBox SelectedValuePath="Tag" SelectedValue="{Binding Theme, Mode=TwoWay}" Padding="6">
-                            <ComboBoxItem Content="Follow Windows (System)" Tag="system" />
-                            <ComboBoxItem Content="Light Theme" Tag="light" />
-                            <ComboBoxItem Content="Dark Theme" Tag="dark" />
+                            <ComboBoxItem Content="Follow Windows · default" Tag="system" />
+                            <ComboBoxItem Content="Light" Tag="light" />
+                            <ComboBoxItem Content="Dark" Tag="dark" />
                         </ComboBox>
 
-                        <TextBlock x:Name="DefaultWindowSizeLabel" Text="Default window size" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,12,0,8" />
+                        <TextBlock x:Name="DefaultWindowSizeLabel" Text="Default window size" Style="{StaticResource FieldLabel}" />
                         <ComboBox x:Name="WindowSizeComboBox"
                                   ItemsSource="{Binding WindowSizeOptions}"
                                   SelectedItem="{Binding SelectedWindowSize}"
@@ -39,36 +75,62 @@
                                   Padding="6" />
                         <TextBlock x:Name="DefaultWindowSizeNote"
                                    Text="A size you pick here is applied to the window straight away. &quot;Remember last size&quot; keeps whatever you dragged it to."
-                                   Foreground="{DynamicResource TextSecondaryBrush}"
-                                   FontSize="11"
-                                   TextWrapping="Wrap"
-                                   Margin="0,6,0,0" />
+                                   Style="{StaticResource Hint}" />
+
+                        <TextBlock Text="Check interval (seconds)" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="IntervalTextBox" Text="{Binding RefreshIntervalText, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="90" HorizontalAlignment="Left" Padding="4"
+                                 ToolTip="0 = manual refresh only; otherwise 30 to 86,400 seconds." />
+                        <TextBlock x:Name="IntervalErrorText" Text="{Binding RefreshIntervalError}" TextWrapping="Wrap" FontSize="11"
+                                   Margin="0,4,0,0" Foreground="{DynamicResource SeverityCriticalBrush}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasIntervalError}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
                 </Border>
 
-                <!-- Windows Integration -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="14" Margin="0,0,0,12">
-                    <StackPanel>
-                        <TextBlock Text="System Integrations" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
-                        <CheckBox Content="Start AIMonitor with Windows" IsChecked="{Binding StartWithWindows}" Margin="0,0,0,8" Foreground="{DynamicResource TextPrimaryBrush}" />
-                        <CheckBox Content="Minimize to System Tray on close" IsChecked="{Binding MinimizeToTray}" Margin="0,0,0,8" Foreground="{DynamicResource TextPrimaryBrush}" />
-                        <CheckBox Content="Show icon in System Tray" IsChecked="{Binding ShowTrayIcon}" Foreground="{DynamicResource TextPrimaryBrush}" />
-                    </StackPanel>
-                </Border>
+                <!-- One group per service: enablement only; credentials live on the Connections page -->
+                <ItemsControl x:Name="ProviderGroups" ItemsSource="{Binding Providers}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource GroupCard}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource GroupTitle}" />
+                                    <CheckBox Content="Monitor this service" IsChecked="{Binding IsEnabled}"
+                                              Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding Hint}" Style="{StaticResource Hint}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
-                <!-- Widget Customization -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+                <!-- Widget mode -->
+                <Border Style="{StaticResource GroupCard}" Margin="0">
                     <StackPanel>
-                        <TextBlock Text="Compact Widget" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
-                        <CheckBox Content="Always on top" IsChecked="{Binding WidgetAlwaysOnTop}" Margin="0,0,0,8" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Widget mode" Style="{StaticResource GroupTitle}" />
+                        <TextBlock Text="Press Ctrl+W or use the Widget button to collapse into the compact widget. Double-click the widget to expand it again."
+                                   Style="{StaticResource Hint}" Margin="0,0,0,8" />
+                        <CheckBox Content="Always on top" IsChecked="{Binding WidgetAlwaysOnTop}" Margin="0,0,0,8"
+                                  Foreground="{DynamicResource TextPrimaryBrush}" />
                         <DockPanel Margin="0,4,0,0">
-                            <TextBlock Text="Widget Opacity:" Foreground="{DynamicResource TextSecondaryBrush}" DockPanel.Dock="Left" VerticalAlignment="Center" />
-                            <TextBlock x:Name="OpacityPercentLabel" Text="{Binding OpacityPercent, StringFormat='{}{0}%'}" Foreground="{DynamicResource TextPrimaryBrush}" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="8,0,0,0" Width="40" TextAlignment="Right" />
-                            <Slider x:Name="OpacitySlider" Minimum="0.25" Maximum="1.0" Value="{Binding WidgetOpacity}" TickFrequency="0.05" IsSnapToTickEnabled="True" VerticalAlignment="Center" />
+                            <TextBlock Text="Opacity" Foreground="{DynamicResource TextSecondaryBrush}" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <TextBlock x:Name="OpacityPercentLabel" Text="{Binding OpacityPercent, StringFormat='{}{0}%'}" Foreground="{DynamicResource TextPrimaryBrush}"
+                                       DockPanel.Dock="Right" VerticalAlignment="Center" Margin="8,0,0,0" Width="40" TextAlignment="Right" />
+                            <Slider x:Name="OpacitySlider" Minimum="0.25" Maximum="1.0" Value="{Binding WidgetOpacity}" TickFrequency="0.05"
+                                    IsSnapToTickEnabled="True" TickPlacement="BottomRight" VerticalAlignment="Center" Cursor="Hand" />
                         </DockPanel>
                         <Border x:Name="OpacitySwatch"
                                 Opacity="{Binding WidgetOpacity}"
-                                Background="{DynamicResource AppBackgroundBrush}"
+                                Background="{DynamicResource CardBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="6"
@@ -78,29 +140,18 @@
                                        Text="Widget preview"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                       FontSize="11"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
                         </Border>
-                    </StackPanel>
-                </Border>
-
-                <!-- Polling Interval -->
-                <Border Background="{DynamicResource CardBackgroundBrush}" CornerRadius="8" Padding="14">
-                    <StackPanel>
-                        <TextBlock Text="Refresh Schedule" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
-                        <DockPanel>
-                            <TextBlock Text="Check interval (seconds):" Foreground="{DynamicResource TextSecondaryBrush}" DockPanel.Dock="Left" VerticalAlignment="Center" />
-                            <TextBox Text="{Binding RefreshIntervalSeconds, UpdateSourceTrigger=PropertyChanged}" Width="70" HorizontalAlignment="Right" Padding="4" />
-                        </DockPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Dialog Buttons -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button x:Name="CancelButton" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" Padding="16,6" Margin="0,0,8,0" Cursor="Hand" />
-            <Button x:Name="SaveButton" Content="Save" Command="{Binding SaveCommand}" Padding="20,6" FontWeight="SemiBold" Cursor="Hand" />
+        <!-- Dialog buttons: Save first (default), then Cancel, as in 1.3.3 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="SaveButton" Content="Save" Command="{Binding SaveCommand}" IsDefault="True" Padding="20,6" Margin="0,0,8,0" FontWeight="SemiBold" Cursor="Hand" />
+            <Button x:Name="CancelButton" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" Padding="16,6" Cursor="Hand" />
         </StackPanel>
     </Grid>
 </Window>

@@ -22,10 +22,14 @@ public sealed record ProviderSnapshotRequest
     /// <summary>Whether the caller wants history folded into the snapshot at all.</summary>
     public bool IncludeHistory { get; }
 
+    /// <summary>Providers the user switched off ("Monitor this service"); the refresh skips them entirely.</summary>
+    public IReadOnlySet<string> DisabledProviders { get; }
+
     public ProviderSnapshotRequest(
         int historyDays = DefaultHistoryDays,
         string? metric = null,
-        bool includeHistory = false)
+        bool includeHistory = false,
+        IEnumerable<string>? disabledProviders = null)
     {
         if (historyDays <= 0)
         {
@@ -36,7 +40,18 @@ public sealed record ProviderSnapshotRequest
         HistoryDays = historyDays;
         Metric = metric ?? string.Empty;
         IncludeHistory = includeHistory;
+        DisabledProviders = new HashSet<string>(disabledProviders ?? [], StringComparer.OrdinalIgnoreCase);
     }
+
+    // The disabled set is compared by content: record equality would otherwise compare the set by reference.
+    public bool Equals(ProviderSnapshotRequest? other) =>
+        other is not null
+        && HistoryDays == other.HistoryDays
+        && Metric == other.Metric
+        && IncludeHistory == other.IncludeHistory
+        && DisabledProviders.SetEquals(other.DisabledProviders);
+
+    public override int GetHashCode() => HashCode.Combine(HistoryDays, Metric, IncludeHistory, DisabledProviders.Count);
 
     /// <summary>The request a caller sends when it only wants the current quota.</summary>
     public static ProviderSnapshotRequest Default { get; } = new();

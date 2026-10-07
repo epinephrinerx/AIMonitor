@@ -297,7 +297,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             var req = new ProviderSnapshotRequest(
                 historyDays: settings.ChartRangeDays,
                 metric: settings.ChartMetric,
-                includeHistory: true);
+                includeHistory: true,
+                disabledProviders: settings.Providers.Where(p => !p.Value.Enabled).Select(p => p.Key));
             var requestId = Interlocked.Increment(ref _requestIdCounter);
             var result = await _refreshCoordinator.QueueAsync(requestId, req).ConfigureAwait(true);
             _latestSnapshots = result.Snapshots;

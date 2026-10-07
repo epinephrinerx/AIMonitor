@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows.Input;
 using AIMonitor.Application.Settings;
@@ -26,6 +27,9 @@ public sealed class SettingsViewModel : ViewModelBase
     private int _chartRangeDays;
     private WindowSizeOption _selectedWindowSize;
 
+    private string _refreshIntervalText;
+    private string _refreshIntervalError = "";
+
     private bool _discarded;
     private bool _saved;
     private bool _isSaving;
@@ -51,12 +55,21 @@ public sealed class SettingsViewModel : ViewModelBase
         _minimizeToTray = _entrySettings.MinimizeToTray;
         _showTrayIcon = _entrySettings.ShowTrayIcon;
         _refreshIntervalSeconds = _entrySettings.RefreshIntervalSeconds;
+        _refreshIntervalText = _refreshIntervalSeconds.ToString(CultureInfo.InvariantCulture);
+        Providers =
+        [
+            .. ProviderMeta.All.Select(meta => new ProviderToggle(
+                meta.Id,
+                meta.DisplayName,
+                string.IsNullOrEmpty(meta.Tagline) ? "Sign-in is managed on the Connections page." : meta.Tagline,
+                !_entrySettings.Providers.TryGetValue(meta.Id, out var pref) || pref.Enabled)),
+        ];
         _widgetOpacity = Math.Clamp(_entrySettings.WidgetOpacity, 0.25, 1.0);
         _widgetAlwaysOnTop = _entrySettings.WidgetAlwaysOnTop;
         _chartRangeDays = _entrySettings.ChartRangeDays;
         _selectedWindowSize = WindowSizeOption.FromSize(_entrySettings.DashboardWidth, _entrySettings.DashboardHeight);
 
-        SaveCommand = new RelayCommand(async () => await ExecuteSaveCommandAsync());
+        SaveCommand = new RelayCommand(async () => await ExecuteSaveCommandAsync(), () => !HasIntervalError);
         CancelCommand = new RelayCommand(Cancel);
     }
 
@@ -93,7 +106,71 @@ public sealed class SettingsViewModel : ViewModelBase
     public int RefreshIntervalSeconds
     {
         get => _refreshIntervalSeconds;
-        set => SetProperty(ref _refreshIntervalSeconds, value);
+        set
+        {
+            if (SetProperty(ref _refreshIntervalSeconds, value))
+            {
+                SetIntervalText(value.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+    }
+
+    /// <summary>What the Check interval box holds; parsed and validated as it is typed.</summary>
+    public string RefreshIntervalText
+    {
+        get => _refreshIntervalText;
+        set
+        {
+            SetIntervalText(value ?? "");
+            if (!HasIntervalError && int.TryParse(_refreshIntervalText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+            {
+                SetProperty(ref _refreshIntervalSeconds, seconds, nameof(RefreshIntervalSeconds));
+            }
+        }
+    }
+
+    /// <summary>Why the interval cannot be saved, or empty. 0 means "Manual only".</summary>
+    public string RefreshIntervalError
+    {
+        get => _refreshIntervalError;
+        private set
+        {
+            if (SetProperty(ref _refreshIntervalError, value))
+            {
+                OnPropertyChanged(nameof(HasIntervalError));
+                (SaveCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool HasIntervalError => _refreshIntervalError.Length > 0;
+
+    /// <summary>"Monitor this service" per provider; a switched-off service is skipped by the refresh.</summary>
+    public IReadOnlyList<ProviderToggle> Providers { get; }
+
+    internal static string ValidateInterval(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "Enter a number of seconds, or 0 for manual refresh only.";
+        }
+
+        if (!int.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return "Use whole seconds (digits only), or 0 for manual refresh only.";
+        }
+
+        return seconds == 0 || seconds is >= 30 and <= 86_400
+            ? ""
+            : "Use 0 (manual only) or between 30 and 86,400 seconds.";
+    }
+
+    private void SetIntervalText(string text)
+    {
+        _refreshIntervalText = text;
+        OnPropertyChanged(nameof(RefreshIntervalText));
+        RefreshIntervalError = ValidateInterval(text);
     }
 
     public double WidgetOpacity
@@ -190,6 +267,7 @@ public sealed class SettingsViewModel : ViewModelBase
                 MinimizeToTray = MinimizeToTray,
                 ShowTrayIcon = ShowTrayIcon,
                 RefreshIntervalSeconds = RefreshIntervalSeconds,
+                Providers = WithProviderToggles(s.Providers),
                 WidgetOpacity = WidgetOpacity,
                 WidgetAlwaysOnTop = WidgetAlwaysOnTop,
                 ChartRangeDays = ChartRangeDays,
@@ -226,6 +304,18 @@ public sealed class SettingsViewModel : ViewModelBase
         }
 
         RequestClose?.Invoke(true);
+    }
+
+    private IReadOnlyDictionary<string, ProviderPreference> WithProviderToggles(IReadOnlyDictionary<string, ProviderPreference> current)
+    {
+        var updated = new Dictionary<string, ProviderPreference>(current, StringComparer.OrdinalIgnoreCase);
+        foreach (var toggle in Providers)
+        {
+            var extra = updated.TryGetValue(toggle.Id, out var pref) ? pref.Extra : "";
+            updated[toggle.Id] = new ProviderPreference(toggle.IsEnabled, extra);
+        }
+
+        return updated;
     }
 
     public void Discard()

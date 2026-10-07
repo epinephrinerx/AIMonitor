@@ -32,6 +32,11 @@ public sealed class RefreshProvidersUseCase
         foreach (var provider in _providers)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (request.DisabledProviders.Contains(provider.ProviderId))
+            {
+                continue;
+            }
+
             try
             {
                 var snapshot = await provider.Client.GetSnapshotAsync(request, cancellationToken).ConfigureAwait(false);

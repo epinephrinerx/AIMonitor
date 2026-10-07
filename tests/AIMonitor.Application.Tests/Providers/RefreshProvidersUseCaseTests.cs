@@ -133,6 +133,22 @@ public sealed class RefreshProvidersUseCaseTests
         Assert.Equal(2, calls);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_SkipsProvidersTheUserSwitchedOff()
+    {
+        var called = new List<string>();
+        var useCase = Create(
+            ("claude", (_, _) => { called.Add("claude"); return Task.FromResult(new ProviderSnapshot("claude", configured: true)); }),
+            ("gemini", (_, _) => { called.Add("gemini"); return Task.FromResult(new ProviderSnapshot("gemini", configured: true)); }));
+
+        var request = new ProviderSnapshotRequest(14, "Total tokens", true, disabledProviders: ["Gemini"]);
+        var result = await useCase.ExecuteAsync(1, request, CancellationToken.None);
+
+        Assert.Equal(["claude"], called);
+        Assert.True(result.Snapshots.ContainsKey("claude"));
+        Assert.False(result.Snapshots.ContainsKey("gemini"));
+    }
+
     private static RefreshProvidersUseCase Create(
         params (string Id, Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> Handler)[] providers) =>
         new(providers.Select(provider => new ProviderClientRegistration(provider.Id, new StubClient(provider.Handler))));
