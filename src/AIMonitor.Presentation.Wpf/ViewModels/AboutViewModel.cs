@@ -5,10 +5,23 @@ using AIMonitor.Application.Version;
 
 namespace AIMonitor.Presentation.Wpf.ViewModels;
 
+/// <summary>The About menu's pages; each opens as its own window, as in 1.3.3.</summary>
+public enum AboutPage
+{
+    Version,
+    Readme,
+    License,
+    Notices,
+    Developer,
+}
+
 public sealed class AboutViewModel : ViewModelBase
 {
+    private const string UpdateNote = "Checking for updates is a read-only request to GitHub. Nothing is downloaded or installed.";
+    private const string ReleasesUrl = "https://github.com/epinephrinerx/AIMonitor/releases";
+
     private readonly IVersionChecker _versionChecker;
-    private string _updateStatus = "Checking for updates...";
+    private string _updateStatus = UpdateNote;
     private bool _isChecking;
     private bool _isUpdateAvailable;
     private ReleaseInfo? _latestRelease;
@@ -22,23 +35,52 @@ public sealed class AboutViewModel : ViewModelBase
 
         OpenProjectUrlCommand = new RelayCommand(() => OpenUrl(ProjectUrl));
         OpenReleaseUrlCommand = new RelayCommand(() =>
-        {
-            if (_latestRelease is not null)
-            {
-                OpenUrl(_latestRelease.Url);
-            }
-        });
-
-        CheckUpdatesAsync();
+            OpenUrl(_latestRelease is { Url.Length: > 0 } release ? release.Url : ReleasesUrl));
+        CheckUpdatesCommand = new RelayCommand(async () => await CheckUpdatesAsync(), () => !_isChecking);
     }
 
     public string AppName => "AIMonitor 2.0";
     public string AppVersion { get; }
     public string DeveloperName => "Apichart Chantanis";
+
+    public string DeveloperBlurb =>
+        "AI Usage Monitor reads the AI sign-ins you already have on this machine and shows what each service says "
+        + "you have used. It never writes to another tool's credentials and never sends your usage anywhere.";
+
+    public string AssistantsBlurb =>
+        "Written and maintained by the author above, with help from two coding assistants: Claude Code (Anthropic) and "
+        + "Codex (OpenAI). They are tools, in the same sense as the compiler; the design decisions and the releases are "
+        + "the author's.";
+
+    public string LicenseFooter =>
+        $"Version {AppVersion}  ·  GPL-3.0-or-later. The full licence is under About > License Agreement, and the notices "
+        + "for redistributed components sit beside it.";
+
+    public string CheckButtonText => _isChecking ? "Checking…" : "Check for updates";
+
+    public string ReleaseButtonText => _isUpdateAvailable ? "Get the update" : "Open releases page";
+
+    public string NoticesText => ReadBesideApp("THIRD-PARTY-NOTICES.md")
+        ?? "The notices for redistributed components ship beside the application (THIRD-PARTY-NOTICES.md).";
+
+    private static string? ReadBesideApp(string fileName)
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, fileName);
+            return System.IO.File.Exists(path) ? System.IO.File.ReadAllText(path) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
     public string DeveloperEmail => "apichart@apichart.net";
     public string ProjectUrl => "https://github.com/epinephrinerx/AIMonitor";
 
-    public string LicenseText =>
+    public string LicenseText => ReadBesideApp("LICENSE.txt") ?? LicenseExcerpt;
+
+    private const string LicenseExcerpt =
         """
         GNU GENERAL PUBLIC LICENSE
         Version 3, 29 June 2007
@@ -84,13 +126,26 @@ public sealed class AboutViewModel : ViewModelBase
     public bool IsChecking
     {
         get => _isChecking;
-        set => SetProperty(ref _isChecking, value);
+        set
+        {
+            if (SetProperty(ref _isChecking, value))
+            {
+                OnPropertyChanged(nameof(CheckButtonText));
+                (CheckUpdatesCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsUpdateAvailable
     {
         get => _isUpdateAvailable;
-        set => SetProperty(ref _isUpdateAvailable, value);
+        set
+        {
+            if (SetProperty(ref _isUpdateAvailable, value))
+            {
+                OnPropertyChanged(nameof(ReleaseButtonText));
+            }
+        }
     }
 
     public ReleaseInfo? LatestRelease
@@ -101,11 +156,13 @@ public sealed class AboutViewModel : ViewModelBase
 
     public ICommand OpenProjectUrlCommand { get; }
     public ICommand OpenReleaseUrlCommand { get; }
+    public ICommand CheckUpdatesCommand { get; }
 
-    public async void CheckUpdatesAsync()
+    /// <summary>On demand only, never on open: one read-only request to GitHub.</summary>
+    public async Task CheckUpdatesAsync()
     {
         IsChecking = true;
-        UpdateStatus = "Checking for updates...";
+        UpdateStatus = "Asking GitHub for the newest release…";
 
         try
         {
@@ -114,12 +171,12 @@ public sealed class AboutViewModel : ViewModelBase
             if (release.IsNewer)
             {
                 IsUpdateAvailable = true;
-                UpdateStatus = $"New version {release.Tag} is available! (Published: {release.Published})";
+                UpdateStatus = $"Update available: {release.Tag}{Published(release)}. You have {AppVersion}.";
             }
             else
             {
                 IsUpdateAvailable = false;
-                UpdateStatus = $"You are running the latest version ({AppVersion}).";
+                UpdateStatus = $"You are up to date. The newest release is {release.Tag}{Published(release)}.";
             }
         }
         catch (UpdateCheckException ex)
@@ -137,6 +194,9 @@ public sealed class AboutViewModel : ViewModelBase
             IsChecking = false;
         }
     }
+
+    private static string Published(ReleaseInfo release) =>
+        string.IsNullOrEmpty(release.Published) ? "" : $" (published {release.Published})";
 
     private static void OpenUrl(string url)
     {

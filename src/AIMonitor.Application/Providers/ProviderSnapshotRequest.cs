@@ -25,11 +25,15 @@ public sealed record ProviderSnapshotRequest
     /// <summary>Providers the user switched off ("Monitor this service"); the refresh skips them entirely.</summary>
     public IReadOnlySet<string> DisabledProviders { get; }
 
+    /// <summary>When set, only this provider is refreshed ("Re-detect" on one connection card).</summary>
+    public string? OnlyProviderId { get; }
+
     public ProviderSnapshotRequest(
         int historyDays = DefaultHistoryDays,
         string? metric = null,
         bool includeHistory = false,
-        IEnumerable<string>? disabledProviders = null)
+        IEnumerable<string>? disabledProviders = null,
+        string? onlyProviderId = null)
     {
         if (historyDays <= 0)
         {
@@ -41,6 +45,7 @@ public sealed record ProviderSnapshotRequest
         Metric = metric ?? string.Empty;
         IncludeHistory = includeHistory;
         DisabledProviders = new HashSet<string>(disabledProviders ?? [], StringComparer.OrdinalIgnoreCase);
+        OnlyProviderId = string.IsNullOrWhiteSpace(onlyProviderId) ? null : onlyProviderId;
     }
 
     // The disabled set is compared by content: record equality would otherwise compare the set by reference.
@@ -49,9 +54,10 @@ public sealed record ProviderSnapshotRequest
         && HistoryDays == other.HistoryDays
         && Metric == other.Metric
         && IncludeHistory == other.IncludeHistory
+        && OnlyProviderId == other.OnlyProviderId
         && DisabledProviders.SetEquals(other.DisabledProviders);
 
-    public override int GetHashCode() => HashCode.Combine(HistoryDays, Metric, IncludeHistory, DisabledProviders.Count);
+    public override int GetHashCode() => HashCode.Combine(HistoryDays, Metric, IncludeHistory, DisabledProviders.Count, OnlyProviderId);
 
     /// <summary>The request a caller sends when it only wants the current quota.</summary>
     public static ProviderSnapshotRequest Default { get; } = new();

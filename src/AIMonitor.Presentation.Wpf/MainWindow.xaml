@@ -46,7 +46,12 @@
             <MenuItem Header="_Settings…" Command="{Binding OpenSettingsCommand}" />
         </MenuItem>
         <MenuItem Header="_About">
-            <MenuItem Header="_About AIMonitor…" InputGestureText="F1" Command="{Binding OpenAboutCommand}" />
+            <MenuItem Header="_Version…" Command="{Binding ShowAboutCommand}" CommandParameter="Version" />
+            <MenuItem Header="_Readme" InputGestureText="F1" Command="{Binding ShowAboutCommand}" CommandParameter="Readme" />
+            <MenuItem Header="_License Agreement" Command="{Binding ShowAboutCommand}" CommandParameter="License" />
+            <MenuItem Header="Third-party _notices" Command="{Binding ShowAboutCommand}" CommandParameter="Notices" />
+            <Separator />
+            <MenuItem Header="About the _developer" Command="{Binding ShowAboutCommand}" CommandParameter="Developer" />
         </MenuItem>
     </Menu>
     <Grid Margin="20,16,20,12">

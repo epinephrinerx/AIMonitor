@@ -8,7 +8,7 @@
              d:DataContext="{d:DesignInstance Type=vm:ConnectionsViewModel}"
              Background="{DynamicResource AppBackgroundBrush}">
 
-    <Grid Margin="24,20,24,20">
+    <Grid Margin="28,24,28,20">
         <Grid.RowDefinitions>
             <!-- Header (Title & Subtitle) -->
             <RowDefinition Height="Auto" />
@@ -66,16 +66,14 @@
                                         Width="38"
                                         Height="38"
                                         CornerRadius="19"
-                                        Background="{DynamicResource CardHoverBrush}"
-                                        BorderBrush="{DynamicResource BorderBrush}"
-                                        BorderThickness="1"
+                                        Background="{Binding BadgeTint}"
                                         VerticalAlignment="Top"
                                         Margin="0,0,14,0">
                                     <TextBlock x:Name="BadgeLetterText"
                                                Text="{Binding Meta.BadgeLetter}"
                                                FontWeight="SemiBold"
                                                FontSize="15"
-                                               Foreground="{DynamicResource AccentBrush}"
+                                               Foreground="{Binding BadgeBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center" />
                                 </Border>
@@ -96,26 +94,12 @@
                                                 Padding="8,2"
                                                 Margin="8,0,0,0"
                                                 VerticalAlignment="Center">
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource TextMutedBrush}" />
-                                                    <Setter Property="Background" Value="#14808080" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding StateWord}" Value="Connected">
-                                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource SeverityNormalBrush}" />
-                                                            <Setter Property="Background" Value="#2010B981" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding StateWord}" Value="Limited">
-                                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource SeverityWarningBrush}" />
-                                                            <Setter Property="Background" Value="#20F59E0B" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding StateWord}" Value="Expired">
-                                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource SeverityCriticalBrush}" />
-                                                            <Setter Property="Background" Value="#20EF4444" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
+                                            <Border.Background>
+                                                <Binding Path="StateTint" />
+                                            </Border.Background>
+                                            <TextElement.Foreground>
+                                                <Binding Path="StateBrush" />
+                                            </TextElement.Foreground>
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <TextBlock x:Name="StateGlyphText"
                                                            Text="{Binding StateGlyph}"

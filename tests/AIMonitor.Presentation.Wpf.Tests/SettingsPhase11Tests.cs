@@ -1,5 +1,8 @@
+using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
+using AIMonitor.Domain;
+using AIMonitor.Presentation.Wpf.Theme;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
 
@@ -107,5 +110,53 @@ public sealed class SettingsPhase11Tests
         using var owned = session;
 
         Assert.False(vm.Providers.Single(p => p.Id == "openai").IsEnabled);
+    }
+
+    [Fact]
+    public async Task RedetectOnOneCard_RefreshesOnlyThatService_AndKeepsTheOthers()
+    {
+        var seen = new List<(string Id, string? Only)>();
+        ProviderClientRegistration Registration(string id) => new(id, new StubClient((request, _) =>
+        {
+            seen.Add((id, request.OnlyProviderId));
+            return Task.FromResult(new ProviderSnapshot(id, configured: true,
+                meters: [new Meter("session", "session", "Session", "5-hour window", 10)]));
+        }));
+
+        await using var coordinator = new LatestRefreshCoordinator(
+            new RefreshProvidersUseCase([Registration("claude"), Registration("openai")]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        store.Release();
+        using var session = new SettingsSession(store, new AppSettings());
+        var vm = new MainWindowViewModel(coordinator, session);
+
+        await vm.RefreshAsync();
+        Assert.Equal(2, vm.LatestSnapshots.Count);
+        seen.Clear();
+
+        await vm.RefreshAsync("openai");
+
+        Assert.Equal([("openai", "openai")], seen);
+        Assert.Equal(2, vm.LatestSnapshots.Count); // claude's last snapshot is kept
+    }
+
+    [Fact]
+    public void ConnectionCard_ColoursFollowTheDetectionState()
+    {
+        var card = new ConnectionCardViewModel(ProviderMeta.Claude);
+        var unknown = ((System.Windows.Media.SolidColorBrush)card.StateBrush).Color;
+
+        card.Update(new DetectionInfo("claude", DetectionState.Connected, "cli", "Claude Code login", "me@example.com"));
+        var connected = ((System.Windows.Media.SolidColorBrush)card.StateBrush).Color;
+
+        Assert.NotEqual(unknown, connected);
+        Assert.Equal(ThemePalette.StatusGood, connected);
+    }
+
+    private sealed class StubClient(Func<ProviderSnapshotRequest, CancellationToken, Task<ProviderSnapshot>> handler)
+        : IProviderQuotaClient
+    {
+        public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken) =>
+            handler(request, cancellationToken);
     }
 }

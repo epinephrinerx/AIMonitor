@@ -138,8 +138,10 @@ public sealed class RefreshProvidersUseCaseTests
     {
         var called = new List<string>();
         var useCase = Create(
-            ("claude", (_, _) => { called.Add("claude"); return Task.FromResult(new ProviderSnapshot("claude", configured: true)); }),
-            ("gemini", (_, _) => { called.Add("gemini"); return Task.FromResult(new ProviderSnapshot("gemini", configured: true)); }));
+            ("claude", (_, _) => { called.Add("claude"); return Task.FromResult(new ProviderSnapshot("claude", configured: true)); }
+        ),
+            ("gemini", (_, _) => { called.Add("gemini"); return Task.FromResult(new ProviderSnapshot("gemini", configured: true)); }
+        ));
 
         var request = new ProviderSnapshotRequest(14, "Total tokens", true, disabledProviders: ["Gemini"]);
         var result = await useCase.ExecuteAsync(1, request, CancellationToken.None);

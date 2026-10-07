@@ -49,11 +49,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenSettingsCommand = new RelayCommand(() => RequestOpenSettings?.Invoke());
         SwitchToWidgetCommand = new RelayCommand(() => RequestSwitchToWidget?.Invoke());
         OpenLogCommand = new RelayCommand(() => RequestOpenLog?.Invoke());
-        OpenAboutCommand = new RelayCommand(() => RequestOpenAbout?.Invoke());
+        // F1 is the Readme in 1.3.3; the About menu names each page.
+        OpenAboutCommand = new RelayCommand(() => RequestOpenAbout?.Invoke(AboutPage.Readme));
+        ShowAboutCommand = new RelayCommand<string>(page =>
+            RequestOpenAbout?.Invoke(Enum.TryParse<AboutPage>(page, out var parsed) ? parsed : AboutPage.Version));
 
         Connections = new ConnectionsViewModel(_settingsSession);
         Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
-        Connections.RedetectRequested += async _ => await RefreshAsync();
+        Connections.RedetectRequested += async id => await RefreshAsync(id);
         Connections.OpenDashboardRequested += () => IsConnectionsPageVisible = false;
 
         ExitCommand = new RelayCommand(() => RequestExit?.Invoke());
@@ -226,6 +229,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand SwitchToWidgetCommand { get; }
     public ICommand OpenLogCommand { get; }
     public ICommand OpenAboutCommand { get; }
+    public ICommand ShowAboutCommand { get; }
     public ICommand ShowConnectionsCommand { get; }
     public ICommand ShowDashboardCommand { get; }
     public ICommand ExitCommand { get; }
@@ -242,7 +246,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public event Action? RequestOpenSettings;
     public event Action? RequestSwitchToWidget;
     public event Action? RequestOpenLog;
-    public event Action? RequestOpenAbout;
+    public event Action<AboutPage>? RequestOpenAbout;
     public event Action<string>? RequestConnect;
     public event Action? RequestExit;
 
@@ -279,7 +283,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private long _requestIdCounter;
 
-    public async Task RefreshAsync()
+    /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
+    public async Task RefreshAsync(string? onlyProviderId = null)
     {
         if (IsRefreshing)
         {
@@ -298,10 +303,24 @@ public sealed class MainWindowViewModel : ViewModelBase
                 historyDays: settings.ChartRangeDays,
                 metric: settings.ChartMetric,
                 includeHistory: true,
-                disabledProviders: settings.Providers.Where(p => !p.Value.Enabled).Select(p => p.Key));
+                disabledProviders: settings.Providers.Where(p => !p.Value.Enabled).Select(p => p.Key),
+                onlyProviderId: onlyProviderId);
             var requestId = Interlocked.Increment(ref _requestIdCounter);
             var result = await _refreshCoordinator.QueueAsync(requestId, req).ConfigureAwait(true);
-            _latestSnapshots = result.Snapshots;
+            // A single-service re-detect returns just that service; keep the others' last snapshots.
+            IReadOnlyDictionary<string, Domain.ProviderSnapshot> snapshots = result.Snapshots;
+            if (onlyProviderId is not null)
+            {
+                var merged = new Dictionary<string, Domain.ProviderSnapshot>(_latestSnapshots, StringComparer.Ordinal);
+                foreach (var (id, snapshot) in result.Snapshots)
+                {
+                    merged[id] = snapshot;
+                }
+
+                snapshots = merged;
+            }
+
+            _latestSnapshots = snapshots;
 
             // Update tab ViewModels
             if (result.Snapshots.TryGetValue("claude", out var claudeSnap)) ClaudeTab.UpdateFromSnapshot(claudeSnap);
@@ -310,7 +329,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             // Update connections page view model with latest snapshot detections.
             // In AIMonitor, re-detect triggers a unified refresh across all providers in a single pass.
-            Connections.Update(result.Snapshots);
+            Connections.Update(snapshots);
 
             // Update tray readings
             var trayReadings = TrayReadings.Build(ProviderTabs, _lastGoodMeters);

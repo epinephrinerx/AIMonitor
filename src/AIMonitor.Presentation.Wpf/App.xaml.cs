@@ -313,12 +313,12 @@ public partial class App : System.Windows.Application
         });
     }
 
-    public void OpenAboutDialog()
+    public void OpenAboutDialog(AboutPage page = AboutPage.Version)
     {
         Dispatcher.Invoke(() =>
         {
             var vm = new AboutViewModel(new GitHubVersionChecker(_httpClient));
-            var dialog = new AboutDialog(vm)
+            var dialog = new AboutDialog(vm, page)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
             };

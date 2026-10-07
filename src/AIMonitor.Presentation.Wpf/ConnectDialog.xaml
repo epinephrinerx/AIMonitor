@@ -285,11 +285,12 @@
                         </Style.Triggers>
                     </Style>
                 </StackPanel.Style>
-                <Button x:Name="CancelButton"
-                        Content="Cancel"
-                        Command="{Binding CancelCommand}"
-                        Padding="16,6"
+                <Button x:Name="SaveButton"
+                        Content="Save"
+                        Command="{Binding SaveCommand}"
+                        Padding="20,6"
                         Margin="0,0,8,0"
+                        FontWeight="SemiBold"
                         Cursor="Hand">
                     <Button.Style>
                         <Style TargetType="Button">
@@ -302,11 +303,10 @@
                         </Style>
                     </Button.Style>
                 </Button>
-                <Button x:Name="SaveButton"
-                        Content="Save"
-                        Command="{Binding SaveCommand}"
-                        Padding="20,6"
-                        FontWeight="SemiBold"
+                <Button x:Name="CancelButton"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Padding="16,6"
                         Cursor="Hand">
                     <Button.Style>
                         <Style TargetType="Button">

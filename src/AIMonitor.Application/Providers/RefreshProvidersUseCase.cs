@@ -32,7 +32,8 @@ public sealed class RefreshProvidersUseCase
         foreach (var provider in _providers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (request.DisabledProviders.Contains(provider.ProviderId))
+            if (request.DisabledProviders.Contains(provider.ProviderId)
+                || (request.OnlyProviderId is not null && request.OnlyProviderId != provider.ProviderId))
             {
                 continue;
             }

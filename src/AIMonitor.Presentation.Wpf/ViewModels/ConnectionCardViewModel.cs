@@ -1,7 +1,9 @@
 namespace AIMonitor.Presentation.Wpf.ViewModels;
 
 using System.Windows.Input;
+using System.Windows.Media;
 using AIMonitor.Domain;
+using AIMonitor.Presentation.Wpf.Theme;
 
 /// <summary>
 /// ViewModel representing a single provider's connection status card on the connections page.
@@ -15,8 +17,42 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     private string _account = "Not signed in";
     private string _sourceLine = "";
     private string _connectButtonText = "Connect...";
+    private readonly int _seriesIndex;
 
     public ProviderMeta Meta { get; }
+
+    /// <summary>Round service badge: the service's categorical hue, tinted behind the initial (1.3.3 <c>_Badge</c>).</summary>
+    public Brush BadgeBrush => Solid(ThemePalette.For(ThemeManager.Instance.IsDark).Series(_seriesIndex), 0xFF);
+
+    public Brush BadgeTint => Solid(ThemePalette.For(ThemeManager.Instance.IsDark).Series(_seriesIndex), 0x29);
+
+    /// <summary>State chip colour: green connected, yellow limited, orange expired, muted ink when absent.</summary>
+    public Brush StateBrush => Solid(StateColour(), 0xFF);
+
+    public Brush StateTint => Solid(StateColour(), 0x24);
+
+    private System.Windows.Media.Color StateColour() => _detection?.State switch
+    {
+        DetectionState.Connected => ThemePalette.StatusGood,
+        DetectionState.Limited => ThemePalette.StatusWarning,
+        DetectionState.Expired => ThemePalette.StatusSerious,
+        _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
+    };
+
+    private static SolidColorBrush Solid(System.Windows.Media.Color colour, byte alpha)
+    {
+        var brush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(alpha, colour.R, colour.G, colour.B));
+        brush.Freeze();
+        return brush;
+    }
+
+    private void RefreshColours()
+    {
+        OnPropertyChanged(nameof(BadgeBrush));
+        OnPropertyChanged(nameof(BadgeTint));
+        OnPropertyChanged(nameof(StateBrush));
+        OnPropertyChanged(nameof(StateTint));
+    }
 
     public DetectionInfo? Detection
     {
@@ -63,6 +99,8 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     public ConnectionCardViewModel(ProviderMeta meta)
     {
         Meta = meta ?? throw new ArgumentNullException(nameof(meta));
+        _seriesIndex = Math.Max(0, ProviderMeta.All.ToList().FindIndex(m => m.Id == meta.Id));
+        ThemeManager.Instance.ThemeChanged += () => System.Windows.Application.Current?.Dispatcher.InvokeAsync(RefreshColours);
 
         ConnectCommand = new RelayCommand(() => ConnectRequested?.Invoke(Meta.Id));
         RedetectCommand = new RelayCommand(() => RedetectRequested?.Invoke(Meta.Id));
@@ -77,6 +115,7 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     public void Update(DetectionInfo? detection)
     {
         Detection = detection;
+        RefreshColours();
 
         if (detection is null)
         {
