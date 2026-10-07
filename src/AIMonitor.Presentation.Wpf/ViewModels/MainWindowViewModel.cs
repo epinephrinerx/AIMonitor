@@ -11,6 +11,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly SettingsSession _settingsSession;
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
+    private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
 
     private bool _isRefreshing;
     private bool _pendingRefresh;
@@ -259,6 +260,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// The window was just parked in the tray. The first time ever, say so with a balloon, so closing the window
+    /// does not look like the app quit (1.3.3 <c>mark_once("trayHint")</c>).
+    /// </summary>
+    public void NotifyParkedInTray()
+    {
+        if (_settingsSession.Current.TrayHintShown || _traySink is not ITrayNotifier notifier)
+        {
+            return;
+        }
+
+        notifier.ShowBalloon(
+            "Still watching",
+            "AI Usage Monitor is in the notification area. Double-click its icon to reopen it, or use Exit to quit.");
+        _ = _settingsSession.UpdateAsync(s => s with { TrayHintShown = true });
+    }
+
     private long _requestIdCounter;
 
     public async Task RefreshAsync()
@@ -294,35 +312,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             Connections.Update(result.Snapshots);
 
             // Update tray readings
-            var trayReadings = new List<TrayReading>();
-            foreach (var tab in ProviderTabs)
-            {
-                var highestMeter = tab.Meters.MaxBy(m => m.Value);
-                var pct = highestMeter?.Value ?? 0.0;
-                var sev = highestMeter?.Severity ?? Domain.Severity.Normal;
-                var detail = highestMeter?.Title ?? tab.Status;
-                var code = tab.ProviderId switch
-                {
-                    "claude" => "CL",
-                    "openai" => "OA",
-                    "gemini" => "GE",
-                    _ => "AI"
-                };
-
-                trayReadings.Add(new TrayReading(
-                    tab.ProviderId,
-                    tab.DisplayName,
-                    code,
-                    pct,
-                    sev,
-                    detail,
-                    tab.Status is "Connected" or "Limited"));
-            }
-
-            if (trayReadings.Any(r => r.HasData))
-            {
-                _latestTrayReadings = trayReadings;
-            }
+            var trayReadings = TrayReadings.Build(ProviderTabs, _lastGoodMeters);
+            _latestTrayReadings = trayReadings;
 
             _traySink?.UpdateReadings(trayReadings);
 

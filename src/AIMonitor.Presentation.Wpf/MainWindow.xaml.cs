@@ -90,6 +90,7 @@ public partial class MainWindow : Window
             e.Cancel = true;
             Hide();
             SaveGeometry();
+            (DataContext as MainWindowViewModel)?.NotifyParkedInTray();
             return;
         }
 

@@ -12,6 +12,9 @@ public sealed record AppSettings
 
     public bool ShowTrayIcon { get; init; } = true;
 
+    /// <summary>Set once the "Still watching" balloon has been shown, so it appears only the first time the window parks in the tray.</summary>
+    public bool TrayHintShown { get; init; }
+
     public string Theme { get; init; } = "system";
 
     public int DashboardWidth { get; init; } = 1120;

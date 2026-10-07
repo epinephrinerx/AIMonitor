@@ -25,6 +25,15 @@ public sealed class MeterDisplayItem : ViewModelBase
 
     /// <summary>Widget wording: "resets in 2h 5m  ·  17:50", "no reset scheduled", "resetting now".</summary>
     public string ResetCompact { get; init; } = "";
+
+    /// <summary>False when the service exposes no denominator ("--"); the tray then shows <see cref="Detail"/>.</summary>
+    public bool HasPercent { get; init; }
+
+    public string Detail { get; init; } = "";
+
+    public DateTimeOffset? ResetsAt { get; init; }
+
+    public string? LockedReason { get; init; }
 }
 
 /// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
@@ -328,6 +337,10 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 SeverityText = $"{glyph} {word}",
                 ResetText = FormatResetText(m, reference),
                 ResetCompact = FormatResetCompact(m, reference),
+                HasPercent = m.Percent.HasValue,
+                Detail = m.Detail,
+                ResetsAt = m.ResetsAt,
+                LockedReason = m.LockedReason,
                 IsFiveHour = m.Percent.HasValue && (m.Kind == "session"
                     || string.Equals(m.Subtitle.Trim(), "5-hour window", StringComparison.OrdinalIgnoreCase)),
             });

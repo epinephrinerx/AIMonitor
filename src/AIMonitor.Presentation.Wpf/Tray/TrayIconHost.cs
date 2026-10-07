@@ -1,149 +1,159 @@
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using AIMonitor.Domain;
-using Application = System.Windows.Application;
+using AIMonitor.Presentation.Wpf.Theme;
 
 namespace AIMonitor.Presentation.Wpf.Tray;
 
 /// <summary>
-/// Manages the system tray icon using System.Windows.Forms.NotifyIcon directly.
-/// Satisfies PAR-022, PAR-025, and ADR-0001:
-/// - Generates dynamic tray icon based on short-window usage with severity colors
-/// - Rotates active providers every 2 seconds
-/// - Preserves last good reading on refresh failure
-/// - Provides live context menu and tooltip
+/// Manages the system tray icon using System.Windows.Forms.NotifyIcon directly. Follows 1.3.3 <c>tray.py</c>
+/// (PAR-022, PAR-025, ADR-0001):
+/// - the icon is a tile filled to the five-hour window's percentage, with the number across it
+/// - one icon rotates every two seconds over services that have such a reading, and stays still for one
+/// - the last good reading survives a failed refresh (marked stale)
+/// - the menu lists every quota window per service with a live countdown, rebuilt each time it opens
+/// - the tooltip names the service, the window, its severity and when it resets
 /// </summary>
-public sealed class TrayIconHost : ITrayHost
+public sealed class TrayIconHost : ITrayHost, ITrayNotifier
 {
+    private const int RotateMilliseconds = 2000;
+
     private readonly NotifyIcon _notifyIcon;
     private readonly System.Windows.Forms.Timer _rotationTimer;
-    private readonly List<TrayReading> _readings = [];
-    private int _currentReadingIndex;
+    private readonly Func<DateTimeOffset> _clock;
+    private List<TrayReading> _all = [];
+    private List<TrayReading> _rotation = [];
+    private int _currentIndex;
     private IntPtr _currentHicon = IntPtr.Zero;
     private ContextMenuStrip? _contextMenu;
     private bool _disposed;
 
     public event Action? OpenDashboardRequested;
     public event Action? OpenWidgetRequested;
-    public event Action? OpenLogRequested;
     public event Action? RefreshRequested;
     public event Action? OpenSettingsRequested;
-    public event Action? OpenAboutRequested;
     public event Action? ExitRequested;
 
-    public TrayIconHost()
+    public TrayIconHost(Func<DateTimeOffset>? clock = null)
     {
-        _notifyIcon = new NotifyIcon
-        {
-            Visible = true,
-            Text = "AIMonitor 2.0"
-        };
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _notifyIcon = new NotifyIcon { Visible = true, Text = "AI Usage Monitor" };
 
+        // Double-click restores the full window; right-click opens the menu (the platform convention).
         _notifyIcon.DoubleClick += (s, e) => OpenDashboardRequested?.Invoke();
 
         _contextMenu = new ContextMenuStrip();
-        _contextMenu.Items.Add("Open Dashboard", null, (s, e) => OpenDashboardRequested?.Invoke());
-        _contextMenu.Items.Add("Open Widget", null, (s, e) => OpenWidgetRequested?.Invoke());
-        _contextMenu.Items.Add("Usage Log...", null, (s, e) => OpenLogRequested?.Invoke());
-        _contextMenu.Items.Add(new ToolStripSeparator());
-        _contextMenu.Items.Add("Refresh Now", null, (s, e) => RefreshRequested?.Invoke());
-        _contextMenu.Items.Add("Settings...", null, (s, e) => OpenSettingsRequested?.Invoke());
-        _contextMenu.Items.Add("About...", null, (s, e) => OpenAboutRequested?.Invoke());
-        _contextMenu.Items.Add(new ToolStripSeparator());
-        _contextMenu.Items.Add("Exit", null, (s, e) => ExitRequested?.Invoke());
+        // Rebuilt every time it opens: the quota rows carry live countdowns.
+        _contextMenu.Opening += (s, e) => RebuildMenu();
+        RebuildMenu();
         _notifyIcon.ContextMenuStrip = _contextMenu;
 
-        // 2-second rotation timer (PAR-022)
-        _rotationTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-        _rotationTimer.Tick += (s, e) => RotateReading();
-        _rotationTimer.Start();
+        _rotationTimer = new System.Windows.Forms.Timer { Interval = RotateMilliseconds };
+        _rotationTimer.Tick += (s, e) => Advance();
 
-        UpdateIcon(0, Severity.Normal, "AI");
+        Render();
     }
 
     public void UpdateReadings(IEnumerable<TrayReading> readings)
     {
         if (_disposed) return;
 
-        var list = readings.Where(r => r.HasData).ToList();
-        if (list.Count > 0)
+        _all = readings.ToList();
+        var order = _all.Where(r => r.IconMeter is not null).ToList();
+        if (!order.Select(r => r.ProviderId).SequenceEqual(_rotation.Select(r => r.ProviderId)))
         {
-            _readings.Clear();
-            _readings.AddRange(list);
-            _currentReadingIndex %= _readings.Count;
-            ApplyCurrentReading();
+            _currentIndex = 0;
         }
-    }
 
-    private void RotateReading()
-    {
-        if (_readings.Count <= 1) return;
-        _currentReadingIndex = (_currentReadingIndex + 1) % _readings.Count;
-        ApplyCurrentReading();
-    }
+        _rotation = order;
 
-    private void ApplyCurrentReading()
-    {
-        if (_readings.Count == 0)
+        // A single service has nothing to rotate through; leave it still.
+        if (_rotation.Count > 1)
         {
-            UpdateIcon(0, Severity.Normal, "AI");
-            SetTooltip("AIMonitor 2.0");
+            _rotationTimer.Start();
+        }
+        else
+        {
+            _rotationTimer.Stop();
+        }
+
+        Render();
+    }
+
+    public void ShowBalloon(string title, string message)
+    {
+        if (_disposed || !_notifyIcon.Visible) return;
+        _notifyIcon.ShowBalloonTip(4000, title, message, ToolTipIcon.Info);
+    }
+
+    private void Advance()
+    {
+        if (_rotation.Count <= 1) return;
+        _currentIndex = (_currentIndex + 1) % _rotation.Count;
+        Render();
+    }
+
+    private void Render()
+    {
+        var palette = ThemePalette.For(ThemeManager.Instance.IsDark);
+        if (_rotation.Count == 0)
+        {
+            SetIcon(null, Severity.Normal, palette);
+            SetTooltip("AI Usage Monitor — no quota data yet");
             return;
         }
 
-        var reading = _readings[_currentReadingIndex];
-        UpdateIcon(reading.Percentage, reading.Severity, reading.ProviderCode);
-
-        var tooltip = $"AIMonitor: {reading.ProviderName} {reading.Percentage:F0}% ({reading.Detail})";
-        SetTooltip(tooltip);
+        _currentIndex %= _rotation.Count;
+        var reading = _rotation[_currentIndex];
+        var meter = reading.IconMeter!;
+        SetIcon(meter.Value, meter.Severity, palette);
+        SetTooltip(TrayText.Tooltip(reading, _currentIndex, _rotation.Count, _clock(), TimeZoneInfo.Local));
     }
 
-    private void SetTooltip(string text)
+    /// <summary>Resume, Show Widget, every quota window per service, Refresh now, Setting, Exit.</summary>
+    private void RebuildMenu()
     {
-        // NotifyIcon.Text max length is 63 chars (or 127 on Win10/11)
-        var maxLen = 63;
-        _notifyIcon.Text = text.Length > maxLen ? text[..maxLen] : text;
+        if (_contextMenu is null) return;
+        _contextMenu.Items.Clear();
+        _contextMenu.Items.Add("Resume", null, (s, e) => OpenDashboardRequested?.Invoke());
+        _contextMenu.Items.Add("Show Widget", null, (s, e) => OpenWidgetRequested?.Invoke());
+        _contextMenu.Items.Add(new ToolStripSeparator());
+
+        var now = _clock();
+        var added = false;
+        foreach (var reading in _all.Where(r => r.Windows.Count > 0))
+        {
+            _contextMenu.Items.Add(new ToolStripMenuItem(TrayText.Header(reading)) { Enabled = false });
+            foreach (var window in reading.Windows)
+            {
+                _contextMenu.Items.Add(new ToolStripMenuItem("      " + TrayText.QuotaLine(window, now, TimeZoneInfo.Local)) { Enabled = false });
+                added = true;
+            }
+
+            _contextMenu.Items.Add(new ToolStripSeparator());
+        }
+
+        if (!added)
+        {
+            _contextMenu.Items.Add(new ToolStripMenuItem("No quota data yet") { Enabled = false });
+        }
+
+        _contextMenu.Items.Add("Refresh now", null, (s, e) => RefreshRequested?.Invoke());
+        _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add("Setting", null, (s, e) => OpenSettingsRequested?.Invoke());
+        _contextMenu.Items.Add("Exit", null, (s, e) => ExitRequested?.Invoke());
     }
 
-    private void UpdateIcon(double percentage, Severity severity, string code)
+    private void SetTooltip(string text) =>
+        _notifyIcon.Text = text.Length > TrayText.MaxTooltipLength ? TrayText.Fit([text]) : text;
+
+    private void SetIcon(double? percent, Severity severity, ThemePalette palette)
     {
         try
         {
-            const int size = 16;
-            using var bitmap = new Bitmap(size, size);
-            using (var g = Graphics.FromImage(bitmap))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Color.Transparent);
-
-                // Outline track
-                using var trackPen = new Pen(Color.FromArgb(80, 120, 120, 120), 2f);
-                g.DrawEllipse(trackPen, 1, 1, 14, 14);
-
-                // Progress arc
-                var color = severity switch
-                {
-                    Severity.Critical => Color.FromArgb(239, 68, 68),  // Red (90%+)
-                    Severity.VeryHigh or Severity.High => Color.FromArgb(245, 158, 11),  // Amber (75%+)
-                    _ => Color.FromArgb(16, 185, 129)                 // Green
-                };
-
-                var sweep = (float)(Math.Clamp(percentage, 0.0, 100.0) / 100.0 * 360.0);
-                if (sweep > 1f)
-                {
-                    using var progressPen = new Pen(color, 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-                    g.DrawArc(progressPen, 1, 1, 14, 14, -90, sweep);
-                }
-
-                // Inner glyph / letter
-                using var font = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Pixel);
-                using var textBrush = new SolidBrush(Color.White);
-                var textSize = g.MeasureString(code, font);
-                g.DrawString(code, font, textBrush, (size - textSize.Width) / 2f, (size - textSize.Height) / 2f + 0.5f);
-            }
-
+            var size = Math.Max(16, SystemInformation.SmallIconSize.Width);
+            using var bitmap = TrayIconRenderer.Render(percent, severity, palette, size);
             var oldHicon = _currentHicon;
             _currentHicon = bitmap.GetHicon();
 
@@ -189,12 +199,3 @@ public sealed class TrayIconHost : ITrayHost
         }
     }
 }
-
-public sealed record TrayReading(
-    string ProviderId,
-    string ProviderName,
-    string ProviderCode,
-    double Percentage,
-    Severity Severity,
-    string Detail,
-    bool HasData = true);

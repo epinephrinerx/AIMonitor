@@ -192,13 +192,11 @@ public partial class App : System.Windows.Application
         var host = new TrayIconHost();
         host.OpenDashboardRequested += SwitchToDashboardMode;
         host.OpenWidgetRequested += SwitchToWidgetMode;
-        host.OpenLogRequested += OpenUsageLogDialog;
         host.RefreshRequested += async () =>
         {
             if (_mainViewModel is not null) await _mainViewModel.RefreshAsync();
         };
         host.OpenSettingsRequested += OpenSettingsDialog;
-        host.OpenAboutRequested += OpenAboutDialog;
         host.ExitRequested += ShutdownApp;
         return host;
     }
