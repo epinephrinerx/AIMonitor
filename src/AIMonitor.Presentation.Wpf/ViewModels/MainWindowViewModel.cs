@@ -51,6 +51,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenLogCommand = new RelayCommand(() => RequestOpenLog?.Invoke());
         // F1 is the Readme in 1.3.3; the About menu names each page.
         OpenAboutCommand = new RelayCommand(() => RequestOpenAbout?.Invoke(AboutPage.Readme));
+        CheckForUpdatesCommand = new RelayCommand(() => RequestCheckUpdates?.Invoke());
         ShowAboutCommand = new RelayCommand<string>(page =>
             RequestOpenAbout?.Invoke(Enum.TryParse<AboutPage>(page, out var parsed) ? parsed : AboutPage.Version));
 
@@ -230,6 +231,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand OpenLogCommand { get; }
     public ICommand OpenAboutCommand { get; }
     public ICommand ShowAboutCommand { get; }
+    public ICommand CheckForUpdatesCommand { get; }
     public ICommand ShowConnectionsCommand { get; }
     public ICommand ShowDashboardCommand { get; }
     public ICommand ExitCommand { get; }
@@ -247,6 +249,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public event Action? RequestSwitchToWidget;
     public event Action? RequestOpenLog;
     public event Action<AboutPage>? RequestOpenAbout;
+    public event Action? RequestCheckUpdates;
     public event Action<string>? RequestConnect;
     public event Action? RequestExit;
 

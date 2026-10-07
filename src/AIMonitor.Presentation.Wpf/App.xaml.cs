@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using AIMonitor.Application.Providers;
@@ -14,6 +16,7 @@ using AIMonitor.Infrastructure.Time;
 using AIMonitor.Infrastructure.Windows;
 using AIMonitor.Presentation.Wpf.Theme;
 using AIMonitor.Presentation.Wpf.Tray;
+using AIMonitor.Presentation.Wpf.Updates;
 using AIMonitor.Presentation.Wpf.ViewModels;
 
 namespace AIMonitor.Presentation.Wpf;
@@ -39,6 +42,7 @@ public partial class App : System.Windows.Application
     private WindowsStartupRegistrar? _startupRegistrar;
     private LiveSettingsApplier? _liveSettingsApplier;
     private DispatcherTimer? _refreshTimer;
+    private UpdateCoordinator? _updateCoordinator;
 
     public ProviderConnectionStore? ConnectionStore => _connectionStore;
 
@@ -135,6 +139,7 @@ public partial class App : System.Windows.Application
         _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
+        _mainViewModel.RequestCheckUpdates += () => _ = _updateCoordinator?.CheckAsync(interactive: true);
         _mainViewModel.RequestExit += ShutdownApp;
         _mainViewModel.RequestConnect += OpenConnectDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
@@ -174,6 +179,9 @@ public partial class App : System.Windows.Application
             SwitchToDashboardMode);
         _liveSettingsApplier.Apply(_settingsSession.Current);
 
+        // 7b. Updates: asked about on every launch and from About > Check for updates
+        _updateCoordinator = CreateUpdateCoordinator();
+
         // 8. Initial Window
         var startMinimizedRequested = e.Args.Any(a => a is "--minimized" or "--tray" or "-m");
         if (!TrayPolicy.ShouldStartHidden(_settingsSession.Current, startMinimizedRequested))
@@ -183,8 +191,34 @@ public partial class App : System.Windows.Application
 
         // Initial background fetch
         _ = _mainViewModel.RefreshAsync();
+        _ = _updateCoordinator.CheckAsync(interactive: false);
 
         _settingsSession.Changed += OnSettingsChanged;
+    }
+
+    private UpdateCoordinator CreateUpdateCoordinator()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        var installed = version is null ? "2.0.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+        return new UpdateCoordinator(
+            new GitHubVersionChecker(_httpClient),
+            new UpdateDownloader(_httpClient),
+            new WpfUpdateUi(() => _mainWindow?.IsVisible == true ? _mainWindow : null),
+            installed,
+            path =>
+            {
+                try
+                {
+                    // The installer is a per-user Inno Setup wizard; it closes this app itself if still open.
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            },
+            ShutdownApp);
     }
 
     private ITrayHost CreateTrayHost()
@@ -318,6 +352,7 @@ public partial class App : System.Windows.Application
         Dispatcher.Invoke(() =>
         {
             var vm = new AboutViewModel(new GitHubVersionChecker(_httpClient));
+            vm.RequestInstall = release => _ = _updateCoordinator?.OfferAsync(release);
             var dialog = new AboutDialog(vm, page)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null

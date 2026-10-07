@@ -17,7 +17,7 @@ public enum AboutPage
 
 public sealed class AboutViewModel : ViewModelBase
 {
-    private const string UpdateNote = "Checking for updates is a read-only request to GitHub. Nothing is downloaded or installed.";
+    private const string UpdateNote = "Checking for updates is a read-only request to GitHub. Nothing is downloaded until you agree.";
     private const string ReleasesUrl = "https://github.com/epinephrinerx/AIMonitor/releases";
 
     private readonly IVersionChecker _versionChecker;
@@ -35,7 +35,16 @@ public sealed class AboutViewModel : ViewModelBase
 
         OpenProjectUrlCommand = new RelayCommand(() => OpenUrl(ProjectUrl));
         OpenReleaseUrlCommand = new RelayCommand(() =>
-            OpenUrl(_latestRelease is { Url.Length: > 0 } release ? release.Url : ReleasesUrl));
+        {
+            // With an update found, the button installs it from the release; otherwise it opens the page.
+            if (_isUpdateAvailable && _latestRelease is not null && RequestInstall is not null)
+            {
+                RequestInstall(_latestRelease);
+                return;
+            }
+
+            OpenUrl(_latestRelease is { Url.Length: > 0 } release ? release.Url : ReleasesUrl);
+        });
         CheckUpdatesCommand = new RelayCommand(async () => await CheckUpdatesAsync(), () => !_isChecking);
     }
 
@@ -153,6 +162,9 @@ public sealed class AboutViewModel : ViewModelBase
         get => _latestRelease;
         set => SetProperty(ref _latestRelease, value);
     }
+
+    /// <summary>Raised by "Get the update"; the host downloads and installs the release.</summary>
+    public Action<ReleaseInfo>? RequestInstall { get; set; }
 
     public ICommand OpenProjectUrlCommand { get; }
     public ICommand OpenReleaseUrlCommand { get; }

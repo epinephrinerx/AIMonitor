@@ -36,6 +36,20 @@ public class AboutViewModelTests
     }
 
     [Fact]
+    public async Task GetTheUpdate_HandsTheReleaseToTheInstaller_InsteadOfOpeningTheWebPage()
+    {
+        var release = new ReleaseInfo("v2.5.0", "v2.5.0", "https://example.com/release/2.5.0", "", true);
+        var vm = new AboutViewModel(new FakeVersionChecker(release));
+        ReleaseInfo? requested = null;
+        vm.RequestInstall = r => requested = r;
+        await vm.CheckUpdatesAsync();
+
+        vm.OpenReleaseUrlCommand.Execute(null);
+
+        Assert.Same(release, requested);
+    }
+
+    [Fact]
     public async Task CheckUpdatesAsync_WhenNotNewer_SetsUpdateAvailableFalse()
     {
         var release = new ReleaseInfo("v2.0.0", "v2.0.0", "https://example.com", "2026-10-01", false);

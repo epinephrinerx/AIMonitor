@@ -9,7 +9,14 @@ public sealed record ReleaseInfo(
     string Name,
     string Url,
     string Published,
-    bool IsNewer);
+    bool IsNewer,
+    string AssetName = "",
+    string AssetUrl = "",
+    long AssetSize = 0)
+{
+    /// <summary>True when the release carries an installer the app can fetch itself.</summary>
+    public bool HasInstaller => AssetUrl.Length > 0;
+}
 
 public class UpdateCheckException : Exception
 {
@@ -91,12 +98,43 @@ public sealed partial class GitHubVersionChecker : IVersionChecker
             if (published.Length >= 10) published = published[..10];
 
             var newer = IsNewer(tag, installedVersion);
-            return new ReleaseInfo(tag, name, htmlUrl, published, newer);
+            var (assetName, assetUrl, assetSize) = PickInstaller(root);
+            return new ReleaseInfo(tag, name, htmlUrl, published, newer, assetName, assetUrl, assetSize);
         }
         catch (JsonException ex)
         {
             throw new UpdateCheckException("Could not read GitHub's answer.", ex);
         }
+    }
+
+    /// <summary>The installer asset of a release: the *Setup*.exe, else any .exe.</summary>
+    private static (string Name, string Url, long Size) PickInstaller(JsonElement release)
+    {
+        if (!release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+        {
+            return ("", "", 0);
+        }
+
+        (string Name, string Url, long Size)? fallback = null;
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() ?? "" : "";
+            var size = asset.TryGetProperty("size", out var z) && z.TryGetInt64(out var parsed) ? parsed : 0;
+            if (url.Length == 0 || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (name.Contains("Setup", StringComparison.OrdinalIgnoreCase))
+            {
+                return (name, url, size);
+            }
+
+            fallback ??= (name, url, size);
+        }
+
+        return fallback ?? ("", "", 0);
     }
 
     private async Task<ReleaseInfo> CheckLatestTagAsync(string tagsUrl, string installedVersion, CancellationToken cancellationToken)

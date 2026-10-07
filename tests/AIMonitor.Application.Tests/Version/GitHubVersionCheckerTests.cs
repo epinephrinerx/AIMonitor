@@ -56,6 +56,38 @@ public class GitHubVersionCheckerTests
     }
 
     [Fact]
+    public async Task CheckLatestAsync_PicksTheSetupExeAsTheInstallerAsset()
+    {
+        var json = """
+        {
+            "tag_name": "v2.1.0",
+            "assets": [
+                { "name": "notes.txt", "browser_download_url": "https://github.com/x/notes.txt", "size": 10 },
+                { "name": "AIUsageMonitor2-Setup-2.1.0.exe", "browser_download_url": "https://github.com/x/Setup.exe", "size": 4096 }
+            ]
+        }
+        """;
+        using var client = new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, json));
+
+        var release = await new GitHubVersionChecker(client).CheckLatestAsync("2.0.0");
+
+        Assert.True(release.HasInstaller);
+        Assert.Equal("AIUsageMonitor2-Setup-2.1.0.exe", release.AssetName);
+        Assert.Equal("https://github.com/x/Setup.exe", release.AssetUrl);
+        Assert.Equal(4096, release.AssetSize);
+    }
+
+    [Fact]
+    public async Task CheckLatestAsync_WithoutAssets_HasNoInstaller()
+    {
+        using var client = new HttpClient(new MockHttpMessageHandler(HttpStatusCode.OK, """{ "tag_name": "v2.1.0" }"""));
+
+        var release = await new GitHubVersionChecker(client).CheckLatestAsync("2.0.0");
+
+        Assert.False(release.HasInstaller);
+    }
+
+    [Fact]
     public async Task CheckLatestAsync_ReleaseEndpoint404_FallsBackToTags()
     {
         var tagsJson = """

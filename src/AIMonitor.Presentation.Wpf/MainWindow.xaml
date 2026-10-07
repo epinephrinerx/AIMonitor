@@ -46,6 +46,7 @@
             <MenuItem Header="_Settings…" Command="{Binding OpenSettingsCommand}" />
         </MenuItem>
         <MenuItem Header="_About">
+            <MenuItem Header="Check for _updates…" Command="{Binding CheckForUpdatesCommand}" />
             <MenuItem Header="_Version…" Command="{Binding ShowAboutCommand}" CommandParameter="Version" />
             <MenuItem Header="_Readme" InputGestureText="F1" Command="{Binding ShowAboutCommand}" CommandParameter="Readme" />
             <MenuItem Header="_License Agreement" Command="{Binding ShowAboutCommand}" CommandParameter="License" />
