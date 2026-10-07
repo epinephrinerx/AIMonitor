@@ -94,6 +94,7 @@ public partial class App : System.Windows.Application
         _settingsSession = await SettingsSession.CreateAsync(_settingsStore);
 
         // 3. Theme Application (PAR-028)
+        TitleBarTheme.Install(ThemeManager.Instance);
         ThemeManager.Instance.ApplyTheme(_settingsSession.Current.Theme);
 
         // 4. Provider Clients & Refresh Orchestration (PAR-001, PAR-002, PAR-003, PAR-004, PAR-029)

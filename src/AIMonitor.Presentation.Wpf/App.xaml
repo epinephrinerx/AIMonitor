@@ -11,8 +11,105 @@
         <Style TargetType="ComboBoxItem">
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
+        <!-- The stock menu templates paint with SystemColors (white popup), which swallows the themed white text in
+             the dark theme; these templates take every colour from the theme brushes instead. -->
         <Style TargetType="MenuItem">
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Grid SnapsToDevicePixels="True">
+                            <Border x:Name="Root" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition x:Name="CheckColumn" Width="22" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition x:Name="GestureColumn" Width="Auto" />
+                                        <ColumnDefinition x:Name="ArrowColumn" Width="18" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="Check" Text="✓" Visibility="Hidden" HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}" />
+                                    <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                                      VerticalAlignment="Center" />
+                                    <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}"
+                                               Margin="28,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <Path x:Name="Arrow" Grid.Column="3" Data="M0,0 L4,4 L0,8 Z" Visibility="Collapsed"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Fill="{TemplateBinding Foreground}" />
+                                </Grid>
+                            </Border>
+                            <Popup x:Name="PART_Popup" Placement="Right" IsOpen="{TemplateBinding IsSubmenuOpen}"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BaselineBrush}"
+                                        BorderThickness="1" Padding="2" Margin="0,0,6,6">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="6" ShadowDepth="2" Opacity="0.35" />
+                                    </Border.Effect>
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Role" Value="TopLevelHeader">
+                                <Setter TargetName="Root" Property="Padding" Value="8,4" />
+                                <Setter TargetName="CheckColumn" Property="Width" Value="0" />
+                                <Setter TargetName="GestureColumn" Property="Width" Value="0" />
+                                <Setter TargetName="ArrowColumn" Property="Width" Value="0" />
+                                <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="TopLevelItem">
+                                <Setter TargetName="Root" Property="Padding" Value="8,4" />
+                                <Setter TargetName="CheckColumn" Property="Width" Value="0" />
+                                <Setter TargetName="GestureColumn" Property="Width" Value="0" />
+                                <Setter TargetName="ArrowColumn" Property="Width" Value="0" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="Root" Property="Padding" Value="4,5" />
+                                <Setter TargetName="Arrow" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuItem">
+                                <Setter TargetName="Root" Property="Padding" Value="4,5" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource TrackBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSubmenuOpen" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource TrackBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Margin="26,3,4,3" Background="{DynamicResource BaselineBrush}" SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ContextMenu">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BaselineBrush}"
+                                BorderThickness="1" Padding="2">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="PasswordBox">
             <Setter Property="VerticalContentAlignment" Value="Center" />
