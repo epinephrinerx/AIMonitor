@@ -11,3 +11,6 @@ obj/
 ## Build artifacts
 artifacts/
 publish/
+
+# Installer output (attached to GitHub releases, not committed)
+installer_out/
