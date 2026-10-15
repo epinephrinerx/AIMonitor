@@ -227,6 +227,9 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Supplementary details (R-011) -->
+                <local:SupplementaryDetailsView x:Name="SupplementaryDetails" DataContext="{Binding SelectedTab}" Margin="0,0,0,12" />
+
                 <!-- Stat tiles -->
                 <Border x:Name="StatsRow" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="10" Padding="16,12" Margin="0,0,0,12">
@@ -249,8 +252,8 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="0,0,16,0">
-                                    <TextBlock Text="{Binding Label}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" />
-                                    <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimaryBrush}" />
                                     <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" />
                                 </StackPanel>
                             </DataTemplate>

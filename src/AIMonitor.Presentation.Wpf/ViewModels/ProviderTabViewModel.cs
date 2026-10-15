@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows.Media;
 using AIMonitor.Domain;
 using Brush = System.Windows.Media.Brush;
@@ -60,6 +61,8 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _accountInfo = "";
     private string _errorMessage = "";
     private IReadOnlyList<StatTile> _statTiles = [];
+    private SupplementaryDetailsViewModel? _supplementary;
+    private bool _showSupplementary;
     private string _tabTitle;
     private string _accountLabel = "";
     private bool _showSetupCard;
@@ -93,6 +96,42 @@ public sealed class ProviderTabViewModel : ViewModelBase
         get => _statTiles;
         private set => SetProperty(ref _statTiles, value);
     }
+
+    public SupplementaryDetailsViewModel? Supplementary
+    {
+        get => _supplementary;
+        private set
+        {
+            if (SetProperty(ref _supplementary, value))
+            {
+                OnPropertyChanged(nameof(SupplementaryRows));
+                OnPropertyChanged(nameof(ActivityPills));
+                OnPropertyChanged(nameof(ResetBadge));
+                OnPropertyChanged(nameof(ResetSummary));
+                OnPropertyChanged(nameof(ResetDetails));
+                OnPropertyChanged(nameof(ResetTitle));
+                OnPropertyChanged(nameof(HasSupplementaryRows));
+                OnPropertyChanged(nameof(HasSupplementaryActivity));
+                OnPropertyChanged(nameof(ActivityTitle));
+            }
+        }
+    }
+
+    public bool ShowSupplementary
+    {
+        get => _showSupplementary;
+        private set => SetProperty(ref _showSupplementary, value);
+    }
+
+    public IReadOnlyList<SupplementaryRowViewModel> SupplementaryRows => _supplementary?.Rows ?? [];
+    public IReadOnlyList<SupplementaryPillViewModel> ActivityPills => _supplementary?.ActivityPills ?? [];
+    public string ResetBadge => _supplementary?.ResetBadge ?? "";
+    public string ResetSummary => _supplementary?.ResetSummary ?? "";
+    public string ResetDetails => _supplementary?.ResetDetails ?? "";
+    public string ResetTitle => _supplementary?.ResetTitle ?? "Rate Limit Resets";
+    public bool HasSupplementaryRows => _supplementary?.HasRows ?? false;
+    public bool HasSupplementaryActivity => _supplementary?.HasActivity ?? false;
+    public string ActivityTitle => _supplementary?.ActivityTitle ?? "Activity";
 
     /// <summary>True when the service is not set up and has nothing to show yet.</summary>
     public bool ShowSetupCard
@@ -382,13 +421,270 @@ public sealed class ProviderTabViewModel : ViewModelBase
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
-        StatTiles = snapshot.Stats.Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
+
+        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
+        var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
+
+        if (isClaude || isOpenAi)
+        {
+            ShowSupplementary = configuredNow || snapshot.Stats.Any(IsSupplementaryStat);
+            var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
+            Supplementary = BuildSupplementary(snapshot, isClaude, isOpenAi);
+            Supplementary.IsResetDetailsExpanded = wasExpanded;
+        }
+        else
+        {
+            ShowSupplementary = false;
+            Supplementary = null;
+        }
+
+        StatTiles = snapshot.Stats.Where(s => !ShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
 
         // Stats summary
         if (snapshot.Stats.Count > 0)
         {
             StatsSummary = string.Join("  |  ", snapshot.Stats.Select(s => $"{s.Label}: {s.Value}"));
         }
+        else
+        {
+            StatsSummary = "";
+        }
+    }
+
+    private static bool IsSupplementaryStat(Stat s)
+    {
+        var label = s.Label;
+        if (label.Equals("Plan", StringComparison.OrdinalIgnoreCase) || label.EndsWith("· Plan", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (label.Equals("Credits", StringComparison.OrdinalIgnoreCase) || label.EndsWith("· Credits", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (label.Equals("Limit reason", StringComparison.OrdinalIgnoreCase) || label.EndsWith("· Limit reason", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (label.StartsWith("Rate limit reset", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (label.Equals("Current streak", StringComparison.OrdinalIgnoreCase)
+            || label.Equals("Longest streak", StringComparison.OrdinalIgnoreCase)
+            || label.Equals("Longest turn", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private SupplementaryDetailsViewModel BuildSupplementary(ProviderSnapshot snapshot, bool isClaude, bool isOpenAi)
+    {
+        string resetTitle;
+        string resetBadge;
+        string resetSummary;
+        string resetDetails;
+
+        if (isClaude)
+        {
+            resetTitle = "Limit Resets (Claude)";
+            resetBadge = "Not verified";
+            resetSummary = "AIMonitor cannot verify reset offers here. Check Settings > Usage on Claude web/Desktop.";
+            resetDetails = "Official Claude Limit Reset Procedure\n\n"
+                + "Claude limit resets are managed directly within the official Anthropic interface:\n"
+                + "1. Open Claude on Web (claude.ai) or Claude Desktop (not mobile app, IDE extension, or terminal).\n"
+                + "2. Navigate to Settings > Usage.\n"
+                + "3. Under Resets, check if an offer is present.\n"
+                + "4. Click Reset for free > Confirm.\n\n"
+                + "Rules: Redemption is irreversible. Normal weekly schedule remains unchanged. Extra usage credits are distinct. Shared account benefits Claude Code and mobile.\n\n"
+                + "Reference: support.claude.com/en/articles/17007452";
+        }
+        else
+        {
+            resetTitle = "Rate Limit Resets (Codex)";
+            var resetStat = snapshot.Stats.FirstOrDefault(s => s.Label.StartsWith("Rate limit reset", StringComparison.OrdinalIgnoreCase));
+            if (resetStat is not null)
+            {
+                if (long.TryParse(resetStat.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count >= 0)
+                {
+                    if (count > 0)
+                    {
+                        resetBadge = $"Available: {count}";
+                        var expiry = !string.IsNullOrEmpty(resetStat.Detail) ? resetStat.Detail : "Next expiry unknown";
+                        resetSummary = $"{count} reset rights available · {expiry}. These are separate from paid credits.";
+                    }
+                    else
+                    {
+                        resetBadge = "0 Credits";
+                        resetSummary = "0 Rate Limit Reset Credits · Confirmed no reset credits available on this account (count = 0).";
+                    }
+
+                    resetDetails = "Codex Reset Details\n\n"
+                        + "Earned reset rights are reported via Codex App Server account/rateLimits/read. When availableCount > 0, users may restore a capped quota window.\n\n"
+                        + "Read-Only Notice: AIMonitor is a read-only monitor. Reset redemption is managed via official client. No redemption action is executed here.\n\n"
+                        + "Reference: learn.chatgpt.com/docs/app-server";
+                }
+                else
+                {
+                    resetBadge = "Not verified";
+                    resetSummary = "Reset Credits Status: Not verified · Server returned malformed or unconfirmed status.";
+                    resetDetails = "Codex Reset Details\n\n"
+                        + "Server returned malformed or unconfirmed status. Entitlement cannot be verified by AIMonitor.\n\n"
+                        + "Read-Only Notice: AIMonitor is a read-only monitor. No redemption action is executed here.\n\n"
+                        + "Reference: learn.chatgpt.com/docs/app-server";
+                }
+            }
+            else
+            {
+                resetBadge = "Not verified";
+                resetSummary = "Reset Credits Status: Not verified · No confirmed reset data (not zero). Entitlement cannot be verified by AIMonitor.";
+                resetDetails = "Codex Reset Details\n\n"
+                    + "No confirmed reset data (not zero). Entitlement cannot be verified by AIMonitor.\n\n"
+                    + "Read-Only Notice: AIMonitor is a read-only monitor. No redemption action is executed here.\n\n"
+                    + "Reference: learn.chatgpt.com/docs/app-server";
+            }
+        }
+
+        var isApiMode = isOpenAi && snapshot.Detection?.SourceId is "manual" or "env";
+        if (isApiMode)
+        {
+            resetTitle = "Codex reset rights";
+            resetBadge = "Not available in API mode";
+            resetSummary = "Organization API usage does not report ChatGPT/Codex reset rights.";
+            resetDetails = "Use your Codex ChatGPT login to view earned reset rights. AIMonitor performs no redemption.";
+        }
+
+        var rows = new List<SupplementaryRowViewModel>();
+
+        foreach (var s in snapshot.Stats)
+        {
+            if (s.Label.Equals("Plan", StringComparison.OrdinalIgnoreCase) || s.Label.EndsWith("· Plan", StringComparison.OrdinalIgnoreCase))
+            {
+                rows.Add(new SupplementaryRowViewModel
+                {
+                    Label = s.Label,
+                    Value = s.Value,
+                    Detail = s.Detail,
+                    Badge = "Plan",
+                    Group = "Plan"
+                });
+            }
+            else if (s.Label.Equals("Credits", StringComparison.OrdinalIgnoreCase) || s.Label.EndsWith("· Credits", StringComparison.OrdinalIgnoreCase))
+            {
+                rows.Add(new SupplementaryRowViewModel
+                {
+                    Label = s.Label,
+                    Value = s.Value,
+                    Detail = s.Detail,
+                    Badge = "Credits",
+                    Group = "Credits"
+                });
+            }
+            else if (s.Label.Equals("Limit reason", StringComparison.OrdinalIgnoreCase) || s.Label.EndsWith("· Limit reason", StringComparison.OrdinalIgnoreCase))
+            {
+                rows.Add(new SupplementaryRowViewModel
+                {
+                    Label = s.Label,
+                    Value = s.Value,
+                    Detail = s.Detail,
+                    Badge = "Limit",
+                    Group = "Limit reason"
+                });
+            }
+        }
+
+        if (!rows.Any(r => r.Group == "Plan"))
+        {
+            if (isClaude)
+            {
+                rows.Insert(0, new SupplementaryRowViewModel
+                {
+                    Label = "Plan",
+                    Value = "Not reported",
+                    Detail = "Check your plan in Claude",
+                    Badge = "Plan",
+                    Group = "Plan"
+                });
+            }
+            else if (isOpenAi)
+            {
+                rows.Insert(0, new SupplementaryRowViewModel
+                {
+                    Label = "Plan",
+                    Value = "Not reported",
+                    Detail = "Plan not reported via API",
+                    Badge = "Plan",
+                    Group = "Plan"
+                });
+            }
+        }
+
+        if (!rows.Any(r => r.Group == "Credits"))
+        {
+            if (isClaude)
+            {
+                rows.Add(new SupplementaryRowViewModel
+                {
+                    Label = "Workspace Credits",
+                    Value = "Not verified",
+                    Detail = "Check Claude for extra usage balance",
+                    Badge = "Credits",
+                    Group = "Credits"
+                });
+            }
+            else if (isOpenAi)
+            {
+                rows.Add(new SupplementaryRowViewModel
+                {
+                    Label = "Workspace Credits",
+                    Value = "Not reported",
+                    Detail = "Workspace credit balance unavailable",
+                    Badge = "Credits",
+                    Group = "Credits"
+                });
+            }
+        }
+
+        // Activity
+        var activityPills = new List<SupplementaryPillViewModel>();
+        string activityTitle;
+        string activityNote;
+
+        var currentStreak = snapshot.Stats.FirstOrDefault(s => s.Label.Equals("Current streak", StringComparison.OrdinalIgnoreCase));
+        var longestStreak = snapshot.Stats.FirstOrDefault(s => s.Label.Equals("Longest streak", StringComparison.OrdinalIgnoreCase));
+        var longestTurn = snapshot.Stats.FirstOrDefault(s => s.Label.Equals("Longest turn", StringComparison.OrdinalIgnoreCase));
+
+        if (currentStreak is not null || longestStreak is not null || longestTurn is not null)
+        {
+            activityTitle = "Codex Activity";
+            activityNote = "From account/usage/read summary · Metrics hide when null.";
+            if (currentStreak is not null) activityPills.Add(new SupplementaryPillViewModel { Label = "Current streak", Value = currentStreak.Value });
+            if (longestStreak is not null) activityPills.Add(new SupplementaryPillViewModel { Label = "Longest streak", Value = longestStreak.Value });
+            if (longestTurn is not null) activityPills.Add(new SupplementaryPillViewModel { Label = "Longest turn", Value = longestTurn.Value });
+        }
+        else if (isClaude)
+        {
+            activityTitle = "Claude Telemetry Notes";
+            activityNote = "Resets apply to 5-hour session or weekly quota as indicated by offer. Check Settings > Usage in Claude.";
+            activityPills.Add(new SupplementaryPillViewModel { Label = "Scope", Value = "Session / Weekly" });
+            activityPills.Add(new SupplementaryPillViewModel { Label = "Cross-client", Value = "Web / Desktop / Code" });
+        }
+        else
+        {
+            activityTitle = "Codex Activity";
+            activityNote = "Activity telemetry not reported";
+        }
+
+        if (isApiMode)
+        {
+            activityTitle = "Account activity";
+            activityNote = "Codex activity is not available in organization API mode.";
+        }
+
+        return new SupplementaryDetailsViewModel
+        {
+            ProviderId = ProviderId,
+            ResetTitle = resetTitle,
+            ResetBadge = resetBadge,
+            ResetSummary = resetSummary,
+            ResetDetails = resetDetails,
+            Rows = rows,
+            ActivityPills = activityPills,
+            ActivityTitle = activityTitle,
+            ActivityNote = activityNote
+        };
     }
 
     private static string FormatResetCompact(Meter meter, DateTimeOffset now)

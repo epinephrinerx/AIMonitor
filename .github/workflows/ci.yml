@@ -1,0 +1,51 @@
+name: Windows verification
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore AIMonitor.sln
+      - name: Format
+        run: dotnet format AIMonitor.sln --verify-no-changes --no-restore
+      - name: Build
+        run: dotnet build AIMonitor.sln --no-restore
+      - name: Tests
+        run: dotnet test AIMonitor.sln --no-build --no-restore --logger trx --results-directory artifacts/test-results
+      - name: Verification-tool regression
+        run: python -m unittest discover -s tests/verification -v
+      - name: Dependency audit
+        run: ./scripts/verify_packages.ps1
+      - name: Portable Inno compiler
+        run: ./scripts/install_inno_portable.ps1
+      - name: Self-contained executable and installer
+        run: ./build_installer.ps1 -SkipTests -IsccPath ./artifacts/tools/inno/compiler/ISCC.exe
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: windows-test-results
+          path: artifacts/test-results/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+# Screen/upgrade acceptance remains a documented manual gate.
+# This workflow never installs or releases the application.

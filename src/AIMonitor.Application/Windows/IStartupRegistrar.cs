@@ -11,6 +11,8 @@ public interface IStartupRegistrar
     /// Checks whether the application is currently registered to launch at Windows startup.
     /// </summary>
     bool IsRegistered();
+    /// <summary>Null means registration could not be read; callers must preserve existing intent.</summary>
+    bool? GetRegistrationState() => IsRegistered();
 
     /// <summary>
     /// Registers the application to start with Windows.

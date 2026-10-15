@@ -157,6 +157,33 @@ public sealed class GeminiLiveQuotaClientTests : IDisposable
 
     // -- detection integration ----------------------------------------------
 
+    [Theory]
+    [InlineData("env-project", "fallback-project", "env-project")]
+    [InlineData(null, "fallback-project", "fallback-project")]
+    [InlineData("   ", " fallback-project ", "fallback-project")]
+    public async Task GetSnapshotAsync_EnvironmentProject_AvoidsProjectDiscovery(string? preferred, string? fallback, string expected)
+    {
+        WriteGeminiCliLogin("synthetic-token");
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler(Router(onMonitoring: request =>
+        {
+            calls++;
+            Assert.StartsWith($"/v3/projects/{expected}/timeSeries", request.RequestUri!.AbsolutePath);
+            return JsonResponse(EmptyTimeSeriesPayload());
+        }));
+        var client = CreateClient(handler: handler, environmentVariableReader: name => name switch
+        {
+            "GOOGLE_CLOUD_PROJECT" => preferred,
+            "GOOGLE_CLOUD_PROJECT_ID" => fallback,
+            _ => null,
+        });
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal(1, calls);
+    }
+
     [Fact]
     public async Task GetSnapshotAsync_NoCredentialAnywhere_ReturnsNotConnectedWithoutAnyHttpCall()
     {
@@ -354,6 +381,13 @@ public sealed class GeminiLiveQuotaClientTests : IDisposable
         Assert.Equal(expectedUnauthorized, snapshot.Unauthorized);
         Assert.NotNull(snapshot.Error);
         Assert.DoesNotContain("leaked-secret-detail", snapshot.Error, StringComparison.Ordinal);
+        var state = statusCode switch
+        {
+            HttpStatusCode.Unauthorized => DetectionState.Expired,
+            HttpStatusCode.Forbidden => DetectionState.Limited,
+            _ => DetectionState.Connected,
+        };
+        Assert.Equal(state, snapshot.Detection!.State);
     }
 
     [Fact]
@@ -733,6 +767,283 @@ public sealed class GeminiLiveQuotaClientTests : IDisposable
         Assert.Null(snapshot.Error);
         Assert.Contains("400", snapshot.HistoryError!, StringComparison.Ordinal);
         Assert.Null(snapshot.History);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_MissingMonitoringScope_ReturnsLimitedWithoutAnyHttpCall()
+    {
+        var geminiHome = Path.Combine(_directory, ".gemini");
+        Directory.CreateDirectory(geminiHome);
+        var oauth = new Dictionary<string, object?>
+        {
+            ["access_token"] = "synthetic-token",
+            ["scope"] = "https://www.googleapis.com/auth/userinfo.email",
+        };
+        File.WriteAllText(Path.Combine(geminiHome, "oauth_creds.json"), JsonSerializer.Serialize(oauth));
+
+        var handler = new FakeHttpMessageHandler((_, _) => throw new InvalidOperationException("must not make HTTP call"));
+        var client = CreateClient(handler: handler);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.False(snapshot.Configured);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.Contains("Cloud Monitoring", snapshot.Detection.Hint);
+        Assert.Contains("Run `gemini`", snapshot.Detection.Hint);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ProjectPriority_ExplicitProjectBeatsCredentialAndEnv()
+    {
+        var (pem, rsaKey) = GenerateServiceAccountKey();
+        using var _ = rsaKey;
+        var keyPath = WriteServiceAccountFile("key.json", "robot@example.iam.gserviceaccount.com", pem, projectId: "cred-proj");
+
+        string? calledProject = null;
+        var handler = new FakeHttpMessageHandler(Router(
+            onToken: _ => JsonResponse(TokenPayload("synthetic-token")),
+            onMonitoring: request =>
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(request.RequestUri!.AbsolutePath, @"/v3/projects/([^/]+)/timeSeries");
+                if (match.Success)
+                {
+                    calledProject = match.Groups[1].Value;
+                }
+                return JsonResponse(EmptyTimeSeriesPayload());
+            }));
+
+        var client = CreateClient(
+            handler: handler,
+            savedServiceAccountPath: keyPath,
+            projectOverride: "explicit-proj",
+            environmentVariableReader: name => name == "GOOGLE_CLOUD_PROJECT" ? "env-proj" : null);
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal("explicit-proj", calledProject);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ProjectPriority_CredentialProjectBeatsEnv()
+    {
+        var (pem, rsaKey) = GenerateServiceAccountKey();
+        using var _ = rsaKey;
+        var keyPath = WriteServiceAccountFile("key.json", "robot@example.iam.gserviceaccount.com", pem, projectId: "cred-proj");
+
+        string? calledProject = null;
+        var handler = new FakeHttpMessageHandler(Router(
+            onToken: _ => JsonResponse(TokenPayload("synthetic-token")),
+            onMonitoring: request =>
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(request.RequestUri!.AbsolutePath, @"/v3/projects/([^/]+)/timeSeries");
+                if (match.Success)
+                {
+                    calledProject = match.Groups[1].Value;
+                }
+                return JsonResponse(EmptyTimeSeriesPayload());
+            }));
+
+        var client = CreateClient(
+            handler: handler,
+            savedServiceAccountPath: keyPath,
+            projectOverride: null,
+            environmentVariableReader: name => name == "GOOGLE_CLOUD_PROJECT" ? "env-proj" : null);
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal("cred-proj", calledProject);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_Gemini401_ServiceAccount_PreservesMetadataAndGivesServiceAccountAdvice()
+    {
+        var (pem, rsaKey) = GenerateServiceAccountKey();
+        using var _ = rsaKey;
+        var keyPath = WriteServiceAccountFile("key.json", "robot@example.iam.gserviceaccount.com", pem, projectId: "my-proj");
+
+        var handler = new FakeHttpMessageHandler(Router(
+            onToken: _ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(handler: handler, savedServiceAccountPath: keyPath);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.True(snapshot.Unauthorized);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.DoesNotContain("gemini", snapshot.Detection.Hint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("service account", snapshot.Detection.Hint, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(GeminiCredentialResolver.ManualSourceId, snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_Gemini401_CliOAuth_PreservesMetadataAndGivesCliAdvice()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var handler = new FakeHttpMessageHandler(Router(
+            onMonitoring: _ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(
+            handler: handler,
+            projectOverride: "my-proj");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.True(snapshot.Unauthorized);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.Contains("gemini", snapshot.Detection.Hint, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(GeminiCredentialResolver.GeminiCliSourceId, snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_Gemini403_ResourceManagerDiscovery_SuggestsExplicitProjectOrEnv()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var handler = new FakeHttpMessageHandler(Router(
+            onProjects: _ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(handler: handler);
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.Contains("GOOGLE_CLOUD_PROJECT", snapshot.Error, StringComparison.Ordinal);
+        Assert.Contains("GOOGLE_CLOUD_PROJECT", snapshot.Detection.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_Gemini403_Monitoring_ServiceAccount_SuggestsProjectIamApiAccess()
+    {
+        var (pem, rsaKey) = GenerateServiceAccountKey();
+        using var _ = rsaKey;
+        var keyPath = WriteServiceAccountFile("key.json", "robot@example.iam.gserviceaccount.com", pem, projectId: "my-proj");
+
+        var handler = new FakeHttpMessageHandler(Router(
+            onToken: _ => JsonResponse(TokenPayload("synthetic-token")),
+            onMonitoring: _ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(handler: handler, savedServiceAccountPath: keyPath);
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.Contains("service account", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Monitoring Viewer", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Monitoring Viewer", snapshot.Detection.Hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_Gemini403_Monitoring_CliOAuth_SuggestsProjectIamApiAccess()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var handler = new FakeHttpMessageHandler(Router(
+            onMonitoring: _ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(handler: handler, projectOverride: "my-proj");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.DoesNotContain("service account", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Gemini CLI", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Monitoring Viewer", snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Monitoring Viewer", snapshot.Detection.Hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_GeminiHistory401_UpdatesDetectionToExpired_PreservesMeterAndPartialSuccess()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler(Router(
+            onMonitoring: _ =>
+            {
+                calls++;
+                return calls == 1
+                    ? JsonResponse(TimeSeriesPayload(("2026-01-01T00:00:00Z", 42)))
+                    : new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") };
+            }));
+
+        var client = CreateClient(handler: handler, projectOverride: "my-proj");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Single(snapshot.Meters);
+        Assert.Equal("42", snapshot.Meters[0].Detail);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.Equal(GeminiCredentialResolver.GeminiCliSourceId, snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_GeminiHistory403_UpdatesDetectionToLimited_PreservesMeterAndPartialSuccess()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler(Router(
+            onMonitoring: _ =>
+            {
+                calls++;
+                return calls == 1
+                    ? JsonResponse(TimeSeriesPayload(("2026-01-01T00:00:00Z", 42)))
+                    : new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") };
+            }));
+
+        var client = CreateClient(handler: handler, projectOverride: "my-proj");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Single(snapshot.Meters);
+        Assert.Equal("42", snapshot.Meters[0].Detail);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.Equal(GeminiCredentialResolver.GeminiCliSourceId, snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_GeminiHistory500_LeavesDetectionConnected()
+    {
+        WriteGeminiCliLogin("synthetic-token");
+
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler(Router(
+            onMonitoring: _ =>
+            {
+                calls++;
+                return calls == 1
+                    ? JsonResponse(TimeSeriesPayload(("2026-01-01T00:00:00Z", 42)))
+                    : new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{}") };
+            }));
+
+        var client = CreateClient(handler: handler, projectOverride: "my-proj");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Single(snapshot.Meters);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Connected, snapshot.Detection!.State);
     }
 
     private static string ReadFixture(string fileName) =>

@@ -117,7 +117,7 @@ public sealed class AboutViewModel : ViewModelBase
         A native Windows application to monitor quotas and track token usage across AI providers:
         - Claude (Claude Code login, session/weekly limits, CLI transcript ingestion)
         - OpenAI (Codex ChatGPT OAuth, Admin API spend/budget, usage history)
-        - Google Gemini (Cloud Monitoring request count, ADC, service account)
+        - AGY / Antigravity (shared Gemini and Claude/GPT model-pool quotas via CLI)
 
         Key Features:
         - Native WPF desktop dashboard and compact floating widget

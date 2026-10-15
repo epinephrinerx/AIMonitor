@@ -118,7 +118,7 @@ public sealed class ConnectDialogTests
         {
             var (store, _, _) = CreateConnectionStore();
             var vm = new ConnectDialogViewModel(
-                ProviderMeta.Gemini,
+                ProviderMeta.OpenAi,
                 null,
                 new ProviderConnection(null, ""),
                 store);

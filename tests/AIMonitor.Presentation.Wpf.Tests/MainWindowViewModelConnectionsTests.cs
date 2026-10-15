@@ -68,9 +68,9 @@ public sealed class MainWindowViewModelConnectionsTests
             detection: new DetectionInfo("openai", DetectionState.Limited, "admin_key", "Admin Key", "org-codex"));
 
         var snapshotGemini = new ProviderSnapshot(
-            providerId: "gemini",
+            providerId: "agy",
             configured: true,
-            detection: new DetectionInfo("gemini", DetectionState.NotConnected));
+            detection: new DetectionInfo("agy", DetectionState.NotConnected));
 
         var clientClaude = new TestQuotaClient((req, ct) => Task.FromResult(snapshotClaude));
         var clientOpenAi = new TestQuotaClient((req, ct) => Task.FromResult(snapshotOpenAi));
@@ -80,7 +80,7 @@ public sealed class MainWindowViewModelConnectionsTests
         {
             new ProviderClientRegistration("claude", clientClaude),
             new ProviderClientRegistration("openai", clientOpenAi),
-            new ProviderClientRegistration("gemini", clientGemini)
+            new ProviderClientRegistration("agy", clientGemini)
         };
 
         await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
@@ -101,8 +101,8 @@ public sealed class MainWindowViewModelConnectionsTests
         Assert.Equal("Limited", vm.Connections.OpenAiCard.StateWord);
         Assert.Equal("org-codex", vm.Connections.OpenAiCard.Account);
 
-        Assert.Equal("Not connected", vm.Connections.GeminiCard.StateWord);
-        Assert.Equal("Not signed in", vm.Connections.GeminiCard.Account);
+        Assert.Equal("Not connected", vm.Connections.AgyCard.StateWord);
+        Assert.Equal("Not signed in", vm.Connections.AgyCard.Account);
     }
 
     [Fact]

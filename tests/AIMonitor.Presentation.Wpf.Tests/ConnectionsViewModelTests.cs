@@ -26,10 +26,10 @@ public sealed class ConnectionsViewModelTests
         Assert.Equal(3, vm.Cards.Count);
         Assert.Equal("claude", vm.Cards[0].Meta.Id);
         Assert.Equal("openai", vm.Cards[1].Meta.Id);
-        Assert.Equal("gemini", vm.Cards[2].Meta.Id);
+        Assert.Equal("agy", vm.Cards[2].Meta.Id);
         Assert.Same(vm.ClaudeCard, vm.Cards[0]);
         Assert.Same(vm.OpenAiCard, vm.Cards[1]);
-        Assert.Same(vm.GeminiCard, vm.Cards[2]);
+        Assert.Same(vm.AgyCard, vm.Cards[2]);
     }
 
     [Fact]
@@ -58,14 +58,14 @@ public sealed class ConnectionsViewModelTests
             detection: new DetectionInfo("openai", DetectionState.Limited, "admin", "Admin Key", "org-99"));
 
         var geminiSnap = new ProviderSnapshot(
-            "gemini",
+            "agy",
             configured: true,
-            detection: new DetectionInfo("gemini", DetectionState.NotConnected, "", "", ""));
+            detection: new DetectionInfo("agy", DetectionState.NotConnected, "", "", ""));
 
         var dict = new Dictionary<string, ProviderSnapshot>
         {
             ["openai"] = openAiSnap,
-            ["gemini"] = geminiSnap,
+            ["agy"] = geminiSnap,
             ["claude"] = claudeSnap
         };
 
@@ -77,8 +77,8 @@ public sealed class ConnectionsViewModelTests
         Assert.Equal(DetectionState.Limited, vm.OpenAiCard.Detection?.State);
         Assert.Equal("org-99", vm.OpenAiCard.Account);
 
-        Assert.Equal(DetectionState.NotConnected, vm.GeminiCard.Detection?.State);
-        Assert.Equal("Not signed in", vm.GeminiCard.Account);
+        Assert.Equal(DetectionState.NotConnected, vm.AgyCard.Detection?.State);
+        Assert.Equal("Not signed in", vm.AgyCard.Account);
     }
 
     [Fact]
@@ -168,8 +168,8 @@ public sealed class ConnectionsViewModelTests
         vm.OpenAiCard.ConnectCommand.Execute(null);
         Assert.Equal("openai", connectedProvider);
 
-        vm.GeminiCard.RedetectCommand.Execute(null);
-        Assert.Equal("gemini", redetectedProvider);
+        vm.AgyCard.RedetectCommand.Execute(null);
+        Assert.Equal("agy", redetectedProvider);
     }
 
     [Fact]

@@ -74,15 +74,15 @@ public sealed class ConnectionsPageAndDialogXamlTests
                 detection: new DetectionInfo("openai", DetectionState.Limited, "admin", "Admin Key", "org-99"));
 
             var geminiSnap = new ProviderSnapshot(
-                "gemini",
+                "agy",
                 configured: true,
-                detection: new DetectionInfo("gemini", DetectionState.NotConnected, "", "", ""));
+                detection: new DetectionInfo("agy", DetectionState.NotConnected, "", "", ""));
 
             vm.Update(new Dictionary<string, ProviderSnapshot>
             {
                 ["claude"] = claudeSnap,
                 ["openai"] = openAiSnap,
-                ["gemini"] = geminiSnap
+                ["agy"] = geminiSnap
             });
 
             var page = new ConnectionsPage { DataContext = vm };
@@ -129,10 +129,10 @@ public sealed class ConnectionsPageAndDialogXamlTests
             // Provider display names and badge initials
             Assert.Contains("Claude", textBlocks);
             Assert.Contains("OpenAI / Codex", textBlocks);
-            Assert.Contains("Gemini", textBlocks);
+            Assert.Contains("AGY", textBlocks);
             Assert.Contains("C", textBlocks);
             Assert.Contains("O", textBlocks);
-            Assert.Contains("G", textBlocks);
+            Assert.Contains("A", textBlocks);
         });
     }
 
@@ -225,14 +225,14 @@ public sealed class ConnectionsPageAndDialogXamlTests
     }
 
     [Fact]
-    public void ConnectDialog_ForGemini_ShowsBrowseButton_AndSaveButton()
+    public void ConnectDialog_ForAgy_HidesCredentialsAndSave()
     {
         WpfTestHost.Run(() =>
         {
             var (store, _, _) = CreateConnectionStore();
             var vm = new ConnectDialogViewModel(
-                ProviderMeta.Gemini,
-                new DetectionInfo("gemini", DetectionState.NotConnected),
+                ProviderMeta.Agy,
+                new DetectionInfo("agy", DetectionState.NotConnected),
                 new ProviderConnection(null, ""),
                 store);
 
@@ -240,19 +240,19 @@ public sealed class ConnectionsPageAndDialogXamlTests
             using var _ = WpfTestHost.ShowOffscreen(dialog);
             WpfTestHost.Realize(dialog);
 
-            Assert.Equal("Connect Gemini", dialog.Title);
+            Assert.Equal("AGY sign-in", dialog.Title);
 
             var browseButton = (Button)dialog.FindName("BrowseButton");
             Assert.NotNull(browseButton);
-            Assert.Equal(Visibility.Visible, browseButton.Visibility);
+            Assert.Equal(Visibility.Collapsed, browseButton.Visibility);
 
             var saveButton = (Button)dialog.FindName("SaveButton");
             Assert.NotNull(saveButton);
-            Assert.Equal(Visibility.Visible, saveButton.Visibility);
+            Assert.Equal(Visibility.Collapsed, saveButton.Visibility);
 
             var credSection = (FrameworkElement)dialog.FindName("CredentialsSection");
             Assert.NotNull(credSection);
-            Assert.Equal(Visibility.Visible, credSection.Visibility);
+            Assert.Equal(Visibility.Collapsed, credSection.Visibility);
         });
     }
 }

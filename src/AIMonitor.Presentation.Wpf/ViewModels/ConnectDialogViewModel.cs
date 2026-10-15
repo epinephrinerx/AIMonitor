@@ -32,7 +32,13 @@ public sealed class ConnectDialogViewModel : ViewModelBase
     public string Key
     {
         get => _key;
-        set => SetProperty(ref _key, value);
+        set
+        {
+            if (SetProperty(ref _key, value))
+            {
+                OnPropertyChanged(nameof(KeyGuidance));
+            }
+        }
     }
 
     public string Extra
@@ -62,6 +68,25 @@ public sealed class ConnectDialogViewModel : ViewModelBase
     public string FoundLine { get; }
 
     public string Hint => Detection?.Hint ?? "";
+
+    public string KeyGuidance
+    {
+        get
+        {
+            if (!string.Equals(Meta.Id, "openai", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(_key))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = _key.Trim();
+            if (trimmed.StartsWith("sk-admin-", StringComparison.Ordinal))
+            {
+                return "Admin API key format recognized (sk-admin-…).";
+            }
+
+            return "API spend requires an organization Admin key (sk-admin-…). Project or user keys (e.g. sk-proj-…) cannot read organization usage or costs.";
+        }
+    }
 
     public string AlsoPresent { get; }
 
@@ -131,7 +156,7 @@ public sealed class ConnectDialogViewModel : ViewModelBase
         CancelCommand = new RelayCommand(() => RequestClose?.Invoke(false));
         CloseCommand = new RelayCommand(() => RequestClose?.Invoke(false));
         ClearCommand = new RelayCommand(ExecuteClear);
-        BrowseCommand = new RelayCommand(() => BrowseRequested?.Invoke());
+        BrowseCommand = new RelayCommand(() => { if (CanBrowse) BrowseRequested?.Invoke(); }, () => CanBrowse);
     }
 
     private void ExecuteClear()
@@ -143,6 +168,7 @@ public sealed class ConnectDialogViewModel : ViewModelBase
 
     public void SetKeyFromBrowse(string path)
     {
+        if (!Meta.NeedsKey) return;
         Key = path ?? string.Empty;
         IsKeyRevealed = true;
     }

@@ -5,16 +5,26 @@ namespace AIMonitor.Infrastructure.Providers.Gemini;
 /// <summary>
 /// Reads the Gemini CLI's own Google OAuth login (<c>&lt;home&gt;/.gemini/oauth_creds.json</c>),
 /// read-only: this app never refreshes or rewrites another tool's login. Usable for Cloud Monitoring
-/// only when the token's granted scopes include <c>cloud-platform</c>, which the Gemini CLI does
-/// request; without it the token can prove identity but not read metrics. Matching the Python
-/// baseline's actual behavior (not its aspirational docstring, which describes reporting this case as
-/// Limited but whose code returns nothing), a token missing that scope is treated as though this
-/// source found nothing, letting detection continue to gcloud ADC rather than surfacing a Limited
-/// candidate for it.
+/// when the token's granted scopes include <c>cloud-platform</c>, <c>monitoring</c>, or
+/// <c>monitoring.read</c>. When the required scopes are missing or insufficient, a Limited
+/// credential is returned so actionable detection information is preserved.
 /// </summary>
 internal static class GeminiCliCredentialReader
 {
     private const string CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform";
+    private const string MonitoringScope = "https://www.googleapis.com/auth/monitoring";
+    private const string MonitoringReadScope = "https://www.googleapis.com/auth/monitoring.read";
+
+    private const string MissingMonitoringScopeReason =
+        "Gemini CLI OAuth login lacks required Cloud Monitoring scopes (cloud-platform, monitoring, or monitoring.read). " +
+        "Run `gemini` to log in with Cloud Monitoring scopes, or configure a Google Cloud service account with Monitoring Viewer in Settings.";
+
+    private static readonly string[] AcceptedMonitoringScopes =
+    [
+        CloudPlatformScope,
+        MonitoringScope,
+        MonitoringReadScope,
+    ];
 
     private static readonly char[] ScopeSeparators = [' ', '\t', '\n', '\r'];
 
@@ -47,15 +57,18 @@ internal static class GeminiCliCredentialReader
         string[] scopes = TryReadNonEmptyString(root, "scope", out var scopeText)
             ? scopeText.Split(ScopeSeparators, StringSplitOptions.RemoveEmptyEntries)
             : [];
-        if (Array.IndexOf(scopes, CloudPlatformScope) < 0)
-        {
-            return null;
-        }
+        var isUsageCapable = scopes.Any(s => AcceptedMonitoringScopes.Contains(s, StringComparer.Ordinal));
 
         var account = await ResolveAccountAsync(geminiHome, root, cancellationToken).ConfigureAwait(false);
         var expiresAtUtc = root.TryGetProperty("expiry_date", out var expiryElement) ? ParseEpoch(expiryElement) : null;
 
-        return new GeminiCredential(GeminiCredentialKind.OAuth, accessToken, account: account, expiresAtUtc: expiresAtUtc, usageCapable: true);
+        return new GeminiCredential(
+            GeminiCredentialKind.OAuth,
+            isUsageCapable ? accessToken : string.Empty,
+            account: account,
+            expiresAtUtc: expiresAtUtc,
+            usageCapable: isUsageCapable,
+            limitedReason: isUsageCapable ? string.Empty : MissingMonitoringScopeReason);
     }
 
     /// <summary>The active Google account, preferring the CLI's own record of which login is active

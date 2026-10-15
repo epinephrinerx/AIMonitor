@@ -1,8 +1,9 @@
 # AI Usage Monitor 2.0
 
-A native Windows desktop monitor for AI usage quota: Claude, OpenAI / Codex and Gemini in one window.
-Version 2.0 is a rewrite of the Python 1.3.3 application in C# / WPF (.NET 10) that keeps the same screens and
-behaviour.
+A native Windows desktop monitor for AI usage quota: Claude, OpenAI / Codex and AGY in one window.
+Version 2.0 is a rewrite of the Python 1.3.3 application in C# / WPF (.NET 10).
+Core automated checks pass; final screen and upgrade acceptance is tracked in
+[`Docs/PARITY_ACCEPTANCE.md`](Docs/PARITY_ACCEPTANCE.md).
 
 Two shapes in one app: a **dashboard** with a tab per service, and a compact **desk widget** (at most 300 × 300) that can
 stay on top and go translucent. It also lives in the system tray, where the icon shows your five-hour window as a
@@ -12,6 +13,8 @@ filled tile with the percentage written across it.
 
 Run `AIUsageMonitor Setup 2.0.0.exe` (installs per user, no administrator rights needed), or run `AIUsageMonitor 2.0.0.exe` directly without installing. The first launch
 imports the settings of a Python 1.3.x install if there is one; nothing in the old registry keys is deleted.
+The installer uses the Python 1.3.3 product identity for in-place upgrades. An experimental 2.0 installation
+made with the former separate product identity needs a separate migration check before release.
 
 ## What each service can report
 
@@ -19,7 +22,13 @@ imports the settings of a Python 1.3.x install if there is one; nothing in the o
 |---|---|---|
 | Claude | Your existing Claude Code login (read-only) and local transcripts | Session and weekly windows, usage per day by model and project, equivalent API value |
 | OpenAI / Codex | Your Codex ChatGPT login (read-only), or an optional Admin API key | Codex quota windows, optional API spend against a monthly budget |
-| Gemini | Your Gemini CLI login or a service account JSON | Request counts from Cloud Monitoring (Google publishes no token-level usage) |
+| AGY | Your existing Antigravity CLI sign-in; `agy -p "/usage" --output-format json` | Shared Gemini and Claude/GPT model-pool quotas for 5-hour and weekly windows, used percentage and reset time |
+
+AGY replaces the former Gemini Cloud Monitoring connection. Install/sign in to AGY through its own
+client, ensure `agy.exe` is available on PATH, then Refresh in AIMonitor. AGY needs no API key,
+service-account file or Google Cloud project in this app. Old saved Gemini credentials are retained
+but are not used. AGY quota pools are separate from standalone Claude/Codex subscriptions; AGY
+usage does not supply the app's token, cost or daily-history charts.
 
 Nothing is invented: when a service reports no percentage, the app shows a dash rather than a guess. The app never
 writes to another tool's credentials and never sends your usage anywhere.
@@ -49,6 +58,11 @@ dotnet test AIMonitor.sln --no-build
 
 `build_installer.ps1` builds, tests, publishes a self-contained win-x64 build and compiles the Inno Setup installer
 (Inno Setup 6 required).
+
+Use `-IsccPath <path-to-ISCC.exe>` to select a portable compiler, or `-SkipInstaller` to build only the
+self-contained executable. Version numbers come from `Directory.Build.props`; the script also creates
+the versioned portable filename. See [`Docs/TESTING.md`](Docs/TESTING.md) for reproducible verification
+and synthetic screen evidence commands.
 
 ## Licence
 

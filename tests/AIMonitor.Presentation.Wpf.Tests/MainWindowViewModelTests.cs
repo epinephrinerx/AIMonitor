@@ -204,6 +204,20 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(3, callCount);
     }
 
+    [Fact]
+    public void Constructor_InitializesAgyTabInProviderTabs()
+    {
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var vm = new MainWindowViewModel(coordinator, session);
+
+        Assert.Equal(3, vm.ProviderTabs.Count);
+        Assert.Equal("agy", vm.ProviderTabs[2].ProviderId);
+        Assert.Equal("AGY", vm.ProviderTabs[2].DisplayName);
+        Assert.Same(vm.AgyTab, vm.ProviderTabs[2]);
+    }
+
     private sealed class FakeTrayReadingsSink : ITrayReadingsSink
     {
         public List<IReadOnlyList<TrayReading>> RecordedUpdates { get; } = [];

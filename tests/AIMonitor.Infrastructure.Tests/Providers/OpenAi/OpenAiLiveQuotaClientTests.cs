@@ -244,6 +244,128 @@ public sealed class OpenAiLiveQuotaClientTests : IDisposable
         Assert.Equal(1, launcher.CallCount);
     }
 
+    [Fact]
+    public async Task GetSnapshotAsync_CodexMetadataSurvivesWhenHistoryDisabled()
+    {
+        WriteOAuthAuth("acct-1");
+        var rateLimits = JsonDocument.Parse("""
+            {
+              "rateLimits": {
+                "planType": "plus",
+                "credits": { "hasCredits": true, "unlimited": false, "balance": "100" },
+                "primary": { "usedPercent": 15 }
+              }
+            }
+            """).RootElement;
+        var launcher = new FakeCodexAppServerLauncher((_, _, _) => Task.FromResult(
+            new CodexAppServerResult(rateLimits, null, null)));
+        var client = CreateClient(codexLauncher: launcher);
+
+        var snapshot = await client.GetSnapshotAsync(
+            new ProviderSnapshotRequest(includeHistory: false), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Single(snapshot.Meters);
+        Assert.Null(snapshot.History);
+        Assert.Contains(snapshot.Stats, s => s.Label == "Plan" && s.Value == "Plus");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Credits" && s.Value == "100");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CodexMetadataSurvivesWhenHistoryFails()
+    {
+        WriteOAuthAuth("acct-1");
+        var rateLimits = JsonDocument.Parse("""
+            {
+              "rateLimits": {
+                "planType": "team",
+                "credits": { "hasCredits": true, "unlimited": true, "balance": null },
+                "rateLimitReachedType": "rate_limit_reached",
+                "primary": { "usedPercent": 90 }
+              }
+            }
+            """).RootElement;
+        var launcher = new FakeCodexAppServerLauncher((_, _, _) => Task.FromResult(
+            new CodexAppServerResult(rateLimits, null, "History unavailable.")));
+        var client = CreateClient(codexLauncher: launcher);
+
+        var snapshot = await client.GetSnapshotAsync(
+            new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Single(snapshot.Meters);
+        Assert.Null(snapshot.History);
+        Assert.Equal("History unavailable.", snapshot.HistoryError);
+        Assert.Contains(snapshot.Stats, s => s.Label == "Plan" && s.Value == "Team");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Credits" && s.Value == "Unlimited");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Limit reason" && s.Value == "Rate limit reached");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CodexMetadataOnlyPayload_ReturnsErrorSnapshotWithoutInventingQuotaSuccess()
+    {
+        WriteOAuthAuth("acct-1");
+        var rateLimits = JsonDocument.Parse("""
+            {
+              "rateLimits": {
+                "planType": "pro",
+                "credits": { "hasCredits": true, "unlimited": false, "balance": "50" }
+              }
+            }
+            """).RootElement;
+        var launcher = new FakeCodexAppServerLauncher((_, _, _) => Task.FromResult(
+            new CodexAppServerResult(rateLimits, null, null)));
+        var client = CreateClient(codexLauncher: launcher);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.Empty(snapshot.Meters);
+        Assert.Equal("OpenAI returned no percentage quota windows for this account.", snapshot.Error);
+        Assert.Contains(snapshot.Stats, s => s.Label == "Plan" && s.Value == "Pro");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Credits" && s.Value == "50");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CodexMultipleBuckets_AttachesGroupedMetadataStatsAndMeters()
+    {
+        WriteOAuthAuth("acct-1");
+        var rateLimits = JsonDocument.Parse("""
+            {
+              "rateLimitsByLimitId": {
+                "codex": {
+                  "limitId": "codex",
+                  "limitName": null,
+                  "planType": "plus",
+                  "credits": { "hasCredits": true, "unlimited": false, "balance": "200" },
+                  "primary": { "usedPercent": 20 }
+                },
+                "other": {
+                  "limitId": "other",
+                  "limitName": "Other Bucket",
+                  "planType": "team",
+                  "credits": { "hasCredits": true, "unlimited": true, "balance": null },
+                  "rateLimitReachedType": "rate_limit_reached",
+                  "primary": { "usedPercent": 85 }
+                }
+              }
+            }
+            """).RootElement;
+        var launcher = new FakeCodexAppServerLauncher((_, _, _) => Task.FromResult(
+            new CodexAppServerResult(rateLimits, null, null)));
+        var client = CreateClient(codexLauncher: launcher);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal(2, snapshot.Meters.Count);
+        Assert.Contains(snapshot.Stats, s => s.Label == "Codex · Plan" && s.Value == "Plus");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Codex · Credits" && s.Value == "200");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Other Bucket · Plan" && s.Value == "Team");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Other Bucket · Credits" && s.Value == "Unlimited");
+        Assert.Contains(snapshot.Stats, s => s.Label == "Other Bucket · Limit reason" && s.Value == "Rate limit reached");
+    }
+
     // -- Admin API path (PAR-010) ------------------------------------------
 
     private static string CostsPayload(double total, long startTimeUnixSeconds = 1_700_000_000) =>
@@ -363,6 +485,13 @@ public sealed class OpenAiLiveQuotaClientTests : IDisposable
         Assert.Equal(expectedUnauthorized, snapshot.Unauthorized);
         Assert.NotNull(snapshot.Error);
         Assert.DoesNotContain("leaked-secret-detail", snapshot.Error, StringComparison.Ordinal);
+        var state = statusCode switch
+        {
+            HttpStatusCode.Unauthorized => DetectionState.Expired,
+            HttpStatusCode.Forbidden => DetectionState.Limited,
+            _ => DetectionState.Connected,
+        };
+        Assert.Equal(state, snapshot.Detection!.State);
     }
 
     [Fact]
@@ -482,5 +611,128 @@ public sealed class OpenAiLiveQuotaClientTests : IDisposable
         Assert.NotNull(snapshot.History);
         Assert.Equal(8, snapshot.History!.Series.Count);
         Assert.Contains("Other", snapshot.History.Series);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_OpenAi401_EnvKey_PreservesMetadataAndGivesEnvAdvice()
+    {
+        var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(
+            handler: handler,
+            savedAdminKey: null,
+            environmentVariableReader: name => name == "OPENAI_ADMIN_KEY" ? "sk-admin-synthetic" : null);
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.True(snapshot.Unauthorized);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.Contains("OPENAI_ADMIN_KEY", snapshot.Detection.Hint);
+        Assert.Equal("env", snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_OpenAi401_ManualKey_PreservesMetadataAndGivesSettingsAdvice()
+    {
+        var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }));
+
+        var client = CreateClient(handler: handler, savedAdminKey: "sk-admin-test");
+
+        var snapshot = await client.GetSnapshotAsync(ProviderSnapshotRequest.Default, CancellationToken.None);
+
+        Assert.False(snapshot.Ok);
+        Assert.True(snapshot.Unauthorized);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.Contains("Settings", snapshot.Detection.Hint);
+        Assert.Equal("manual", snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_OpenAiHistory401_UpdatesDetectionToExpired_PreservesMetersAndPartialSuccess()
+    {
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            calls++;
+            if (request.RequestUri!.AbsolutePath == "/v1/organization/costs")
+            {
+                // Month and today costs calls
+                return Task.FromResult(JsonResponse(CostsPayload(12.5)));
+            }
+
+            // History usage call
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") });
+        });
+
+        var client = CreateClient(handler: handler, savedAdminKey: "sk-admin-test");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal(2, snapshot.Meters.Count);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Expired, snapshot.Detection!.State);
+        Assert.Equal("manual", snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_OpenAiHistory403_UpdatesDetectionToLimited_PreservesMetersAndPartialSuccess()
+    {
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            calls++;
+            if (request.RequestUri!.AbsolutePath == "/v1/organization/costs")
+            {
+                return Task.FromResult(JsonResponse(CostsPayload(12.5)));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") });
+        });
+
+        var client = CreateClient(handler: handler, savedAdminKey: "sk-admin-test");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal(2, snapshot.Meters.Count);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Limited, snapshot.Detection!.State);
+        Assert.Equal("manual", snapshot.Detection.SourceId);
+        Assert.NotEmpty(snapshot.Detection.Candidates);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_OpenAiHistory500_LeavesDetectionConnected()
+    {
+        var calls = 0;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            calls++;
+            if (request.RequestUri!.AbsolutePath == "/v1/organization/costs")
+            {
+                return Task.FromResult(JsonResponse(CostsPayload(12.5)));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{}") });
+        });
+
+        var client = CreateClient(handler: handler, savedAdminKey: "sk-admin-test");
+
+        var snapshot = await client.GetSnapshotAsync(new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
+
+        Assert.True(snapshot.Ok);
+        Assert.Equal(2, snapshot.Meters.Count);
+        Assert.NotNull(snapshot.HistoryError);
+        Assert.Null(snapshot.Error);
+        Assert.Equal(DetectionState.Connected, snapshot.Detection!.State);
     }
 }

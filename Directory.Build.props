@@ -13,11 +13,10 @@
     === Single version source of truth (PAR-035) ===
     Update VersionPrefix here only.  AssemblyVersion, FileVersion and
     InformationalVersion are all derived from it automatically.
-    The installer script reads AppVersion from this same constant via a
-    #define that must be kept in sync — see installer/AIMonitor2.iss.
+    build_installer.ps1 reads this value and passes /DAppVersion to Inno Setup.
   -->
   <PropertyGroup>
-    <VersionPrefix>2.0.0</VersionPrefix>
+    <VersionPrefix>2.0.1</VersionPrefix>
     <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
     <FileVersion>$(VersionPrefix).0</FileVersion>
     <InformationalVersion>$(VersionPrefix)</InformationalVersion>

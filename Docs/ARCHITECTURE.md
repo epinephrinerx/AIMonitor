@@ -4,7 +4,11 @@
 บน .NET 10 สำหรับ Windows Desktop (`Requirements.md` R-001) อัปเดตเอกสารนี้เมื่อมีการเปลี่ยน
 service boundary, data flow, storage, interface หรือ dependency direction
 
-สถานะ ณ ตอนเขียน: **Phase 5C Windows integrations เสร็จสิ้น** — มี `AIMonitor.sln`/`.csproj` และ solution skeleton ตาม
+สถานะปัจจุบัน (2026-10-14): WPF composition root, dashboard/widget/tray, dialogs, reports และ
+installer มี implementation แล้ว; R-002 มี commits ถึงเฟส 11b ยังไม่ผ่านการตรวจรับ R-004 >95%
+ดู `STATUS_2026-10-14.md` สำหรับหลักฐานและข้อจำกัดล่าสุด
+
+รายละเอียดต่อไปนี้เป็นประวัติ foundation ณ Phase 5C ไม่ใช่สถานะปัจจุบัน — มี `AIMonitor.sln`/`.csproj` และ solution skeleton ตาม
 โครงสร้างด้านล่างจริงแล้ว Phase 4A เพิ่ม provider-neutral domain contract (`Meter`, `Severity`,
 `MeterReadingOrder` ฯลฯ), Phase 4B เพิ่ม `AIMonitor.Infrastructure.Providers.Claude.ClaudeQuotaParser` —
 pure JSON parsing boundary (ใช้ `System.Text.Json` เท่านั้น ไม่มี dependency ใหม่) ที่แปลง Claude OAuth
@@ -57,7 +61,7 @@ AIMonitor 2.0 เป็นแอป Windows desktop ผู้ใช้เดี�
 credential/log ที่เครื่องมือ CLI ของแต่ละ provider สร้างไว้อยู่แล้ว หรือจาก API ของ provider นั้นโดยตรง
 แล้วแสดงผลเป็น dashboard, compact widget และ system tray icon พร้อมแจ้งเตือนเมื่อใกล้เต็มโควตา
 แอปไม่มี backend ของตัวเอง ไม่มี multi-tenant boundary และไม่ส่งข้อมูลผู้ใช้ออกไปยังบริการภายนอกใด ๆ
-นอกจาก provider ที่ผู้ใช้เชื่อมต่อเองและการตรวจ GitHub release แบบ read-only
+นอกจาก provider ที่ผู้ใช้เชื่อมต่อเองและ GitHub สำหรับตรวจ release/ดาวน์โหลด installer ที่ผู้ใช้เลือก
 
 ### Goals
 
@@ -130,15 +134,18 @@ local server name (`AIUsageMonitor|<username>|<scope>`) ซึ่งเป็น
 │   ├── AIMonitor.Infrastructure.Tests/
 │   ├── AIMonitor.Presentation.Wpf.Tests/
 │   └── AIMonitor.TestSupport/            # fakes, fixture factories ที่ใช้ร่วมกันหลาย test project
-├── installer/                             # Inno Setup script (ADR-0003) — ยังไม่สร้างในเฟสนี้
+├── installer/                             # AIMonitor2.iss, in-place upgrade (ADR-0003)
+├── .github/workflows/ci.yml               # Windows verification; no deployment
+├── scripts/                              # dependency audit / portable compiler tools
+├── tools/AIMonitor.ScreenEvidence/        # synthetic WPF screen renderer (no real credentials)
 ├── AIMonitor.sln                         # classic solution format
 ├── global.json                           # pin .NET SDK 10.0.401, rollForward: latestPatch
 ├── Directory.Build.props                 # nullable/implicit usings/warnings-as-errors ส่วนกลาง
 ├── AGENTS.md / CLAUDE.md / Requirements.md
 ```
 
-`installer/` ยังไม่ถูกสร้างในเฟสนี้ (อยู่นอกขอบเขต Phase 3) ส่วนที่เหลือของโครงสร้างข้างต้นมีอยู่จริงใน
-repository แล้ว หากมีการปรับ ให้แก้เอกสารนี้ให้ตรงกับ repository จริงทันที
+`installer/AIMonitor2.iss` และ `build_installer.ps1` มีแล้ว; build script อ่าน VersionPrefix และส่ง
+ให้ Inno Setup โดยตรง การสร้าง package ไม่ใช่หลักฐานว่า clean install/upgrade ผ่าน
 
 ## 4. Components and ownership
 
@@ -375,9 +382,8 @@ source อยู่เลยเท่านั้น ไม่ใช่ fallback
 
 ## 12. Known constraints and technical debt
 
-- Feature parity ส่วนใหญ่ใน `Docs/FEATURE_PARITY.md` (PAR-001 ถึง PAR-036) ยังอยู่ในสถานะ `Not started`;
-  PAR-003 ถึง PAR-012 และ PAR-016/PAR-017 เป็น `Verified` ส่วน PAR-001/PAR-002/PAR-026/PAR-029 ยังเป็น
-  `In progress` ตามขอบเขตที่ implement จริง รายละเอียดและหลักฐานล่าสุดอยู่ใน `Docs/FEATURE_PARITY.md`
+- ตาราง PAR เป็น implementation baseline ไม่ใช่คำรับรองความเหมือน >95%; owner acceptance,
+  real DPI/multi-monitor และ install/upgrade ยังต้องตรวจตาม `PARITY_ACCEPTANCE.md`
 - WPF ไม่มี chart/gauge control สำเร็จรูปที่อนุมัติให้ใช้ ต้องเขียน custom-drawn control เอง
   (ADR-0001) ซึ่งเพิ่มต้นทุนบำรุงรักษาเทียบกับ chart library
 - การอ้างอิง `System.Windows.Forms.NotifyIcon` โดยตรงจาก WPF app (ไม่ผ่าน `WindowsFormsIntegration`
@@ -385,6 +391,47 @@ source อยู่เลยเท่านั้น ไม่ใช่ fallback
   ไว้ที่ tray-hosting component ใน `Infrastructure`/`Presentation.Wpf` เท่านั้น)
 - Minimum test coverage percentage ยังไม่ถูกกำหนดเป็นตัวเลขตายตัว (ดู `Docs/TESTING.md` §6) —
   เป็น open decision ที่ต้องยืนยันก่อนเริ่มพัฒนาโค้ดจริงหากทีมต้องการ threshold บังคับใน CI
-- CI pipeline file (เช่น GitHub Actions workflow) ยังไม่ถูกสร้างในเฟสนี้ตาม constraint ของ Phase 3;
-  `Docs/TESTING.md` §7 ระบุ gate ที่ pipeline ในอนาคตต้องบังคับใช้ไว้ล่วงหน้า
-- `installer/AIMonitor.iss` (ADR-0003) ยังไม่ถูกสร้างในเฟสนี้ — อยู่นอกขอบเขต Phase 3
+- `.github/workflows/ci.yml` รัน Windows gates; remote run ต้องเกิดหลังการนำ workflow ขึ้น GitHub
+- รุ่นพัฒนา 2.0 ที่เคยติดตั้งด้วย AppId `B1C4F2E8...` ไม่ใช่ legacy Python identity; การนำรุ่นพัฒนานั้น
+  ออกต้องตรวจแยก ไม่ลบ installation หรือข้อมูลของเครื่องนี้ระหว่าง local verification
+
+## 13. Current composition and update flow
+
+### Supplementary provider details (R-011)
+
+Dashboard adds a separate supplementary-details component after the existing gauge block. It consumes
+provider snapshot stats through the presentation ViewModel; it does not alter GaugeControl, meter
+calculations or widget behavior. Codex reset-count metadata comes from the existing rate-limits result;
+activity comes from the existing optional usage result. No additional request or redemption is added.
+Missing optional data stays unknown/absent; reset detail-list length is never used as the count.
+Claude reset offers remain unverified with instructions to check the official web/Desktop interface.
+
+### AGY replaces the active Gemini provider (R-012)
+
+The user-supplied `AGY-Usage.md` is the CLI contract input. The active third provider is AGY (`agy`),
+using the existing Antigravity sign-in through a bounded, cancellable, shell-free `agy.exe` subprocess.
+Only the `/usage` JSON slash command is executed. No model prompt, login mutation or Google API
+fallback is used. `command.data.groups[].buckets[].remaining_fraction` becomes used percentage;
+grouped 5h/weekly windows stay distinct from standalone Claude/Codex quotas. There is no inferred
+history, token count, cost or earned-reset privilege.
+
+Composition, Connections, tray and reports use AGY. Legacy Gemini source and synthetic tests remain
+unregistered to preserve existing work/history; saved credentials are neither read for AGY nor
+deleted. Settings compatibility maps active Gemini to AGY and carries Enabled only when no explicit
+AGY preference exists, without reusing a project id or service-account path. No AGY key is stored.
+
+- `App.xaml.cs` โหลด settings/migrate legacy แล้วใช้ `StartupSettingsReconciler` สะท้อนสถานะ
+  Windows Run entry ใน settings; unreadable registration เป็น Unknown และไม่เขียนทับ intent
+  Reconciliation register เฉพาะ default-on ของ profile ใหม่ที่ไม่มี upgrade marker; ไม่ unregister
+  และไม่ย้าย Run command ของ installation เดิมไปยัง portable executable ที่เพิ่งเปิด
+  Installer ที่พบ uninstall identity เดิมเขียน `preserve-startup-intent` ใน install directory เพื่อคง
+  startup off แม้ installation เดิมยังไม่มี legacy settings; path refresh ตอน upgrade เป็นหน้าที่ installer
+- `SettingsSession` เป็นแหล่งเดียวของค่าตั้ง; `LiveSettingsApplier` ผูก widget/tray/timer และ
+  `AppearanceApplier` ทำ preview/discard ใน Settings
+- `TrayIconHost` อยู่ใน Presentation, ไม่ใช่ Infrastructure; charts ปัจจุบันคือ
+  `StackedColumnChartControl`/`HorizontalBarChartControl`
+- `GitHubVersionChecker`/`UpdateDownloader` เป็น Application implementations ที่ใช้ injected HttpClient;
+  `UpdateCoordinator`/`WpfUpdateUi` อยู่ใน Presentation การเรียก network และเปิด installer เป็น explicit
+  boundary ที่ต้อง fake ใน tests; startup ตรวจ release และถามผู้ใช้ก่อน download/run
+- Installer คง AppId/ค่าเริ่มต้น directory ของ Python 1.3.3, snapshot startup intent ก่อนหยุด executable
+  เฉพาะ install path และเปลี่ยน Run command เฉพาะกรณีที่ entry เดิมมีอยู่ ไม่ลบ legacy settings tree

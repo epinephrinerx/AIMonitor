@@ -71,17 +71,18 @@ public sealed class ConnectDialogViewModelTests
     }
 
     [Fact]
-    public void Constructor_ForGemini_SetsCanBrowseTrue()
+    public void Constructor_ForAgy_SetsTitleSignIn_AndNeedsKeyFalse()
     {
         var (store, _, _) = CreateConnectionStore();
         var vm = new ConnectDialogViewModel(
-            ProviderMeta.Gemini,
-            null,
+            ProviderMeta.Agy,
+            new DetectionInfo("agy", DetectionState.Connected, "agy_cli", "AGY CLI"),
             new ProviderConnection(null, ""),
             store);
 
-        Assert.True(vm.CanBrowse);
-        Assert.Equal(@"C:\path\to\service-account.json  (optional)", vm.KeyPlaceholder);
+        Assert.Equal("AGY sign-in", vm.Title);
+        Assert.False(vm.NeedsKey);
+        Assert.False(vm.CanBrowse);
     }
 
     [Fact]
@@ -482,31 +483,32 @@ public sealed class ConnectDialogViewModelTests
     }
 
     [Fact]
-    public void BrowseCommand_FiresBrowseRequested()
+    public void Agy_BrowseCommand_DoesNotRequestFileAccess()
     {
         var (store, _, _) = CreateConnectionStore();
-        var vm = new ConnectDialogViewModel(ProviderMeta.Gemini, null, new ProviderConnection(null, ""), store);
+        var vm = new ConnectDialogViewModel(ProviderMeta.Agy, null, new ProviderConnection(null, ""), store);
 
         var browseRequested = false;
         vm.BrowseRequested += () => browseRequested = true;
 
         vm.BrowseCommand.Execute(null);
-        Assert.True(browseRequested);
+        Assert.False(browseRequested);
+        Assert.False(vm.BrowseCommand.CanExecute(null));
     }
 
     [Fact]
-    public void SetKeyFromBrowse_UpdatesKey_AndSetsIsKeyRevealedTrue()
+    public void Agy_SetKeyFromBrowse_IsIgnored()
     {
         var (store, _, _) = CreateConnectionStore();
-        var vm = new ConnectDialogViewModel(ProviderMeta.Gemini, null, new ProviderConnection(null, ""), store);
+        var vm = new ConnectDialogViewModel(ProviderMeta.Agy, null, new ProviderConnection(null, ""), store);
 
         Assert.False(vm.IsKeyRevealed);
         Assert.Equal("", vm.Key);
 
         vm.SetKeyFromBrowse(@"C:\Users\test\creds.json");
 
-        Assert.Equal(@"C:\Users\test\creds.json", vm.Key);
-        Assert.True(vm.IsKeyRevealed);
+        Assert.Empty(vm.Key);
+        Assert.False(vm.IsKeyRevealed);
     }
 
     [Fact]
@@ -610,5 +612,58 @@ public sealed class ConnectDialogViewModelTests
         Assert.NotNull(failureMessage);
         Assert.Contains(nameof(JsonException), failureMessage);
         Assert.DoesNotContain(typedKey, failureMessage);
+    }
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("sk-proj-12345", "API spend requires an organization Admin key")]
+    [InlineData("sk-something", "API spend requires an organization Admin key")]
+    [InlineData("sk-admin-12345", "Admin API key format recognized")]
+    public void KeyGuidance_ForOpenAi_ProvidesFeedbackBasedOnKeyPrefix(string typedKey, string expectedSubstring)
+    {
+        var (store, _, _) = CreateConnectionStore();
+        var vm = new ConnectDialogViewModel(ProviderMeta.OpenAi, null, new ProviderConnection(null, ""), store);
+
+        vm.Key = typedKey;
+
+        if (string.IsNullOrEmpty(expectedSubstring))
+        {
+            Assert.Equal(string.Empty, vm.KeyGuidance);
+        }
+        else
+        {
+            Assert.Contains(expectedSubstring, vm.KeyGuidance);
+        }
+    }
+
+    [Fact]
+    public void KeyGuidance_ForGemini_AlwaysReturnsEmpty()
+    {
+        var (store, _, _) = CreateConnectionStore();
+        var vm = new ConnectDialogViewModel(ProviderMeta.Agy, null, new ProviderConnection(null, ""), store);
+
+        vm.Key = "some-key";
+
+        Assert.Equal(string.Empty, vm.KeyGuidance);
+    }
+
+    [Fact]
+    public void Key_WhenChanged_RaisesPropertyChangedForKeyGuidance()
+    {
+        var (store, _, _) = CreateConnectionStore();
+        var vm = new ConnectDialogViewModel(ProviderMeta.OpenAi, null, new ProviderConnection(null, ""), store);
+        var propertyChangedList = new List<string>();
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+            {
+                propertyChangedList.Add(args.PropertyName);
+            }
+        };
+
+        vm.Key = "sk-admin-12345";
+
+        Assert.Contains(nameof(vm.KeyGuidance), propertyChangedList);
     }
 }

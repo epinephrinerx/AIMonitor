@@ -208,6 +208,28 @@
                             Cursor="Hand" />
                 </Grid>
 
+                <!-- Key Guidance / Feedback -->
+                <TextBlock x:Name="KeyGuidanceText"
+                           Text="{Binding KeyGuidance}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           FontSize="11"
+                           Margin="0,0,0,10">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <Trigger Property="Text" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </Trigger>
+                                <Trigger Property="Text" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <!-- Extra Field (when Meta.ExtraLabel not empty) -->
                 <StackPanel x:Name="ExtraFieldSection">
                     <StackPanel.Style>

@@ -39,31 +39,26 @@ public sealed class ProviderMetaTests
         Assert.Equal("e.g. 50 — a local target, not an OpenAI limit", meta.ExtraPlaceholder);
 
         var expectedHint =
-            "Sign in to Codex with ChatGPT on this machine to see Codex quota percentages, reset times and available daily token totals. Requires Codex CLI or the Codex desktop app. The existing auth.json is read-only; open Codex to renew an expired login.\n\n" +
-            "A Codex ChatGPT login takes priority over saved or environment keys. Your existing keys are kept. When no Codex ChatGPT login is found, an optional organization Admin key provides API platform spend. Regular project keys cannot read API spend.";
+            "To connect Codex with ChatGPT, sign in via terminal: run `codex login` for browser ChatGPT OAuth, or `codex login --device-auth` for device-code flow (enable it in ChatGPT security/workspace settings if required). Run `codex login status` to check mode, then return to AIMonitor and click Refresh.\n\n" +
+            "This app reads existing file-backed login (~/.codex/auth.json) read-only and does not initiate OAuth or refresh external tokens; credential-store-only logins may not be detected. Open Codex to renew an expired login.\n\n" +
+            "Codex OAuth always has priority over API keys (including expired logins), and saved keys are retained. For API platform spend instead, provide an optional organization Admin key (sk-admin-…) via Connections or OPENAI_ADMIN_KEY + restart; ordinary project keys cannot read organization spend.";
         Assert.Equal(expectedHint, meta.SetupHint);
     }
 
     [Fact]
-    public void Gemini_Metadata_MatchesSpecificationVerbatim()
+    public void Agy_Metadata_IsKeylessAndUsesCliOnly()
     {
-        var meta = ProviderMeta.Gemini;
-
-        Assert.Equal("gemini", meta.Id);
-        Assert.Equal("Gemini", meta.DisplayName);
-        Assert.Equal("G", meta.BadgeLetter);
-        Assert.Equal("Gemini CLI · Cloud Monitoring", meta.Tagline);
-        Assert.True(meta.NeedsKey);
-        Assert.Equal("Service account JSON", meta.KeyLabel);
-        Assert.Equal(@"C:\path\to\service-account.json  (optional)", meta.KeyPlaceholder);
-        Assert.Equal("Google Cloud project id", meta.ExtraLabel);
-        Assert.Equal("auto-detected from your login if left blank", meta.ExtraPlaceholder);
-
-        var expectedHint =
-            "Detected automatically from your Gemini CLI login if you have signed in with gemini — that token already carries the cloud-platform scope this needs.\n\n" +
-            "Otherwise point this at a Google Cloud service account JSON with the Monitoring Viewer role.\n\n" +
-            "Either way, usage comes from Cloud Monitoring, because Google publishes no usage endpoint for Gemini. Gemini Advanced subscription limits are not available from any public API.";
-        Assert.Equal(expectedHint, meta.SetupHint);
+        var meta = ProviderMeta.Agy;
+        Assert.Equal("agy", meta.Id);
+        Assert.Equal("AGY", meta.DisplayName);
+        Assert.False(meta.NeedsKey);
+        Assert.Empty(meta.KeyLabel);
+        Assert.Empty(meta.KeyPlaceholder);
+        Assert.Empty(meta.ExtraLabel);
+        Assert.Empty(meta.ExtraPlaceholder);
+        Assert.Contains("/usage", meta.SetupHint);
+        Assert.Contains("PATH", meta.SetupHint);
+        Assert.Null(ProviderMeta.TryGet("gemini"));
     }
 
     [Fact]
@@ -72,14 +67,14 @@ public sealed class ProviderMetaTests
         Assert.Equal(3, ProviderMeta.All.Count);
         Assert.Equal("claude", ProviderMeta.All[0].Id);
         Assert.Equal("openai", ProviderMeta.All[1].Id);
-        Assert.Equal("gemini", ProviderMeta.All[2].Id);
+        Assert.Equal("agy", ProviderMeta.All[2].Id);
     }
 
     [Theory]
     [InlineData("claude", "Claude")]
     [InlineData("CLAUDE", "Claude")]
     [InlineData("openai", "OpenAI / Codex")]
-    [InlineData("gemini", "Gemini")]
+    [InlineData("agy", "AGY")]
     public void TryGet_CaseInsensitive_ReturnsCorrectMetadata(string providerId, string expectedDisplayName)
     {
         var meta = ProviderMeta.TryGet(providerId);

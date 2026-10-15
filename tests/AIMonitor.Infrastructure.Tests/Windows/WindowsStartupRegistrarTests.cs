@@ -1,10 +1,28 @@
 using System.Security;
+using AIMonitor.Application.Settings;
 using AIMonitor.Infrastructure.Windows;
+using AIMonitor.TestSupport;
 
 namespace AIMonitor.Infrastructure.Tests.Windows;
 
 public sealed class WindowsStartupRegistrarTests
 {
+    [Fact]
+    public async Task RegistryReadDenied_ReconciliationPreservesSavedIntent()
+    {
+        var registrar = new WindowsStartupRegistrar("Fixture", _ => throw new SecurityException("Synthetic denial"));
+        var initial = new AppSettings { StartWithWindows = true };
+        var store = new BlockingSettingsStore(initial);
+        store.Release();
+        using var session = new SettingsSession(store, initial);
+
+        Assert.Null(registrar.GetRegistrationState());
+        await StartupSettingsReconciler.ReconcileAsync(session, registrar, @"C:\fixtures\AIUsageMonitor.exe");
+
+        Assert.True(session.Current.StartWithWindows);
+        Assert.Empty(store.SavedSettings);
+    }
+
     [Fact]
     public void DefaultValueName_MatchesLegacyParity()
     {

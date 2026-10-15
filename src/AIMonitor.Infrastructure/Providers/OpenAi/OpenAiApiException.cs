@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace AIMonitor.Infrastructure.Providers.OpenAi;
 
 /// <summary>
@@ -9,10 +11,12 @@ namespace AIMonitor.Infrastructure.Providers.OpenAi;
 internal sealed class OpenAiApiException : Exception
 {
     public bool Unauthorized { get; }
+    public HttpStatusCode? StatusCode { get; }
 
-    public OpenAiApiException(string message, bool unauthorized = false)
+    public OpenAiApiException(string message, bool unauthorized = false, HttpStatusCode? statusCode = null)
         : base(message)
     {
         Unauthorized = unauthorized;
+        StatusCode = statusCode;
     }
 }

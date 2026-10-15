@@ -101,25 +101,54 @@ public sealed class GeminiCliCredentialReaderTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadAsync_ScopeMissingCloudPlatform_ReturnsNullRatherThanLimited()
+    public async Task ReadAsync_InsufficientMonitoringScope_ReturnsLimitedCredential()
     {
-        // Matches the Python baseline's actual code (not its aspirational docstring): a token that
-        // cannot read Cloud Monitoring is treated as though nothing was found here.
         WriteOAuthCreds(OAuthJson(scope: "https://www.googleapis.com/auth/userinfo.email"));
 
         var credential = await ReadAsync();
 
-        Assert.Null(credential);
+        Assert.NotNull(credential);
+        Assert.False(credential.UsageCapable);
+        Assert.Contains("Cloud Monitoring", credential.LimitedReason);
+        Assert.Contains("Run `gemini`", credential.LimitedReason);
+        Assert.Equal(string.Empty, credential.Value);
     }
 
     [Fact]
-    public async Task ReadAsync_MissingScopeField_ReturnsNull()
+    public async Task ReadAsync_InsufficientMonitoringScope_DoesNotRetainTokenValue()
+    {
+        WriteOAuthCreds(OAuthJson(accessToken: "secret-token", scope: "https://www.googleapis.com/auth/userinfo.email"));
+
+        var credential = await ReadAsync();
+
+        Assert.NotNull(credential);
+        Assert.False(credential.UsageCapable);
+        Assert.Equal(string.Empty, credential.Value);
+    }
+
+    [Fact]
+    public async Task ReadAsync_MissingScopeField_ReturnsLimitedCredential()
     {
         WriteOAuthCreds("""{"access_token":"t"}""");
 
         var credential = await ReadAsync();
 
-        Assert.Null(credential);
+        Assert.NotNull(credential);
+        Assert.False(credential.UsageCapable);
+        Assert.Contains("Cloud Monitoring", credential.LimitedReason);
+    }
+
+    [Theory]
+    [InlineData("https://www.googleapis.com/auth/monitoring")]
+    [InlineData("https://www.googleapis.com/auth/monitoring.read")]
+    public async Task ReadAsync_MonitoringScopes_AreUsageCapable(string scope)
+    {
+        WriteOAuthCreds(OAuthJson(scope: scope));
+
+        var credential = await ReadAsync();
+
+        Assert.NotNull(credential);
+        Assert.True(credential.UsageCapable);
     }
 
     [Fact]

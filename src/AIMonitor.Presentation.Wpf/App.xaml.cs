@@ -9,7 +9,7 @@ using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Version;
 using AIMonitor.Infrastructure.Providers.Claude;
-using AIMonitor.Infrastructure.Providers.Gemini;
+using AIMonitor.Infrastructure.Providers.Agy;
 using AIMonitor.Infrastructure.Providers.OpenAi;
 using AIMonitor.Infrastructure.Storage;
 using AIMonitor.Infrastructure.Time;
@@ -38,7 +38,6 @@ public partial class App : System.Windows.Application
     private DpapiSecretStore? _secretStore;
     private ProviderConnectionStore? _connectionStore;
     private ReconfigurableQuotaClient? _openAiClient;
-    private ReconfigurableQuotaClient? _geminiClient;
     private WindowsStartupRegistrar? _startupRegistrar;
     private LiveSettingsApplier? _liveSettingsApplier;
     private DispatcherTimer? _refreshTimer;
@@ -80,18 +79,40 @@ public partial class App : System.Windows.Application
         _secretStore = new DpapiSecretStore(secretsPath);
         _startupRegistrar = new WindowsStartupRegistrar();
 
+        var firstLaunch = false;
         if (!_settingsStore.Exists)
         {
+            ILegacySettingsReader legacyReader = new LegacyRegistrySettingsReader();
+            try
+            {
+                var legacyValues = legacyReader.ReadAll();
+                firstLaunch = legacyValues.Count == 0;
+                legacyReader = new CapturedLegacySettings(legacyValues);
+            }
+            catch
+            {
+                // An unreadable legacy profile is never treated as a fresh profile.
+            }
+
             var migrationUseCase = new MigrateLegacySettingsUseCase(
                 _settingsStore,
                 _secretStore,
-                new LegacyRegistrySettingsReader(),
+                legacyReader,
                 new LegacyDpapiSecretUnsealer());
 
             await migrationUseCase.ExecuteAsync();
         }
 
         _settingsSession = await SettingsSession.CreateAsync(_settingsStore);
+        try
+        {
+            var preserveInstallerIntent = File.Exists(Path.Combine(AppContext.BaseDirectory, "preserve-startup-intent"));
+            await StartupSettingsReconciler.ReconcileAsync(_settingsSession, _startupRegistrar, Environment.ProcessPath!, firstLaunch, preserveInstallerIntent);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            // Startup registration is optional; failure must not prevent the dashboard from opening.
+        }
 
         // 3. Theme Application (PAR-028)
         TitleBarTheme.Install(ThemeManager.Instance);
@@ -117,20 +138,13 @@ public partial class App : System.Windows.Application
                 return new OpenAiLiveQuotaClient(_httpClient, userProfile, clock, savedAdminKey: conn.Key, monthlyBudgetUsd: monthlyBudget);
             });
 
-        _geminiClient = new ReconfigurableQuotaClient(
-            _connectionStore,
-            "gemini",
-            conn =>
-            {
-                var projectOverride = string.IsNullOrWhiteSpace(conn.Extra) ? null : conn.Extra;
-                return new GeminiLiveQuotaClient(_httpClient, userProfile, clock, savedServiceAccountPath: conn.Key, projectOverride: projectOverride);
-            });
+        var agyClient = new AgyQuotaClient(new AgyUsageRunner(), clock);
 
         var registrations = new[]
         {
             new ProviderClientRegistration("claude", claudeClient),
             new ProviderClientRegistration("openai", _openAiClient),
-            new ProviderClientRegistration("gemini", _geminiClient)
+            new ProviderClientRegistration("agy", agyClient)
         };
 
         var refreshUseCase = new RefreshProvidersUseCase(registrations);
@@ -220,6 +234,11 @@ public partial class App : System.Windows.Application
                 }
             },
             ShutdownApp);
+    }
+
+    private sealed class CapturedLegacySettings(IReadOnlyDictionary<string, object?> values) : ILegacySettingsReader
+    {
+        public IReadOnlyDictionary<string, object?> ReadAll() => values;
     }
 
     private ITrayHost CreateTrayHost()
@@ -333,7 +352,7 @@ public partial class App : System.Windows.Application
             {
                 ("claude", "Claude"),
                 ("openai", "OpenAI / Codex"),
-                ("gemini", "Gemini")
+                ("agy", "AGY")
             };
 
             var snapshots = _mainViewModel?.LatestSnapshots ?? new Dictionary<string, Domain.ProviderSnapshot>();
@@ -463,7 +482,6 @@ public partial class App : System.Windows.Application
         _liveSettingsApplier?.Shutdown();
         _ = _refreshCoordinator?.DisposeAsync();
         _openAiClient?.Dispose();
-        _geminiClient?.Dispose();
         _httpClient?.Dispose();
         _singleInstanceCoordinator?.Dispose();
         ThemeManager.Instance.Dispose();

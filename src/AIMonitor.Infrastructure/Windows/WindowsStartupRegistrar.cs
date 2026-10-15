@@ -36,7 +36,9 @@ public sealed class WindowsStartupRegistrar : IStartupRegistrar
 
     public string ValueName => _valueName;
 
-    public bool IsRegistered()
+    public bool IsRegistered() => GetRegistrationState() ?? false;
+
+    public bool? GetRegistrationState()
     {
         try
         {
@@ -48,7 +50,7 @@ public sealed class WindowsStartupRegistrar : IStartupRegistrar
         }
         catch (Exception ex) when (ex is SecurityException or UnauthorizedAccessException or IOException)
         {
-            return false;
+            return null;
         }
     }
 

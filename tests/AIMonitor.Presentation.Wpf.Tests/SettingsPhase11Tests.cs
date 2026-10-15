@@ -87,11 +87,13 @@ public sealed class SettingsPhase11Tests
         Assert.Equal(3, vm.Providers.Count);
         Assert.All(vm.Providers, p => Assert.True(p.IsEnabled));
 
-        vm.Providers.Single(p => p.Id == "gemini").IsEnabled = false;
+        vm.Providers.Single(p => p.Id == "agy").IsEnabled = false;
         await vm.SaveAsync();
 
         var saved = session.Current.Providers;
-        Assert.False(saved["gemini"].Enabled);
+        Assert.False(saved["agy"].Enabled);
+        Assert.True(saved["gemini"].Enabled);
+        Assert.Empty(saved["agy"].Extra);
         Assert.Equal("my-project", saved["gemini"].Extra);
         Assert.True(saved["claude"].Enabled);
     }

@@ -2,12 +2,17 @@
 
 เอกสารนี้เป็น baseline สำหรับ `R-001` เพื่อย้าย `D:\Dev\Apps\AIMonitor` จาก Python/PySide6 เป็น C# บน Windows โดยอิงพฤติกรรมที่ผู้ใช้มองเห็นและกฎความถูกต้อง ไม่ใช่การแปลโครงสร้างไฟล์เดิมแบบหนึ่งต่อหนึ่ง
 
-สำรวจล่าสุด: 2026-09-27
+สำรวจ baseline: 2026-09-27 · ทบทวนสถานะ implementation: 2026-10-14
 
 ## 1. ขอบเขตที่สำรวจ
 
 - Application source: 39 ไฟล์ Python ประมาณ 10,497 บรรทัด
-- Provider implementations: Claude, OpenAI และ Gemini
+- Provider implementations baseline: Claude, OpenAI และ Gemini
+
+**R-012 (2026-10-15):** ผู้ใช้สั่งแทนเส้นทาง Gemini Cloud Monitoring ด้วย AGY-only CLI usage
+รายการ PAR-011/PAR-012 ด้านล่างเป็นหลักฐาน baseline ในอดีต ไม่ใช่ provider ที่ register ใช้จริงหลัง
+R-012. AGY แสดง shared 5h/weekly quotas ของ Gemini และ Claude/GPT; ไม่สร้าง request counts,
+tokens, spend หรือ history ขึ้นเอง การตรวจรับรุ่นปัจจุบันให้ดู Requirements.md R-012 และ handoff ของข้อนั้น
 - Automated tests: 20 ไฟล์ ประมาณ 5,973 บรรทัด รวม 341 test cases
 - Packaging: PyInstaller one-file/one-directory และ Inno Setup
 - แหล่งข้อมูลหลัก: `README.md`, `GUIDELINES.md`, source ใน `ai_usage_monitor/` และ tests ใน `tests/`
@@ -16,7 +21,10 @@
 
 ## 2. Behavioral parity matrix
 
-สถานะเริ่มต้นทุกข้อเป็น `Not started` และต้องเปลี่ยนเป็น `Verified` ด้วยหลักฐานการทดสอบใน C# solution
+`Verified` ในตารางนี้เป็นสถานะ automated baseline ของ R-001 ที่บันทึกไว้เดิม ไม่ใช่ผลตรวจรับ R-004
+และไม่ใช่คะแนนความเหมือน 100% ตาราง acceptance ปัจจุบันแยกอยู่ใน `PARITY_ACCEPTANCE.md`
+ผล local full suite ล่าสุดและข้อจำกัดอยู่ใน `STATUS_2026-10-14.md`; commits เฟส 5–11b มีแล้ว
+แต่ไม่อนุมานว่าทุกเฟสผ่าน independent review หรือ owner acceptance จากชื่อ commit
 
 | ID | Area | พฤติกรรมที่ต้องรักษา | หลักฐานจากรุ่นเดิม | สถานะ |
 |---|---|---|---|---|
@@ -52,9 +60,9 @@
 | PAR-030 | Reports | report มาจาก snapshots ที่แสดงอยู่ ไม่ fetch ใหม่; แสดง failed/no-history sections และไม่สร้างข้อมูลที่ไม่มี | `report.py`, `test_report.py` → `UsageReportGenerator` (build from LatestSnapshots, Markdown/CSV/HTML, no re-fetch) + `UsageReportGeneratorTests` (C#) | Verified |
 | PAR-031 | Export/print | export CSV/Markdown/HTML, escape content, filename มีวันที่ และ print preview ใช้ light palette | `log_dialog.py`, `test_report.py` → `UsageLogDialog`/`UsageLogViewModel` (Save as CSV/MD/HTML, PrintDialog) + `UsageLogViewModelTests` (C#) | Verified |
 | PAR-032 | Menus/shortcuts | คงคำสั่ง Refresh, Sign-in, Log, Print, Exit, startup, theme, widget, settings, About และ shortcuts ที่ใช้ได้ใน widget mode | README Menus → `MainWindow.xaml` InputBindings (F5, F1, Ctrl+L, Ctrl+P, Ctrl+W) + header & tray context menu (C#) | Verified |
-| PAR-033 | Update check | ตรวจ GitHub release แบบ read-only, ไม่ดาวน์โหลด/ติดตั้ง, แยก private/rate-limit/offline และ fallback ไป highest tag | `about_dialog.py`, `version.py`, `test_version.py` → `GitHubVersionChecker` (/releases/latest + /tags fallback, semantic version, rate-limit recognition) + `GitHubVersionCheckerTests` (C#) | Verified |
+| PAR-033 | Update check | ตรวจ GitHub release, แยก private/rate-limit/offline และ fallback ไป highest tag; โค้ดปัจจุบันมี optional installer download/run หลังยืนยันบน UI (ต่างจาก baseline เดิม ต้องรับรองข้อยกเว้นใน R-004) | `GitHubVersionCheckerTests`, `UpdateDownloaderTests`, `UpdateCoordinatorTests` | Automated tests pass; exception pending |
 | PAR-034 | Documents | เปิด README, GPL-3.0 license, third-party notices และ developer information จากตัวแอปได้ | `readme_dialog.py`, main window About menu → `AboutDialog`/`AboutViewModel` (developer info, GPL-3.0, README link) + `AboutViewModelTests` (C#) | Verified |
-| PAR-035 | Versioning | app, executable metadata และ installer ใช้ชื่อ/เวอร์ชันจาก source of truth เดียว; installer identity ต้องรองรับ upgrade แทน side-by-side | version tests, Inno Setup config → `Directory.Build.props` (VersionPrefix=2.0.0), `AssemblyName=AIUsageMonitor`, `installer/AIMonitor2.iss` (new AppId distinct from 1.x) | Verified |
+| PAR-035 | Versioning | app, executable metadata และ installer ใช้ชื่อ/เวอร์ชันจาก source of truth เดียว; installer identity ต้องรองรับ upgrade แทน side-by-side | `Directory.Build.props` → `build_installer.ps1` → Inno `/DAppVersion`; legacy Python AppId/dir preserved | Compile verified; upgrade pending |
 | PAR-036 | Resource lifecycle | ปิด subprocess, pipes, HTTP work และ background workers เมื่อยกเลิก/ออก; tray-idle ลด timers/กราฟที่ไม่จำเป็น | refresh lifecycle tests, README Resource use → `App.OnExit` (disposing timers, tray, HTTP clients, single instance mutex/pipes) + cancellation tokens (C#) | Verified |
 
 ## 3. Implementation ที่ไม่ต้องเหมือน Python
@@ -91,7 +99,7 @@
 5. ทำ UI/component tests สำหรับ widget sizing/navigation และ manual smoke สำหรับ tray/DPI/printing
 6. ทุก regression test ใหม่ต้องพิสูจน์ว่า fail เมื่อย้อน production behavior ที่มันคุ้มครอง
 
-## 6. Open decisions for Phase 2
+## 6. Historical questions from Phase 2
 
 - .NET target: ใช้ SDK ที่ติดตั้งอยู่หรือกำหนด LTS รุ่นใหม่พร้อม installation policy
 - Desktop UI framework: WPF, WinUI 3 หรือทางเลือกอื่น โดยพิจารณา tray, custom drawing, DPI, accessibility, startup footprint และ installer
@@ -99,6 +107,10 @@
 - HTTP/process abstraction และ JSON contract strategy สำหรับ provider payloads
 - Packaging: self-contained/framework-dependent, architecture targets, signing และ installer technology
 - Compatibility policy กับ installation รุ่น Python รวมถึง AppId, startup entry และ single-instance identity
+
+รายการนี้เป็นประวัติคำถามเดิม ข้อเลือกปัจจุบันคือ .NET 10/WPF, atomic JSON settings/DPAPI,
+injected HTTP/process transports, Inno Setup self-contained win-x64 และ in-place upgrade ตาม ADR-0001–0003
+Code signing, coverage threshold และ owner/manual acceptance ยังไม่ได้ปิด
 
 ## 7. Phase 1 exit criteria
 

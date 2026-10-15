@@ -24,7 +24,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipTests,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [string]$IsccPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -35,6 +36,9 @@ $Sln     = Join-Path $Root 'AIMonitor.sln'
 $WpfProj = Join-Path $Root 'src\AIMonitor.Presentation.Wpf\AIMonitor.Presentation.Wpf.csproj'
 $PubOut  = Join-Path $Root 'publish\win-x64'
 $IssFile = Join-Path $Root 'installer\AIMonitor2.iss'
+$buildProperties = [xml](Get-Content -Raw -LiteralPath (Join-Path $Root 'Directory.Build.props'))
+$Version = $buildProperties.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'VersionPrefix must be a three-part numeric version.' }
 
 function Step([string]$label) { Write-Host "`n=== $label ===" -ForegroundColor Cyan }
 
@@ -52,7 +56,19 @@ if (-not $SkipTests) {
 
 # ── 3. Publish release ────────────────────────────────────────────────────────
 Step "Publish win-x64 self-contained"
-if (Test-Path $PubOut) { Remove-Item $PubOut -Recurse -Force }
+# Refuse to clean anything outside the workspace, including junction/symlink targets.
+$resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+$resolvedOutput = [IO.Path]::GetFullPath($PubOut)
+if (-not $resolvedOutput.StartsWith($resolvedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Publish output is outside the repository.'
+}
+foreach ($candidate in @((Join-Path $Root 'publish'), $PubOut)) {
+    if ((Test-Path -LiteralPath $candidate) -and
+        ((Get-Item -LiteralPath $candidate).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Publish output must not be a junction or symbolic link.'
+    }
+}
+if (Test-Path -LiteralPath $PubOut) { Remove-Item -LiteralPath $PubOut -Recurse -Force }
 dotnet publish $WpfProj `
     /p:PublishProfile=win-x64-self-contained `
     -o $PubOut `
@@ -63,24 +79,26 @@ $ExePath = Join-Path $PubOut 'AIUsageMonitor.exe'
 if (-not (Test-Path $ExePath)) { throw "Published exe not found at $ExePath" }
 $sizeMB = [math]::Round((Get-Item $ExePath).Length / 1MB, 1)
 Write-Host "  Published: $ExePath ($sizeMB MB)" -ForegroundColor Green
+Copy-Item -LiteralPath $ExePath -Destination (Join-Path $PubOut "AIUsageMonitor $Version.exe")
+foreach ($document in @('README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
+    Copy-Item -LiteralPath (Join-Path $Root $document) -Destination $PubOut
+}
 
 # ── 4. Installer ──────────────────────────────────────────────────────────────
 if (-not $SkipInstaller) {
     Step "Inno Setup — compile installer"
 
     # Look for iscc in common locations
-    $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+    $iscc = if ($IsccPath) { Get-Command $IsccPath -ErrorAction Stop } else { Get-Command iscc -ErrorAction SilentlyContinue }
     if (-not $iscc) {
         $iscc = Get-Command 'C:\Program Files (x86)\Inno Setup 6\iscc.exe' -ErrorAction SilentlyContinue
     }
 
     if (-not $iscc) {
-        Write-Warning "iscc.exe not found on PATH or at default location."
-        Write-Warning "Install Inno Setup 6 from https://jrsoftware.org/isdownload.php"
-        Write-Warning "Skipping installer compilation."
+        throw 'iscc.exe not found. Supply -IsccPath or explicitly use -SkipInstaller.'
     }
     else {
-        & $iscc $IssFile
+        & $iscc "/DAppVersion=$Version" $IssFile
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
 
         $InstallerOut = Join-Path $Root 'installer_out'

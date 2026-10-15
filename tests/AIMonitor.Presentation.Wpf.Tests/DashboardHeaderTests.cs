@@ -84,15 +84,15 @@ public sealed class DashboardHeaderTests
     [Fact]
     public void NotConfigured_ShowsSetupCardAndAccountLabel()
     {
-        var vm = new ProviderTabViewModel("gemini", "Gemini");
-        var detection = new DetectionInfo("gemini", DetectionState.NotConnected, "", "");
+        var vm = new ProviderTabViewModel("agy", "AGY");
+        var detection = new DetectionInfo("agy", DetectionState.NotConnected, "", "");
 
-        vm.UpdateFromSnapshot(new ProviderSnapshot("gemini", configured: false, detection: detection), Now);
+        vm.UpdateFromSnapshot(new ProviderSnapshot("agy", configured: false, detection: detection), Now);
 
         Assert.True(vm.ShowSetupCard);
-        Assert.Equal("Gemini is not set up yet", vm.SetupTitle);
-        Assert.Contains("Cloud Monitoring", vm.SetupHint);
-        Assert.Equal("Gemini is not configured yet", vm.AccountLabel);
+        Assert.Equal("AGY is not set up yet", vm.SetupTitle);
+        Assert.Contains("/usage", vm.SetupHint);
+        Assert.Equal("AGY is not configured yet", vm.AccountLabel);
     }
 
     [Fact]
@@ -134,12 +134,12 @@ public sealed class DashboardHeaderTests
     public async Task SelectingTab_PersistsActiveProvider_AndInitialTabIsRestored()
     {
         await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
-        var store = new BlockingSettingsStore(new AppSettings { ActiveProvider = "gemini" });
+        var store = new BlockingSettingsStore(new AppSettings { ActiveProvider = "agy" });
         store.Release();
-        using var session = new SettingsSession(store, new AppSettings { ActiveProvider = "gemini" });
+        using var session = new SettingsSession(store, new AppSettings { ActiveProvider = "agy" });
         var vm = new MainWindowViewModel(coordinator, session);
 
-        Assert.Equal("gemini", vm.SelectedTab.ProviderId);
+        Assert.Equal("agy", vm.SelectedTab.ProviderId);
 
         vm.SelectedTab = vm.OpenAiTab;
         await session.FlushAsync();

@@ -210,8 +210,7 @@ public sealed class GeminiCredentialResolverTests : IDisposable
     public async Task ResolveAsync_FallbackCandidatesAccumulateAcrossEveryNonNullSource()
     {
         // manual: Limited (incomplete). env: not configured (never becomes a candidate). gemini_cli:
-        // present but not usable for Cloud Monitoring (missing scope -> null, never becomes a
-        // candidate either). gcloud: a user login, Limited. The first non-connected source (manual)
+        // present but Limited for Cloud Monitoring. gcloud: a user login, Limited. The first non-connected source (manual)
         // is what is actually returned, but every source that yielded *something* is still listed.
         WriteManual(IncompleteServiceAccountJson);
         Directory.CreateDirectory(Path.GetDirectoryName(GeminiCliOAuthPath)!);
@@ -222,9 +221,10 @@ public sealed class GeminiCredentialResolverTests : IDisposable
 
         Assert.Equal(DetectionState.Limited, resolution.Detection.State);
         Assert.Equal(GeminiCredentialResolver.ManualSourceId, resolution.Detection.SourceId);
-        Assert.Equal(2, resolution.Detection.Candidates.Count);
+        Assert.Equal(3, resolution.Detection.Candidates.Count);
         Assert.Equal(GeminiCredentialResolver.ManualSourceId, resolution.Detection.Candidates[0].SourceId);
-        Assert.Equal(GeminiCredentialResolver.GcloudAdcSourceId, resolution.Detection.Candidates[1].SourceId);
+        Assert.Equal(GeminiCredentialResolver.GeminiCliSourceId, resolution.Detection.Candidates[1].SourceId);
+        Assert.Equal(GeminiCredentialResolver.GcloudAdcSourceId, resolution.Detection.Candidates[2].SourceId);
     }
 
     [Fact]
@@ -284,5 +284,23 @@ public sealed class GeminiCredentialResolverTests : IDisposable
     {
         await Assert.ThrowsAnyAsync<ArgumentException>(
             () => GeminiCredentialResolver.ResolveAsync(null, NoEnv(), blank!, _clock, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_GeminiCliLimitedScopes_DoesNotMaskUsableGcloudServiceAccount()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(GeminiCliOAuthPath)!);
+        File.WriteAllText(GeminiCliOAuthPath, """{"access_token":"t","scope":"https://www.googleapis.com/auth/userinfo.email"}""");
+        WriteGcloudWindows(CompleteServiceAccountJson);
+
+        var resolution = await ResolveAsync(null, NoEnv());
+
+        Assert.Equal(DetectionState.Connected, resolution.Detection.State);
+        Assert.Equal(GeminiCredentialResolver.GcloudAdcSourceId, resolution.Detection.SourceId);
+        Assert.NotNull(resolution.Credential);
+        Assert.Equal(GeminiCredentialKind.ServiceAccount, resolution.Credential.Kind);
+        Assert.Equal(2, resolution.Detection.Candidates.Count);
+        Assert.Equal(GeminiCredentialResolver.GeminiCliSourceId, resolution.Detection.Candidates[0].SourceId);
+        Assert.Equal(GeminiCredentialResolver.GcloudAdcSourceId, resolution.Detection.Candidates[1].SourceId);
     }
 }

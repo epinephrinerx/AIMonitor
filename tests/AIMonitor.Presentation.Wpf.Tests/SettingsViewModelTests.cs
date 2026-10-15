@@ -88,10 +88,10 @@ public class SettingsViewModelTests
         // Another writer changes geometry/providers/ActiveProvider AFTER view model was constructed
         await session.UpdateAsync(s => s with
         {
-            ActiveProvider = "gemini",
+            ActiveProvider = "agy",
             ChartMetric = "Output tokens",
             LegacyGeometry = new Dictionary<string, string> { ["d0123456789/dash/usedAt"] = "timestamp" },
-            Providers = new Dictionary<string, ProviderPreference> { ["gemini"] = new(true, "extra-val") }
+            Providers = new Dictionary<string, ProviderPreference> { ["agy"] = new(true, "extra-val") }
         });
 
         // User edits dialog fields and saves
@@ -103,10 +103,10 @@ public class SettingsViewModelTests
         // Fields written after construction must survive
         Assert.Equal("dark", session.Current.Theme);
         Assert.Equal(300, session.Current.RefreshIntervalSeconds);
-        Assert.Equal("gemini", session.Current.ActiveProvider);
+        Assert.Equal("agy", session.Current.ActiveProvider);
         Assert.Equal("Output tokens", session.Current.ChartMetric);
         Assert.True(session.Current.LegacyGeometry.ContainsKey("d0123456789/dash/usedAt"));
-        Assert.True(session.Current.Providers.ContainsKey("gemini"));
+        Assert.True(session.Current.Providers.ContainsKey("agy"));
     }
 
     [Fact]
@@ -414,7 +414,7 @@ public class SettingsViewModelTests
         // 2. Concurrently, another component updates session with new ActiveProvider & ChartMetric
         await session.UpdateAsync(s => s with
         {
-            ActiveProvider = "gemini",
+            ActiveProvider = "agy",
             ChartMetric = "Output tokens"
         });
 
@@ -430,11 +430,11 @@ public class SettingsViewModelTests
         Assert.True(lastPreview.WidgetAlwaysOnTop);
         Assert.Equal(1120, lastPreview.DashboardWidth);
         Assert.Equal(820, lastPreview.DashboardHeight);
-        Assert.Equal("gemini", lastPreview.ActiveProvider);
+        Assert.Equal("agy", lastPreview.ActiveProvider);
         Assert.Equal("Output tokens", lastPreview.ChartMetric);
 
         // Session current remains updated with gemini and Output tokens
-        Assert.Equal("gemini", session.Current.ActiveProvider);
+        Assert.Equal("agy", session.Current.ActiveProvider);
         Assert.Equal("Output tokens", session.Current.ChartMetric);
     }
 

@@ -7,11 +7,8 @@
 ;   HKCU / %LOCALAPPDATA%, so a machine-wide install buys nothing.
 ;   A power user who wants a machine-wide install can override in the wizard.
 ;
-; * New AppId (distinct from Python 1.x GUID) — side-by-side capable.
-;   Running `AIMonitor2.iss` will NOT uninstall the legacy Python edition.
-;   If the user wants to retire the old copy they do so manually.
-;   Choosing a new GUID means the two products never accidentally upgrade
-;   each other.
+; * Preserve Python 1.3.3 AppId and directory for in-place upgrade (ADR-0003).
+;   Never remove legacy settings or credentials.
 ;
 ; * Startup-registry entry is owned by the app, not the installer (PAR-024).
 ;   Toggling "Start with Windows" in Settings writes / removes the Run entry.
@@ -26,21 +23,22 @@
 ;
 ; * The resulting installer lands in installer_out\AIUsageMonitor2-Setup-{version}.exe
 ;
-; === Version — keep in sync with Directory.Build.props VersionPrefix ===
-#define AppVersion     "2.0.0"
+; VersionPrefix is passed by build_installer.ps1 from Directory.Build.props.
+#ifndef AppVersion
+  #error Build using build_installer.ps1 (AppVersion must come from Directory.Build.props)
+#endif
 
 ; === Fixed constants — do not change without understanding the impact ===
 #define AppName        "AI Usage Monitor"
-#define AppShortName   "AIUsageMonitor2"
+#define AppShortName   "AIUsageMonitor"
 #define AppPublisher   "Apichart Chantanis"
 #define AppExe         "AIUsageMonitor.exe"
 ; Source is the dotnet publish output directory.
 #define SourceDir      "..\publish\win-x64"
 
 [Setup]
-; New GUID — side-by-side with Python 1.x edition (2F8A6D51...).
-; Do NOT reuse the legacy GUID or 2.x users will silently overwrite 1.x.
-AppId={{B1C4F2E8-3DA7-4F9B-82CE-7A60E3D1F554}
+; Same product as Python 1.3.3; Inno reuses the existing directory/uninstall identity.
+AppId={{2F8A6D51-9C74-4B3E-A1D6-58E07C4B9A12}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -76,7 +74,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 ; Offer to close a running copy rather than failing on locked files.
-CloseApplications=yes
+CloseApplications=force
 RestartApplications=no
 
 [Languages]
@@ -117,8 +115,14 @@ Filename: "{app}\{#AppExe}"; \
 [UninstallDelete]
 ; Remove log files that the app may write beside the executable.
 Type: files; Name: "{app}\*.log"
+Type: files; Name: "{app}\preserve-startup-intent"
 
 [Code]
+var
+  StartupWasEnabled: Boolean;
+  StartupCaptured: Boolean;
+  ExistingInstallation: Boolean;
+
 { -----------------------------------------------------------------------
   Force-close a running copy before touching its files.
   CloseApplications only prompts interactively; a /SILENT run would leave
@@ -126,17 +130,55 @@ Type: files; Name: "{app}\*.log"
   ----------------------------------------------------------------------- }
 procedure StopRunningApp();
 var
-  ResultCode: Integer;
+  Locator, Services, Processes, Process: Variant;
+  I: Integer;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ' + '{#AppExe}',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(500);
+  { Only the executable in this installation, never another same-named app. }
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Services := Locator.ConnectServer('', 'root\CIMV2');
+    Processes := Services.ExecQuery('SELECT * FROM Win32_Process WHERE Name = ''{#AppExe}''');
+    for I := 0 to Processes.Count - 1 do
+    begin
+      Process := Processes.ItemIndex(I);
+      if not VarIsNull(Process.ExecutablePath) then
+        if CompareText(Process.ExecutablePath, ExpandConstant('{app}\{#AppExe}')) = 0 then
+          Process.Terminate();
+    end;
+  except
+    Log('Could not stop the installed executable; Restart Manager handles install file locks.');
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  { Capture once before closing the old process; retain intent across retries. }
+  if not StartupCaptured then
+  begin
+    StartupWasEnabled := RegValueExists(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'AIUsageMonitor');
+    ExistingInstallation :=
+      RegKeyExists(HKCU64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{2F8A6D51-9C74-4B3E-A1D6-58E07C4B9A12}_is1') or
+      RegKeyExists(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{2F8A6D51-9C74-4B3E-A1D6-58E07C4B9A12}_is1') or
+      RegKeyExists(HKCU32, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{2F8A6D51-9C74-4B3E-A1D6-58E07C4B9A12}_is1') or
+      RegKeyExists(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{2F8A6D51-9C74-4B3E-A1D6-58E07C4B9A12}_is1');
+    StartupCaptured := True;
+  end;
   StopRunningApp();
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and ExistingInstallation then
+    if not SaveStringToFile(ExpandConstant('{app}\preserve-startup-intent'), 'Preserve Windows startup intent after upgrade.', False) then
+      RaiseException('Could not record startup intent for this upgrade.');
+  if (CurStep = ssPostInstall) and StartupCaptured and StartupWasEnabled then
+    if not RegWriteStringValue(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'AIUsageMonitor',
+      '"' + ExpandConstant('{app}\{#AppExe}') + '"') then
+      RaiseException('Could not preserve the existing Start with Windows entry.');
+  { An absent entry stays absent. No writes to the legacy settings tree. }
 end;
 
 { Remove the app's own startup entry so an uninstall does not leave

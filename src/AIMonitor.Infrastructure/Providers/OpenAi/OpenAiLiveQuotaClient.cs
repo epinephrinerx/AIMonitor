@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,12 +23,14 @@ public sealed class OpenAiLiveQuotaClient : IProviderQuotaClient
     private const string ProviderId = OpenAiCredentialResolver.ProviderId;
 
     private const string SetupHint =
-        "Sign in to Codex with ChatGPT on this machine to see Codex quota percentages, reset times, " +
-        "and available daily token totals. Requires Codex CLI or the Codex desktop app. The existing " +
-        "login is read-only; open Codex to renew an expired login. A Codex ChatGPT login always takes " +
-        "priority over a saved or environment key. When no Codex ChatGPT login is found, an optional " +
-        "organization Admin key (sk-admin-…) provides API platform spend; regular project keys " +
-        "cannot read API spend.";
+        "To connect Codex with ChatGPT, sign in via terminal: run `codex login` for browser ChatGPT OAuth, or " +
+        "`codex login --device-auth` for device-code flow (enable it in ChatGPT security/workspace settings if required). " +
+        "Run `codex login status` to check mode, then return to AIMonitor and click Refresh.\n\n" +
+        "This app reads existing file-backed login (~/.codex/auth.json) read-only and does not initiate OAuth or " +
+        "refresh external tokens; credential-store-only logins may not be detected. Open Codex to renew an expired login.\n\n" +
+        "Codex OAuth always has priority over API keys (including expired logins), and saved keys are retained. " +
+        "For API platform spend instead, provide an optional organization Admin key (sk-admin-…) via Connections or " +
+        "OPENAI_ADMIN_KEY + restart; ordinary project keys cannot read organization spend.";
 
     private const string CodexValueNote =
         "Codex quota reported by OpenAI. Daily history contains total tokens only; output tokens, " +
@@ -215,21 +218,25 @@ public sealed class OpenAiLiveQuotaClient : IProviderQuotaClient
                 .ConfigureAwait(false);
 
             var meters = CodexQuotaMapper.Meters(result.RateLimits);
+            var rateLimitStats = CodexQuotaMapper.RateLimitStats(result.RateLimits);
             var account = detection.Account.Length > 0 ? $"{detection.Account} · Codex" : "Codex (ChatGPT login)";
 
             UsageHistory? history = null;
-            IReadOnlyList<Stat> stats = [];
+            IReadOnlyList<Stat> historyStats = [];
             if (result.Usage is JsonElement usage)
             {
                 var todayLocal = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, _localTimeZone).DateTime);
-                (history, stats) = CodexQuotaMapper.History(usage, request.HistoryDays, request.Metric, todayLocal);
+                (history, historyStats) = CodexQuotaMapper.History(usage, request.HistoryDays, request.Metric, todayLocal);
             }
+
+            var allStats = new List<Stat>(rateLimitStats);
+            allStats.AddRange(historyStats);
 
             return new ProviderSnapshot(
                 ProviderId,
                 configured: true,
                 meters: meters,
-                stats: stats,
+                stats: allStats,
                 history: history,
                 account: account,
                 // A session that returned zero usable quota windows is a real failure, even though
@@ -292,9 +299,10 @@ public sealed class OpenAiLiveQuotaClient : IProviderQuotaClient
         catch (OpenAiApiException ex)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var failureDetection = UpdateDetectionForAuthError(detection, ex);
             return new ProviderSnapshot(
                 ProviderId, configured: true, unauthorized: ex.Unauthorized, error: ex.Message,
-                detection: detection, setupHint: SetupHint, valueNote: AdminValueNote);
+                detection: failureDetection, setupHint: SetupHint, valueNote: AdminValueNote);
         }
 
         var meters = new List<Meter>(2);
@@ -348,6 +356,10 @@ public sealed class OpenAiLiveQuotaClient : IProviderQuotaClient
                 // the service having failed - the meters are already read and real (PAR-004).
                 cancellationToken.ThrowIfCancellationRequested();
                 historyError = ex.Message;
+                if (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    detection = UpdateDetectionForAuthError(detection, ex);
+                }
             }
         }
 
@@ -814,16 +826,63 @@ public sealed class OpenAiLiveQuotaClient : IProviderQuotaClient
             return new OpenAiApiException(
                 $"OpenAI rejected the key (HTTP {statusCode}). The Usage API needs an organization " +
                 "Admin key (sk-admin-…) with the Usage Dashboard permission.",
-                unauthorized: true);
+                unauthorized: true,
+                statusCode: response.StatusCode);
         }
 
         if (statusCode == 429)
         {
-            return new OpenAiApiException("OpenAI is rate-limiting usage requests. Try again shortly.");
+            return new OpenAiApiException("OpenAI is rate-limiting usage requests. Try again shortly.", statusCode: response.StatusCode);
         }
 
         // No response body is ever echoed here - an arbitrary server-provided message is untrusted.
-        return new OpenAiApiException($"OpenAI usage request failed (HTTP {statusCode}).");
+        return new OpenAiApiException($"OpenAI usage request failed (HTTP {statusCode}).", statusCode: response.StatusCode);
+    }
+
+    private static DetectionInfo UpdateDetectionForAuthError(DetectionInfo detection, OpenAiApiException ex)
+    {
+        var newState = ex.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => DetectionState.Expired,
+            HttpStatusCode.Forbidden => DetectionState.Limited,
+            _ => detection.State,
+        };
+
+        if (newState == detection.State && detection.Hint.Length > 0 && newState != DetectionState.Limited && newState != DetectionState.Expired)
+        {
+            return detection;
+        }
+
+        string hint;
+        if (newState == DetectionState.Expired)
+        {
+            hint = detection.SourceId switch
+            {
+                OpenAiCredentialResolver.EnvSourceId =>
+                    "API key expired or rejected. Check your OPENAI_ADMIN_KEY or OPENAI_API_KEY environment variable.",
+                OpenAiCredentialResolver.CodexCliSourceId =>
+                    "API key expired or rejected. Check your Codex CLI login or sign in again.",
+                _ =>
+                    "API key expired or rejected. Check your key in Settings/Connections.",
+            };
+        }
+        else if (newState == DetectionState.Limited)
+        {
+            hint = ex.Message.Length > 0 ? ex.Message : detection.Hint;
+        }
+        else
+        {
+            hint = detection.Hint;
+        }
+
+        return new DetectionInfo(
+            detection.ProviderId,
+            state: newState,
+            sourceId: detection.SourceId,
+            sourceLabel: detection.SourceLabel,
+            account: detection.Account,
+            hint: hint,
+            candidates: detection.Candidates);
     }
 
     /// <summary>Marker for a response-body failure that must become a fixed safe snapshot: never

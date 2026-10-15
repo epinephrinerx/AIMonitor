@@ -32,11 +32,12 @@ public sealed class ProviderConnectionStore
     {
         var id = NormalizeProviderId(providerId);
 
-        string? key = null;
-        if (id is not "claude")
+        if (id == "agy")
         {
-            key = await _secrets.GetAsync($"providers/{id}/key", cancellationToken).ConfigureAwait(false);
+            return new ProviderConnection(null, "");
         }
+
+        var key = id == "claude" ? null : await _secrets.GetAsync($"providers/{id}/key", cancellationToken).ConfigureAwait(false);
 
         var extra = "";
         if (_session.Current.Providers.TryGetValue(id, out var pref) && pref.Extra is not null)
@@ -67,17 +68,23 @@ public sealed class ProviderConnectionStore
     {
         var id = NormalizeProviderId(providerId);
 
-        if (id is "claude")
+        if (id is "claude" or "agy")
         {
-            var sanitizedClaudeKey = SanitizeKey(typedKey);
-            if (!string.IsNullOrEmpty(sanitizedClaudeKey))
+            var sanitizedKey = SanitizeKey(typedKey);
+            if (!string.IsNullOrEmpty(sanitizedKey))
             {
-                throw new ArgumentException("Claude does not use an API key.", nameof(typedKey));
+                throw new ArgumentException("This provider does not use an API key.", nameof(typedKey));
             }
 
-            if (extra is not null && extra.Trim().Length > 0)
+            if (!string.IsNullOrEmpty(extra?.Trim()))
             {
-                throw new ArgumentException("Claude does not support extra settings.", nameof(extra));
+                throw new ArgumentException("This provider does not support extra settings.", nameof(extra));
+            }
+
+            if (id == "agy")
+            {
+                Changed?.Invoke(id);
+                return;
             }
         }
         else
@@ -131,9 +138,9 @@ public sealed class ProviderConnectionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
         var normalized = providerId.Trim().ToLowerInvariant();
-        if (normalized is not ("claude" or "openai" or "gemini"))
+        if (normalized is not ("claude" or "openai" or "agy" or "gemini"))
         {
-            throw new ArgumentException($"Unknown provider '{providerId}'. Supported providers are claude, openai, and gemini.", nameof(providerId));
+            throw new ArgumentException($"Unknown provider '{providerId}'. Supported providers are claude, openai, and agy.", nameof(providerId));
         }
 
         return normalized;

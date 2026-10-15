@@ -7,10 +7,13 @@ namespace AIMonitor.Infrastructure.Providers.OpenAi;
 /// Real <see cref="ICodexProcess"/>, launching <c>codex app-server --listen stdio://</c> with
 /// <see cref="ProcessStartInfo.ArgumentList"/> (never a hand-built command-line string, so nothing
 /// about the working directory or environment can be misparsed as extra arguments). No window is
-/// created. Production only - tests substitute a hand-written fake instead of a real subprocess.
+/// created. In automated tests, higher-level client suites substitute a hand-written fake rather than
+/// running a live provider CLI, while isolated regression tests exercise this wrapper with synthetic subprocesses.
 /// </summary>
 internal sealed class CodexProcess : ICodexProcess
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly Process _process;
     private bool _disposed;
 
@@ -18,30 +21,7 @@ internal sealed class CodexProcess : ICodexProcess
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var startInfo = new ProcessStartInfo(request.ExecutablePath)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = request.WorkingDirectory,
-            StandardInputEncoding = Encoding.UTF8,
-            StandardOutputEncoding = Encoding.UTF8,
-        };
-        startInfo.ArgumentList.Add("app-server");
-        startInfo.ArgumentList.Add("--listen");
-        startInfo.ArgumentList.Add("stdio://");
-
-        startInfo.Environment.Clear();
-        foreach (var (key, value) in request.Environment)
-        {
-            if (value is not null)
-            {
-                startInfo.Environment[key] = value;
-            }
-        }
-
+        var startInfo = CreateStartInfo(request);
         _process = new Process { StartInfo = startInfo };
         try
         {
@@ -60,6 +40,37 @@ internal sealed class CodexProcess : ICodexProcess
         // does any of its own reading synchronously on the constructor's calling thread. Deliberately
         // not observed any further: DiscardAsync never lets an exception escape it.
         _ = Task.Run(() => TextReaderDrain.DiscardAsync(_process.StandardError));
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(CodexProcessStartRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var startInfo = new ProcessStartInfo(request.ExecutablePath)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = request.WorkingDirectory,
+            StandardInputEncoding = Utf8NoBom,
+            StandardOutputEncoding = Utf8NoBom,
+        };
+        startInfo.ArgumentList.Add("app-server");
+        startInfo.ArgumentList.Add("--listen");
+        startInfo.ArgumentList.Add("stdio://");
+
+        startInfo.Environment.Clear();
+        foreach (var (key, value) in request.Environment)
+        {
+            if (value is not null)
+            {
+                startInfo.Environment[key] = value;
+            }
+        }
+
+        return startInfo;
     }
 
     public TextWriter StandardInput => _process.StandardInput;

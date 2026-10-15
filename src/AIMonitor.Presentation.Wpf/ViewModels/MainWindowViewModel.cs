@@ -35,9 +35,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
-        GeminiTab = new ProviderTabViewModel("gemini", "Gemini");
+        AgyTab = new ProviderTabViewModel("agy", "AGY");
 
-        ProviderTabs = [ClaudeTab, OpenAiTab, GeminiTab];
+        ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
         var settings = _settingsSession.Current;
         _selectedTab = ProviderTabs.FirstOrDefault(t => t.ProviderId == settings.ActiveProvider) ?? ClaudeTab;
         _selectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
@@ -78,7 +78,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public ProviderTabViewModel ClaudeTab { get; }
     public ProviderTabViewModel OpenAiTab { get; }
-    public ProviderTabViewModel GeminiTab { get; }
+    public ProviderTabViewModel AgyTab { get; }
     public IReadOnlyList<ProviderTabViewModel> ProviderTabs { get; }
 
     public IReadOnlyDictionary<string, Domain.ProviderSnapshot> LatestSnapshots => _latestSnapshots;
@@ -328,7 +328,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             // Update tab ViewModels
             if (result.Snapshots.TryGetValue("claude", out var claudeSnap)) ClaudeTab.UpdateFromSnapshot(claudeSnap);
             if (result.Snapshots.TryGetValue("openai", out var openAiSnap)) OpenAiTab.UpdateFromSnapshot(openAiSnap);
-            if (result.Snapshots.TryGetValue("gemini", out var geminiSnap)) GeminiTab.UpdateFromSnapshot(geminiSnap);
+            if (result.Snapshots.TryGetValue("agy", out var agySnap)) AgyTab.UpdateFromSnapshot(agySnap);
 
             // Update connections page view model with latest snapshot detections.
             // In AIMonitor, re-detect triggers a unified refresh across all providers in a single pass.

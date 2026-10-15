@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -25,7 +26,8 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
     private const string SetupHint =
         "Detected automatically from your Gemini CLI login if you have signed in with `gemini` - that " +
         "token already carries the cloud-platform scope this needs. Otherwise point this at a Google " +
-        "Cloud service account JSON with the Monitoring Viewer role. Either way, usage comes from " +
+        "Cloud service account JSON with the Monitoring Viewer role. Specify your Google Cloud project in " +
+        "Settings or with the GOOGLE_CLOUD_PROJECT environment variable. Either way, usage comes from " +
         "Cloud Monitoring, because Google publishes no usage endpoint for Gemini. Gemini Advanced " +
         "subscription limits are not available from any public API.";
 
@@ -44,7 +46,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
 
     private const string NoActiveProjectMessage =
         "This Google account has no active Cloud project. Create one and enable the Generative " +
-        "Language API, then set the project id in Settings.";
+        "Language API, then set the project id in Settings or with GOOGLE_CLOUD_PROJECT.";
 
     private const string RejectedMessage =
         "Google rejected the service account. Check it has the Monitoring Viewer role on the project.";
@@ -182,13 +184,14 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
         try
         {
             token = await GetBearerTokenAsync(credential, cancellationToken).ConfigureAwait(false);
-            project = await ResolveProjectAsync(credential, token, cancellationToken).ConfigureAwait(false);
+            project = await ResolveProjectAsync(credential, token, detection.SourceId, cancellationToken).ConfigureAwait(false);
         }
         catch (GeminiApiException ex)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var failureDetection = UpdateDetectionForAuthError(detection, ex);
             return new ProviderSnapshot(
-                ProviderId, configured: true, detection: detection, setupHint: SetupHint, valueNote: ValueNote,
+                ProviderId, configured: true, detection: failureDetection, setupHint: SetupHint, valueNote: ValueNote,
                 error: ex.Message, unauthorized: ex.Unauthorized);
         }
 
@@ -201,7 +204,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
             var localNow = TimeZoneInfo.ConvertTime(fetchedAt, _localTimeZone);
             var localToday = DateOnly.FromDateTime(localNow.DateTime);
             var dayStartUtc = LocalDayStartUtc(localToday, _localTimeZone);
-            var todayTotal = await GetSeriesTotalAsync(token, project, dayStartUtc, fetchedAt, cancellationToken).ConfigureAwait(false);
+            var todayTotal = await GetSeriesTotalAsync(token, project, dayStartUtc, fetchedAt, detection.SourceId, cancellationToken).ConfigureAwait(false);
 
             var meter = new Meter(
                 kind: "requests_today",
@@ -221,7 +224,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
                 try
                 {
                     var (builtHistory, rangeTotal) = await GetHistoryAsync(
-                        token, project, request.HistoryDays, request.Metric, localToday, fetchedAt, cancellationToken)
+                        token, project, request.HistoryDays, request.Metric, localToday, fetchedAt, detection.SourceId, cancellationToken)
                         .ConfigureAwait(false);
                     history = builtHistory;
                     stats =
@@ -238,6 +241,10 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
                     // (PAR-004).
                     cancellationToken.ThrowIfCancellationRequested();
                     historyError = ex.Message;
+                    if (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                    {
+                        detection = UpdateDetectionForAuthError(detection, ex);
+                    }
                 }
             }
 
@@ -258,9 +265,10 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
         catch (GeminiApiException ex)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var failureDetection = UpdateDetectionForAuthError(detection, ex);
             return new ProviderSnapshot(
                 ProviderId, configured: true, account: account, error: ex.Message, unauthorized: ex.Unauthorized,
-                fetchedAt: fetchedAt, detection: detection, setupHint: SetupHint, valueNote: ValueNote);
+                fetchedAt: fetchedAt, detection: failureDetection, setupHint: SetupHint, valueNote: ValueNote);
         }
     }
 
@@ -382,24 +390,37 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
     private static string Base64UrlEncode(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    private async Task<string> ResolveProjectAsync(GeminiCredential credential, string token, CancellationToken cancellationToken)
+    private async Task<string> ResolveProjectAsync(
+        GeminiCredential credential, string token, string sourceId, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_projectOverride))
         {
-            return _projectOverride;
+            return _projectOverride.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(credential.Project))
         {
-            return credential.Project;
+            return credential.Project.Trim();
         }
 
-        return await DiscoverProjectAsync(token, cancellationToken).ConfigureAwait(false);
+        var envProject = _environmentVariableReader("GOOGLE_CLOUD_PROJECT");
+        if (!string.IsNullOrWhiteSpace(envProject))
+        {
+            return envProject.Trim();
+        }
+
+        var envProjectId = _environmentVariableReader("GOOGLE_CLOUD_PROJECT_ID");
+        if (!string.IsNullOrWhiteSpace(envProjectId))
+        {
+            return envProjectId.Trim();
+        }
+
+        return await DiscoverProjectAsync(token, sourceId, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<string> DiscoverProjectAsync(string token, CancellationToken cancellationToken)
+    private async Task<string> DiscoverProjectAsync(string token, string sourceId, CancellationToken cancellationToken)
     {
-        var body = await GetAuthenticatedAsync(new Uri(CloudResourceManagerUrl), token, CloudResourceManagerHost, cancellationToken)
+        var body = await GetAuthenticatedAsync(new Uri(CloudResourceManagerUrl), token, CloudResourceManagerHost, cancellationToken, sourceId)
             .ConfigureAwait(false);
 
         using var document = ParseJsonOrThrow(body, CloudResourceManagerHost);
@@ -425,12 +446,12 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
     private readonly record struct MonitoringPoint(string? StartTime, string? EndTime, long Value);
 
     private async Task<long> GetSeriesTotalAsync(
-        string token, string project, DateTimeOffset start, DateTimeOffset end, CancellationToken cancellationToken)
+        string token, string project, DateTimeOffset start, DateTimeOffset end, string sourceId, CancellationToken cancellationToken)
     {
         var totalSeconds = (end - start).TotalSeconds;
         var periodSeconds = totalSeconds > int.MaxValue ? int.MaxValue : Math.Max(60, (int)totalSeconds);
 
-        var points = await QueryMonitoringAsync(token, project, start, end, periodSeconds, cancellationToken).ConfigureAwait(false);
+        var points = await QueryMonitoringAsync(token, project, start, end, periodSeconds, sourceId, cancellationToken).ConfigureAwait(false);
 
         long total = 0;
         foreach (var point in points)
@@ -443,7 +464,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
 
     private async Task<(UsageHistory History, long Total)> GetHistoryAsync(
         string token, string project, int days, string metric, DateOnly localToday, DateTimeOffset endUtc,
-        CancellationToken cancellationToken)
+        string sourceId, CancellationToken cancellationToken)
     {
         if (days is < 1 or > MaxHistoryDays)
         {
@@ -455,7 +476,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
         var first = localToday.AddDays(-(days - 1));
         var startUtc = LocalDayStartUtc(first, _localTimeZone);
 
-        var points = await QueryMonitoringAsync(token, project, startUtc, endUtc, 86_400, cancellationToken).ConfigureAwait(false);
+        var points = await QueryMonitoringAsync(token, project, startUtc, endUtc, 86_400, sourceId, cancellationToken).ConfigureAwait(false);
 
         var byDay = new Dictionary<DateOnly, long>();
         foreach (var point in points)
@@ -502,7 +523,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
     }
 
     private async Task<IReadOnlyList<MonitoringPoint>> QueryMonitoringAsync(
-        string token, string project, DateTimeOffset start, DateTimeOffset end, int periodSeconds, CancellationToken cancellationToken)
+        string token, string project, DateTimeOffset start, DateTimeOffset end, int periodSeconds, string sourceId, CancellationToken cancellationToken)
     {
         IReadOnlyList<(string Key, string Value)> baseQuery =
         [
@@ -526,7 +547,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
             }
 
             var uri = BuildUri(string.Format(CultureInfo.InvariantCulture, MonitoringUrlTemplate, Uri.EscapeDataString(project)), query);
-            var body = await GetAuthenticatedAsync(uri, token, MonitoringHost, cancellationToken).ConfigureAwait(false);
+            var body = await GetAuthenticatedAsync(uri, token, MonitoringHost, cancellationToken, sourceId).ConfigureAwait(false);
             using var document = ParseJsonOrThrow(body, MonitoringHost);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
@@ -726,20 +747,21 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
 
     // -- HTTP transport -------------------------------------------------------
 
-    private async Task<string> GetAuthenticatedAsync(Uri uri, string token, string host, CancellationToken cancellationToken)
+    private async Task<string> GetAuthenticatedAsync(
+        Uri uri, string token, string host, CancellationToken cancellationToken, string? sourceId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.UserAgent.TryParseAdd(UserAgentValue);
-        return await SendAsync(request, host, cancellationToken).ConfigureAwait(false);
+        return await SendAsync(request, host, cancellationToken, sourceId).ConfigureAwait(false);
     }
 
     private async Task<string> PostFormAsync(
-        Uri uri, IReadOnlyDictionary<string, string> form, string host, CancellationToken cancellationToken)
+        Uri uri, IReadOnlyDictionary<string, string> form, string host, CancellationToken cancellationToken, string? sourceId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new FormUrlEncodedContent(form) };
         request.Headers.UserAgent.TryParseAdd(UserAgentValue);
-        return await SendAsync(request, host, cancellationToken).ConfigureAwait(false);
+        return await SendAsync(request, host, cancellationToken, sourceId).ConfigureAwait(false);
     }
 
     private static Uri BuildUri(string baseUrl, IReadOnlyList<(string Key, string Value)> query)
@@ -748,7 +770,8 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
         return new Uri($"{baseUrl}?{queryString}");
     }
 
-    private async Task<string> SendAsync(HttpRequestMessage request, string host, CancellationToken cancellationToken)
+    private async Task<string> SendAsync(
+        HttpRequestMessage request, string host, CancellationToken cancellationToken, string? sourceId = null)
     {
         using var timeoutCts = new CancellationTokenSource(_timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -782,7 +805,7 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
             if (!response.IsSuccessStatusCode)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                throw MapErrorResponse(response, host);
+                throw MapErrorResponse(response, host, sourceId);
             }
 
             try
@@ -802,17 +825,78 @@ public sealed class GeminiLiveQuotaClient : IProviderQuotaClient
         }
     }
 
-    private static GeminiApiException MapErrorResponse(HttpResponseMessage response, string host)
+    private static GeminiApiException MapErrorResponse(HttpResponseMessage response, string host, string? sourceId = null)
     {
         var statusCode = (int)response.StatusCode;
 
-        if (statusCode is 401 or 403)
+        if (statusCode == 401)
         {
-            return new GeminiApiException(RejectedMessage, unauthorized: true);
+            var msg = sourceId == GeminiCredentialResolver.GeminiCliSourceId
+                ? $"Gemini CLI credentials rejected by {host} (HTTP 401)."
+                : $"Google rejected the service account credentials on {host} (HTTP 401).";
+            return new GeminiApiException(msg, unauthorized: true, statusCode: response.StatusCode, host: host);
+        }
+
+        if (statusCode == 403)
+        {
+            if (string.Equals(host, CloudResourceManagerHost, StringComparison.OrdinalIgnoreCase))
+            {
+                return new GeminiApiException(
+                    "Project discovery failed on cloudresourcemanager.googleapis.com (HTTP 403). Set your Google Cloud project explicitly in Settings or via GOOGLE_CLOUD_PROJECT.",
+                    unauthorized: true,
+                    statusCode: response.StatusCode,
+                    host: host);
+            }
+
+            var msg = sourceId == GeminiCredentialResolver.GeminiCliSourceId
+                ? "Gemini CLI login lacks Cloud Monitoring access (HTTP 403). Check project, IAM (Monitoring Viewer role), and Cloud Monitoring API access."
+                : "Google rejected the service account (HTTP 403). Check project, IAM (Monitoring Viewer role), and Cloud Monitoring API access.";
+
+            return new GeminiApiException(msg, unauthorized: true, statusCode: response.StatusCode, host: host);
         }
 
         // No response body is ever echoed here - an arbitrary server-provided message is untrusted.
-        return new GeminiApiException($"{host} returned HTTP {statusCode}.");
+        return new GeminiApiException($"{host} returned HTTP {statusCode}.", statusCode: response.StatusCode, host: host);
+    }
+
+    private static DetectionInfo UpdateDetectionForAuthError(DetectionInfo detection, GeminiApiException ex)
+    {
+        var newState = ex.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => DetectionState.Expired,
+            HttpStatusCode.Forbidden => DetectionState.Limited,
+            _ => detection.State,
+        };
+
+        if (newState == detection.State && detection.Hint.Length > 0 && newState != DetectionState.Limited && newState != DetectionState.Expired)
+        {
+            return detection;
+        }
+
+        string hint;
+        if (newState == DetectionState.Expired)
+        {
+            hint = detection.SourceId == GeminiCredentialResolver.GeminiCliSourceId
+                ? "Run `gemini` and sign in again to refresh the token."
+                : "Service account key was rejected or revoked. Check the service account key in Settings or Google Cloud Console.";
+        }
+        else if (newState == DetectionState.Limited)
+        {
+            hint = ex.Message.Length > 0 ? ex.Message : detection.Hint;
+        }
+        else
+        {
+            hint = detection.Hint;
+        }
+
+        return new DetectionInfo(
+            detection.ProviderId,
+            state: newState,
+            sourceId: detection.SourceId,
+            sourceLabel: detection.SourceLabel,
+            account: detection.Account,
+            hint: hint,
+            candidates: detection.Candidates);
     }
 
     /// <summary>Marker for a response-body failure that must become a fixed safe error: never carries

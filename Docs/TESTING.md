@@ -69,6 +69,16 @@ dotnet format AIMonitor.sln --verify-no-changes --no-restore
 
 ## 5. Test data and isolation
 
+### AGY provider (R-012)
+
+AGY automated tests use supplied synthetic JSON groups and an injected runner/process boundary.
+Never execute the real `agy /usage` or access an AGY account in the test suite. Cover remaining-vs-used
+conversion, 0/1 fractions, missing/invalid/duplicate windows, strict reset timestamps, empty/error
+envelopes, bounded output, concurrent pipe drains, deadline/cancellation and child cleanup. Settings
+tests verify legacy Gemini Enabled/active compatibility without migrating keys or project Extra.
+ScreenEvidence supplies AGY pools directly without a CLI. Legacy Gemini adapter tests remain
+historical compatibility checks; they do not imply runtime registration.
+
 - ใช้ synthetic data เท่านั้น; ห้ามใช้ credential, token หรือ payload จาก account จริงไม่ว่ากรณีใด
 - Local test ต้องใช้ disposable fixture เท่านั้น และห้ามเข้าถึง production หรือ real credentials
   (สอดคล้องกับ `AGENTS.md`/`CLAUDE.md`)
@@ -108,8 +118,9 @@ dotnet format AIMonitor.sln --verify-no-changes --no-restore
 
 ## 7. CI quality gates
 
-Pull request ต้องผ่านตามลำดับนี้ (pipeline file เช่น `.github/workflows/ci.yml` **ยังไม่ถูกสร้างใน
-เฟสนี้** ตาม constraint ของ Phase 2 — รายการนี้คือ gate ที่ pipeline ในอนาคตต้อง encode):
+Pull request ใช้ `.github/workflows/ci.yml` บน Windows runner: restore → format → build → full tests
+→ dependency audit → self-contained package ไม่มี deployment/release step รายการด้านล่างคือ gates
+และ release verification policy; remote workflow run ยังไม่เกิดจนกว่าจะ push workflow
 
 1. `dotnet format --verify-no-changes`
 2. `dotnet build AIMonitor.sln` พร้อม warnings-as-errors ตามที่ `Directory.Build.props` กำหนดจากส่วนกลาง
@@ -122,8 +133,8 @@ Pull request ต้องผ่านตามลำดับนี้ (pipeline
    ที่ Inno Setup ต้องใช้จริง
 7. `dotnet list package --vulnerable --include-transitive` (dependency/security check)
 
-CI configuration: ยังไม่มี path จริง — บันทึกไว้ที่นี่ว่าต้องสร้างเป็น GitHub Actions workflow (หรือ
-เทียบเท่า) ที่รันบน Windows runner เนื่องจากมี WPF และ Windows-specific integration test
+CI configuration: `.github/workflows/ci.yml`, `windows-2025`, SDK จาก `global.json`, actions pin ด้วย
+commit SHA และใช้ `contents: read`/ไม่คง checkout credentials ผล local gatesอยู่ใน `STATUS_2026-10-14.md`
 
 Flaky test ห้าม rerun จนเขียวแล้วละเลย ให้เก็บหลักฐาน เปิด issue และ quarantine เฉพาะเมื่อมีเจ้าของกับ
 วันติดตามชัดเจน
@@ -160,6 +171,19 @@ Critical smoke checklist (อ้างอิง parity ID จาก `Docs/FEATUR
   (ไม่ถูก installer เปิดขึ้นมาเอง)
 - Error handling และ recovery ที่สำคัญ: ตัด network ระหว่าง refresh ต้องไม่ทำให้แอป crash หรือค้าง UI
   thread
+- Standalone offline Codex CLI handshake (อยู่นอก default automated test suite):
+  เมื่อต้องการตรวจ handshake กับ Codex CLI ที่ติดตั้งบนเครื่องจริง (เช่น หลังแก้ protocol/transport encoding) ให้รัน offline probe แยกต่างหาก โดยห้ามนำ subprocess จริงของ Codex เข้าไปใน automated test suite (คงข้อห้ามตาม §4 และ §5 อย่างเคร่งครัด):
+  ```sh
+  python scripts/verify_codex_handshake.py --codex-executable "<path/to/codex.exe>"
+  ```
+  Script นี้จะ:
+  - รับ path ชัดเจนผ่าน `--codex-executable`
+  - ยิงเฉพาะ JSON-RPC `initialize` method เท่านั้น (ไม่เรียก account, login, auth token หรือ quota endpoint ใด ๆ)
+  - กำหนด environment ให้สะอาดและตัดตัวแปร credentials ทั้งหมด (`OPENAI_*`, `CODEX_*`, `ANTHROPIC_*`, `CLAUDE_*`, `GEMINI_*`, `GOOGLE_*`)
+  - ใช้ `CODEX_HOME` ชั่วคราวที่ว่างเปล่าและแยกอิสระใต้ workspace `artifacts/verification/codex-handshake/` พร้อมล้างทิ้งอัตโนมัติเมื่อเสร็จสิ้น
+  - รองรับ JSON-RPC notification และรอ response id ที่ตรงกัน พร้อมกำหนด I/O deadline
+  - รับประกันการ kill/wait child process และล้าง temp directory ใน `finally` block เสมอ
+  - ไม่พึ่งพา credentials จริง และไม่เปิดเผย subprocess stderr หรือ payload สุ่มเสี่ยง
 
 ## 9. Failure handling
 
@@ -198,7 +222,7 @@ Critical smoke checklist (อ้างอิง parity ID จาก `Docs/FEATUR
 - CI gates ใน §7 ผ่านจาก commit ที่จะ release
 - Migration test (legacy Registry → `settings.json`) และ upgrade-in-place test (ADR-0002, ADR-0003)
   ผ่าน รวมถึง negative test ที่ยืนยันว่าไม่มีการลบ/เขียนทับ legacy Registry values
-- Installer (`installer/AIMonitor.iss` เมื่อสร้างแล้ว) build ได้แบบทำซ้ำได้ด้วย ISCC.exe จาก artifact
+- Installer (`installer/AIMonitor2.iss`) build ได้แบบทำซ้ำได้ด้วย ISCC.exe จาก artifact
   ของ `dotnet publish src/AIMonitor.Presentation.Wpf -c Release -r win-x64 --self-contained true`
   เดียวกับที่ CI ตรวจใน §7 ข้อ 6 (ไม่ใช่ output ของ `dotnet build -c Release`)
 - Manual smoke checklist ใน §8 ผ่านบน Windows environment ที่สะอาด (clean install) และบน environment
@@ -207,3 +231,29 @@ Critical smoke checklist (อ้างอิง parity ID จาก `Docs/FEATUR
   upgrade มีปัญหา (legacy Registry ที่ไม่ถูกลบทำให้ rollback ไปรุ่น Python เดิมยังทำได้ในกรณีฉุกเฉิน)
 - Monitoring/alert: ไม่ใช้บังคับ — แอปไม่มี server-side component ให้ monitor; สัญญาณหลังปล่อยคือ
   local rolling log และ error report ที่ผู้ใช้ส่งมาเอง
+
+## 12. Local packaging and synthetic screen evidence
+
+```powershell
+./scripts/verify_packages.ps1
+./build_installer.ps1 -SkipInstaller
+# Optional compiler preparation stays inside artifacts, with publisher-signature validation.
+./scripts/install_inno_portable.ps1
+./build_installer.ps1 -IsccPath ./artifacts/tools/inno/compiler/ISCC.exe
+
+dotnet run --project tools/AIMonitor.ScreenEvidence -- tests/Fixtures/Parity/screens.json artifacts/verification/wpf
+python -m pip install --target artifacts/verification/python PySide6==6.12.0 psutil==7.2.2
+python scripts/render_legacy_screens.py D:/Dev/Apps/AIMonitor tests/Fixtures/Parity/screens.json artifacts/verification/legacy
+```
+
+`build_installer.ps1` อ่าน VersionPrefix จาก `Directory.Build.props`; compiler ที่ไม่มีถือว่า fail
+ยกเว้นระบุ `-SkipInstaller` ชัดเจน Output คือ `publish/win-x64/AIUsageMonitor.exe`,
+`AIUsageMonitor <version>.exe` และ `installer_out/AIUsageMonitor Setup <version>.exe`
+Publish directory จะถูกล้างเฉพาะ path ใน repo ที่ไม่ใช่ junction/symlink; ไม่ล้าง settings ของเครื่อง
+
+ScreenEvidence ใช้ production WPF views กับ in-memory provider/settings/secret/startup/version ports
+Qt harness ใช้ baseline UI โดยปิด worker/tray/network startup และ inject QSettings แบบ INI ใน artifacts
+ทั้งสองอ่าน `tests/Fixtures/Parity/screens.json` ชุดเดียวกัน ภาพเป็น **client-area renders** ไม่รวม native
+title bar, notification-area shell หรือ DPI จริง ไม่เท่ากับ manual OS screenshots ตาม R-004
+README/LICENSE/Notices และ version text เป็นเนื้อหาของแต่ละรุ่นจึงต่างกัน ต้องบันทึกข้อยกเว้นและให้ผู้ใช้รับรอง
+ดู `PARITY_ACCEPTANCE.md` สำหรับคะแนน/สถานะที่ยังไม่ได้ตรวจรับ

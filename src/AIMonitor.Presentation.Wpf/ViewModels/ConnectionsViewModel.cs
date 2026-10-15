@@ -14,7 +14,7 @@ public sealed class ConnectionsViewModel : ViewModelBase
 
     public ConnectionCardViewModel ClaudeCard { get; }
     public ConnectionCardViewModel OpenAiCard { get; }
-    public ConnectionCardViewModel GeminiCard { get; }
+    public ConnectionCardViewModel AgyCard { get; }
     public IReadOnlyList<ConnectionCardViewModel> Cards { get; }
 
     /// <summary>
@@ -67,8 +67,8 @@ public sealed class ConnectionsViewModel : ViewModelBase
 
         ClaudeCard = new ConnectionCardViewModel(ProviderMeta.Claude);
         OpenAiCard = new ConnectionCardViewModel(ProviderMeta.OpenAi);
-        GeminiCard = new ConnectionCardViewModel(ProviderMeta.Gemini);
-        Cards = [ClaudeCard, OpenAiCard, GeminiCard];
+        AgyCard = new ConnectionCardViewModel(ProviderMeta.Agy);
+        Cards = [ClaudeCard, OpenAiCard, AgyCard];
 
         foreach (var card in Cards)
         {

@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-10-01  
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-10-15
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -67,7 +67,7 @@
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (เฟส 0) |
+| สถานะ | 🔨 กำลังตรวจสอบและปิดช่องว่าง — โค้ดถึงเฟส 11b; ยังไม่ตรวจรับ R-004 |
 | วันที่ | 2026-10-01 |
 | แตะส่วนไหน | git baseline · App/MainWindow/WidgetWindow settings flow · WidgetViewModel · Connections/ConnectDialog · SettingsDialog · widget layout · header/เมนู · เอกสาร |
 | เกี่ยวกับ | [[R-001]] · [[R-003]] · `Docs/FEATURE_PARITY.md` PAR-014/015/019/027/032 |
@@ -102,7 +102,7 @@
 - [x] เฟส 2: เปลี่ยน opacity/topmost/ShowTrayIcon/interval ใน Settings แล้วมีผลทันที — ตรวจแล้ว: build 0 warning, 1003 tests ผ่าน, format สะอาด, mutation แดงจริง (ยกเว้น 3 จุดที่ต้องตรวจมือ ระบุใน `Docs/REVIEW_R002_P2.md`), Reviewer 2 ตัวตรวจแล้ว; branch `agent/antigravity-widget-tray-live-settings` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อใน REVIEW_R002_P2)
 - [x] เฟส 3: Connections page + ConnectDialog + เส้นทางเขียน secret; key ที่บันทึกมีผลทันที — ตรวจแล้ว: build 0 warning, tests ผ่านครบ, format สะอาด, mutation แดงจริง (ยกเว้นข้อ 7 ที่ต้องตรวจมือ), Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P3.md`); branch `agent/antigravity-connections` (🧪 รอคุณทดลองบนแอปจริง 4 ข้อ)
 - [x] เฟส 4: Settings live preview (theme/opacity/on-top/ขนาดหน้าต่าง) + Cancel/X/Esc คืนค่า — ตรวจแล้ว: build 0 warning, tests ผ่านครบ, format สะอาด, mutation แดงจริง, Reviewer 2 ตัวตรวจแล้ว (`Docs/REVIEW_R002_P4.md`); branch `agent/antigravity-settings-preview` (🧪 รอคุณทดลองบนแอปจริง)
-- [ ] เฟส 4–7: ตามตารางแผน
+- [ ] เฟส 5 เป็นต้นไป: มี implementation commits แล้ว แต่ต้องทบทวนผลรีวิวและ manual acceptance ตามแผนที่ปรับจริง
 - [ ] เฟส 8: ตามเกณฑ์ของ [[R-004]] (ฟังก์ชันและหน้าตาเกิน 95% พร้อมกัน)
 
 **ความคืบหน้า:**
@@ -125,8 +125,14 @@
 **คุณระบุ:**
 > ถ้าม quota เต็ม ในเครื่องมือชิ้นใดชิ้นหนึ่ง ให้พักแล้วทดสอบว่า quota กลับมาหรือยังทุก 15 นาที
 
+**คำสั่งเพิ่มเติม 2026-10-15:**
+> ถ้าตรวจสอบพบคำเตือนว่าเหลือ quota น้อยกว่า 5% หรือพบลิมิตในการทำงานของทุก agent ให้หยุดการทำงาน และตรวจสอบซ้ำทุก 15 นาที ว่าแต่ละ agent ที่ถึง limit การใช้งานนั้น กลับคืนมาหรือยัง ถ้ายังให้รอจนกว่าจะกลับมา
+
 **ผมเข้าใจว่า:**
-เมื่อเครื่องมือใดในสามตัว (Claude Code, `agy`/Antigravity, `codex`) ตอบว่า quota/rate limit เต็ม ให้หยุดงานที่ต้องใช้เครื่องมือนั้น ตรวจทุก 15 นาทีว่าเรียกได้อีกหรือยัง แล้วทำต่อจากจุดเดิมเมื่อกลับมา
+เมื่อ agent/เครื่องมือใด รวม Claude Code, `agy`/Antigravity, Codex และ sub-agent ทุกตัว แจ้ง quota
+เหลือน้อยกว่า 5% หรือถึง usage/rate limit ให้หยุดงานทั้งหมด เก็บชื่อ agent/โมเดลและเวลาที่พบ
+แล้วตรวจ agent ที่ติดลิมิตแต่ละตัวทุก 15 นาทีด้วยคำสั่งเบา ๆ รอจนทุกตัวกลับมาได้และไม่มีคำเตือน
+ต่ำกว่า 5% ก่อนทำต่อจากจุดเดิม ไม่เปลี่ยนเครื่องมือ/โมเดลเพื่อเลี่ยงลิมิต
 
 **ไม่รวม:**
 - ไม่สลับไปใช้โมเดลหรือเครื่องมืออื่นแทนเงียบ ๆ (ไม่ให้ Claude Code เขียนแทน Writing Owner, ไม่ข้าม Reviewer ตัวใดตัวหนึ่ง)
@@ -172,3 +178,297 @@
 - [ ] ภาพเทียบถูกถ่ายจากแอปจริงทั้งสองรุ่นด้วยข้อมูลจำลองชุดเดียวกัน
 - [ ] คุณตรวจรับเอง (agent ตั้งได้ถึง 🧪)
 - 2026-10-02 — เฟส 4 เสร็จ (🧪): พรีวิวสดใน Settings + Discard; Reviewer 2 ตัวพบประเด็นจริง 4 กลุ่ม แก้แล้ว, 3 เบาเก็บเข้าเฟส 5/8; รายละเอียด `Docs/REVIEW_R002_P4.md`; ยังไม่ push
+
+## R-005 · ตรวจและปิดงานที่ค้างภายใน repository
+
+| | |
+|---|---|
+| สถานะ | 🔨 กำลังทำ |
+| วันที่ | 2026-10-14 |
+| แตะส่วนไหน | เอกสารสถานะ · CI · packaging · startup reconciliation · synthetic verification |
+| เกี่ยวกับ | [[R-002]] · [[R-004]] · `Docs/STATUS_2026-10-14.md` |
+
+**คุณระบุ:**
+> ทำทั้งหมดครับ ผมอนุญาตให้ทำได้โดยไม่ต้องถาม ภายใต้ folder นี้
+
+**ผมเข้าใจว่า:**
+อนุญาตให้ลงมือปิดงานจากรายงานสถานะ: ปรับเอกสารให้ตรงโค้ด เพิ่ม CI ตรวจ build/test/format/dependencies
+สร้าง publish output และ installer ในโฟลเดอร์นี้ และเตรียมหลักฐาน parity ด้วย synthetic data โดยไม่ต้องถามซ้ำ
+การสร้าง artifact ภายในเครื่องได้รับอนุญาตแทนข้อจำกัดเดิมของ R-002 ที่ห้ามสร้าง installer
+
+**ไม่รวม:**
+- ไม่ push, publish release หรือแก้โปรเจกต์ Python เดิม
+- ไม่ติดตั้ง/ถอนแอปจริง เปลี่ยน Run key จริง หรืออ่าน credentials จริงนอกโฟลเดอร์นี้
+- ไม่ให้คะแนนหรือรับรองความเหมือนแทนผู้ใช้ตาม R-004
+
+**ตรวจรับเมื่อ:**
+- [ ] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน
+- [ ] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows
+- [ ] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง
+- [ ] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ
+- [ ] ผู้ใช้ตรวจรับ R-004 และ installer upgrade ใน disposable Windows environment
+
+**ความคืบหน้า:**
+- 2026-10-14 — Baseline `4681919`: build 0 warnings/errors, 1,310 tests ผ่าน, format ผ่าน; commits มี widget resize, theme, dashboard, charts, widget behavior, tray, Settings/Connections/About (เฟส 5–11b), update flow และ packaging naming ถึง 2026-10-07 ส่วนรายงานรีวิวที่เก็บใน repo มีถึง R-002 เฟส 4
+
+## R-006 · แก้ OpenAI API Key ดึงข้อมูลไม่ได้ และ Gemini เชื่อมต่อไม่ได้
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ connection จริง (แก้ transport stdin BOM และผ่าน offline handshake/regressions แล้ว 2026-10-15) |
+| วันที่ | 2026-10-14 |
+| แตะส่วนไหน | credential discovery/selection · OpenAI/Gemini provider clients · Connections/Connect dialogs · regression tests |
+| เกี่ยวกับ | [[R-002]] · [[R-004]] · [[R-005]] · PAR-002/008/010/011/012/029 |
+
+**คุณระบุ:**
+> ปัญหาของ version ล่าสุดตอนนี้เรื่องการ login มี 2 อย่างครับ คือผมเมื่อใส่ API Key ของ OpenAI แล้ว ดึงข้อมูลไม่ได้ กับ Gemini ไม่เคยต่อได้ อาจจะต้องตรวจสอบผ่าน Agy แทน ให้ใส่ส่วนนี้ไปใน pipeline การแก้ไขงานด้วยครับ
+
+**รายงานปัญหาเพิ่มเติมจากผู้ใช้ (2026-10-15):**
+> สถานะตอนนี้ของ AIMonitor หน้า OpenAI ยังทำงานไม่ได้อีกแล้วครับ
+
+**ผมเข้าใจว่า:**
+เพิ่มเฟสแก้ provider connection ก่อน final parity/release acceptance ให้ Agy วิเคราะห์เส้นทาง credential,
+permissions และ error propagation ของ OpenAI/Gemini เทียบเอกสารทางการปัจจุบัน แล้วแยกบั๊กที่แก้ได้
+จากข้อจำกัดของชนิด key/account/API โดยแสดงคำแนะนำที่ผู้ใช้ทำต่อได้
+
+**ไม่รวม:**
+- ไม่อ่าน แสดง เก็บเพิ่ม หรือส่ง credentials จริงออกจากเครื่อง
+- ไม่ยิงคำขอด้วย account จริง หรือแก้ login ของเครื่องมืออื่นระหว่าง automated tests
+- ไม่ทำให้ project API key ดูเสมือนมีสิทธิ์ Admin หรือสร้าง usage/quota ที่ provider ไม่เปิดเผย
+
+**ตรวจรับเมื่อ:**
+- [ ] Agy มีรายงานวิเคราะห์และขั้นตอน reproduce ด้วย synthetic fixtures สำหรับสอง provider
+- [ ] OpenAI แยก project/Admin key, permission/auth failures และ OAuth precedence ได้พร้อม actionable UI
+- [ ] Gemini แยก CLI/service-account/ADC/project/Cloud Monitoring permission failures ได้พร้อม actionable UI
+- [ ] บั๊กที่ยืนยันได้มี regression tests ที่ fail ก่อน fix และ pass หลัง fix
+- [ ] ผ่าน independent review, full tests/build/format และผู้ใช้ยืนยัน connection บนแอปจริงโดยไม่เปิดเผย key
+
+**Pipeline:**
+1. Agy วิเคราะห์และ Coding Owner triage สาเหตุเทียบ official documentation
+2. Synthetic reproduction + regression tests
+3. แก้ credential/client/UI ตามสาเหตุที่ยืนยัน พร้อมรักษา read-only external login
+4. Independent review สองตัว → fix → build/test/format
+5. ผู้ใช้ตรวจ connection จริง → final R-004 parity/upgrade acceptance
+
+**ความคืบหน้า:**
+- 2026-10-15 — ตรวจพบสาเหตุหน้า OpenAI ดึงข้อมูลไม่ได้: ใน production `CodexProcess` ตั้งค่า `StandardInputEncoding = Encoding.UTF8` ซึ่งใน .NET มีค่าเริ่มต้นปล่อย UTF-8 BOM (`0xEF, 0xBB, 0xBF`) ส่งผลให้ child process (`codex app-server --listen stdio://`) ได้รับ BOM นำหน้าข้อความ JSON-RPC แรก (`initialize`) และล้มเหลวด้วย `Failed to deserialize JSONRPCMessage: expected value at line 1 column 1` จนไม่ตอบกลับ stdout; ปรับปรุง `StandardInputEncoding` และ `StandardOutputEncoding` ใน `CodexProcess` เป็น BOM-less UTF-8 (`new UTF8Encoding(false)`) พร้อมเพิ่ม regression tests ครอบคลุม byte-boundary, UTF-8 non-ASCII text preservation และ child process OS pipe redirection (ดู `Docs/HANDOFF_OPENAI_TRANSPORT.md`)
+
+## R-007 · แสดง ChatGPT plan, workspace credits และ reached-limit reason ของ Codex
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ (แก้ไขและ synthetic verification แล้ว 2026-10-15) |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | `CodexQuotaMapper` · `OpenAiLiveQuotaClient` · UI mapping/stats · tests · docs |
+| เกี่ยวกับ | [[R-001]] · [[R-002]] · [[R-006]] · PAR-009 |
+
+**คุณระบุ:**
+> ทำตามที่แนะนำได้เลยครับ และอย่าลืมปิด session ด้วยครับ
+
+**คำอนุญาตเพิ่มเติมสำหรับ review/fix:**
+> ผมอนุญาตให้ส่งคำสั่งไปยัง claude, agy ได้ครับ
+
+อนุญาตให้ส่งบริบท source/diff ที่เกี่ยวข้องกับงานให้ Claude/Agy เพื่อ review/fix ตาม workflow เดิม โดยไม่ส่ง credentials จริงหรือขยายขอบเขตงาน
+
+**ผมเข้าใจว่า:**
+ผู้ใช้อนุมัติข้อเสนอแนะในการแสดงข้อมูล ChatGPT plan, remaining workspace credits และ reached-limit reasons ที่ Codex App Server ส่งมาใน `account/rateLimits/read` บน AIMonitor โดยไม่สร้างคำขอเครือข่ายใหม่ ไม่เรียก account service จริง ไม่อ่าน credentials จริง และปิด session เมื่อทำงานเสร็จ
+
+ตีความขอบเขต:
+- อ่านและแสดง `planType`, `credits` (balance หรือ explicit unlimited status), และ `rateLimitReachedType` จาก `rateLimits` และ `rateLimitsByLimitId`
+- หากมีหลาย bucket ให้แสดง label กำกับกลุ่ม (เช่น `Codex · Plan`, `Custom · Plan`)
+- ข้อมูลที่ไม่มี/null/malformed ให้คงสถานะไม่มี (absent)
+- ค่าตัวเลขศูนย์ (0) เป็นค่าที่ถูกต้อง (valid numeric zero) ไม่ถูกตัดเป็น absent
+- ไม่ประดิษฐ์ค่าเงิน สกุลเงิน หรือเครดิตขึ้นเอง (never invent currency or credit values)
+- รักษา meter โควตาเดิม, ลำดับการแสดงผล, ประวัติการใช้งาน (history) และลำดับความสำคัญของ OAuth (OAuth precedence)
+- Metadata เหล่านี้ต้องแสดงได้แม้ history จะ unavailable, failed หรือ disabled
+- ไม่เปลี่ยน payload ที่มีแต่ metadata ให้กลายเป็น percentage quota success หากไม่มี percentage quota window ที่ contract รองรับ
+- ไม่ทำ reset-credit redemption, purchase, notification, login mutation, โหมด Admin พร้อมกัน หรือหมวดหมู่ API ใหม่
+- ปิด CLI session เมื่อรายงานผลเสร็จ โดยไม่เหลืองานเบื้องหลัง
+
+**ไม่รวม:**
+- ไม่ยิง network call ใหม่ หรือเรียก service ภายนอก
+- ไม่อ่าน credentials จริงหรือเข้าถึง account จริง
+- ไม่แก้ reset-credit redemption หรือส่ง notification email
+- ไม่แตะ provider อื่น หรือ refactor ไฟล์ที่ไม่เกี่ยวข้อง
+
+**ตรวจรับเมื่อ:**
+- [x] แสดง plan, workspace credit balance หรือ explicit unlimited status และ reached-limit reason ได้ถูกต้อง
+- [x] กรณีหลาย bucket มี grouped label กำกับชัดเจน
+- [x] รองรับค่า present, absent, malformed, numeric zero, unlimited และ multiple buckets
+- [x] metadata แสดงได้แม้ไม่มี history หรือ history fail
+- [x] ไม่ประดิษฐ์ currency หรือ credit values
+- [x] tests/build/format ผ่านครบถ้วน (1,373 passed, format 0 errors, build 0 warnings/errors)
+
+**ความคืบหน้า:**
+- 2026-10-15 — เพิ่ม R-007 ตามที่ผู้ใช้อนุมัติข้อเสนอแนะ; ตรวจสอบ schema ทางการจาก `codex app-server generate-json-schema` และเอกสารทางการ; เพิ่ม `RateLimitStats` ใน `CodexQuotaMapper` และเชื่อมต่อใน `OpenAiLiveQuotaClient`; เพิ่ม regression tests ครอบคลุม present/absent/malformed/zero/unlimited/multiple buckets และ metadata survival เมื่อไม่มี history; full suite 1,373 tests, build 0 warnings/errors และ format ผ่านครบถ้วน (ดู `Docs/HANDOFF_R007.md`)
+
+## R-008 · เพิ่มคำแนะนำสำหรับการ login เข้าสู่ Codex / OpenAI และสำรวจข้อมูลส่วนที่แสดงเพิ่มเติมได้
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ (ปรับปรุงคำแนะนำ login ใน UI เรียบร้อย และสรุปข้อมูลเพิ่มเติมเชิงข้อมูล 2026-10-15) |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | `ProviderMeta.OpenAi.SetupHint` · `OpenAiLiveQuotaClient.SetupHint` · `tests/AIMonitor.Presentation.Wpf.Tests/ProviderMetaTests.cs` · `Docs/HANDOFF_R008.md` |
+| เกี่ยวกับ | [[R-001]] · [[R-002]] · [[R-006]] · [[R-007]] · PAR-008/009/010 |
+
+**คุณระบุ:**
+> เพิ่มคำแนะนำสำหรับการ login เข้าไปด้วยครับ และมีข้อมูลส่วนไหนที่ยังแสดงได้เพิ่มเติมอีกไหมครับ
+
+**ผมเข้าใจว่า:**
+1. **ขอบเขตงานที่ได้รับอนุญาตให้ทำทันที (Authorized Scope — Guidance-only):**
+   - งาน bounded copy-only ใน UI ปัจจุบัน โดยปรับปรุงข้อความคำแนะนำ (`SetupHint`) ใน `ProviderMeta.OpenAi` และ `OpenAiLiveQuotaClient` ให้ครอบคลุมขั้นตอน practical login:
+     - แนะนำรัน `codex login` สำหรับ browser ChatGPT OAuth
+     - แนะนำรัน `codex login --device-auth` สำหรับ device-code flow (เปิดใช้งานใน ChatGPT security/workspace settings หากจำเป็น)
+     - แนะนำรัน `codex login status` เพื่อตรวจสอบโหมดและสถานะการเข้าสู่ระบบ
+     - แนะนำให้กลับมาที่ AIMonitor แล้วกด Refresh
+     - อธิบายว่าแอปอ่านไฟล์ login ที่มีอยู่เดิม (`~/.codex/auth.json`) แบบ read-only ไม่ได้เป็นผู้เริ่มกระบวนการ OAuth หรือรีเฟรช external tokens เอง และ login ที่เก็บใน OS credential store/keychain เท่านั้นอาจตรวจไม่พบ
+     - อธิบายการดู API spend ว่าต้องใช้ optional organization Admin key (`sk-admin-…`) ผ่าน Connections หรือ `OPENAI_ADMIN_KEY` (ต้องรีสตาร์ตแอป) โดย ordinary project key ไม่สามารถอ่าน organization spend ได้
+     - อธิบายลำดับความสำคัญว่า Codex OAuth มี priority สูงกว่าเสมอ (รวมถึงกรณี expired) และเก็บรักษา saved keys เดิมไว้
+   - คงภาษาอังกฤษที่กระชับ อ่านง่าย สอดคล้องกับ UI เดิม
+   - ไม่เพิ่มปุ่มใหม่ ไม่เรียก external login process ไม่แก้ auth/config ไม่เพิ่ม dependency หรือ metrics ใหม่ และรักษางานที่ uncommitted เดิมไว้ทั้งหมด
+
+2. **ข้อมูลส่วนที่แสดงเพิ่มเติมได้ (Informational / Pending Separate Approval):**
+   - คำถามส่วนที่สองเกี่ยวกับข้อมูลเพิ่มเติม เป็นการให้ข้อมูลเชิงสำรวจเท่านั้น (informational) ยังไม่อนุญาตให้เพิ่ม metrics หรือตัววัดใหม่จนกว่าจะได้รับคำสั่งและอนุมัติแยกต่างหาก
+   - สรุปข้อมูลเพิ่มเติมของ OpenAI/Codex ที่เอกสารทางการรองรับและแอปยังไม่แสดงไว้ใน `Docs/HANDOFF_R008.md` เพื่อรอผู้ใช้พิจารณา
+
+**ไม่รวม:**
+- ไม่เพิ่มปุ่ม UI ใหม่ ไม่เรียกกระบวนการ login ภายนอก หรือสั่งเปิด browser/terminal
+- ไม่เปลี่ยน auth logic, credential resolution หรือ configuration ของระบบ
+- ไม่เพิ่ม metrics หรือตัววัดใหม่ลงใน codebase
+- ไม่อ่านหรือส่ง credentials จริง ไม่แตะ registry หรือ live accounts; ส่งเฉพาะ source/diff ที่จำเป็นให้ Claude/Agy ได้ตามคำอนุญาตเดิม
+
+**ตรวจรับเมื่อ:**
+- [x] อัปเดต `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint` ตรงตามขั้นตอน login และเงื่อนไขครบถ้วน
+- [x] ข้อความอ่านง่าย กระชับ ถูกต้องตามสไตล์ UI ภาษาอังกฤษเดิม
+- [x] บันทึก R-008 ใน `Requirements.md` พร้อม verbatim user quote และสถานะรอตรวจรับ (waiting owner acceptance after copy verification)
+- [x] สร้าง `Docs/HANDOFF_R008.md` สรุปไฟล์ที่เปลี่ยน ผลการตรวจสอบ build/format และรายการข้อมูลเพิ่มเติมเชิงข้อมูล
+- [ ] ผู้ใช้ตรวจรับคำแนะนำใน UI ของจริง
+
+**ความคืบหน้า:**
+- 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
+
+## R-012 · แทน Gemini Cloud Monitoring ด้วย AGY อย่างเดียว
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ — เปิด Debug build AGY แล้ว |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | AGY CLI provider · composition · tab/connections/tray/reports · settings compatibility · tests/docs |
+| เกี่ยวกับ | R-001/R-006 เฉพาะ Gemini slice · Docs/AGY-Usage.md |
+
+**คุณระบุ:**
+> ตัด gemini ทิ้งไปเลยครับ ให้ดึงข้อมูลผ่าน AGY อย่างเดียว
+
+**ผมเข้าใจว่า:**
+เปลี่ยน provider ที่ใช้งานจริงจาก Gemini Cloud Monitoring เป็น AGY (id agy) อ่านโควตาผ่าน `agy -p "/usage" --output-format json` เท่านั้น แสดงกลุ่ม Gemini Models และ Claude/GPT ที่ AGY รายงานเป็น shared pools โดยคง gauge เดิมและไม่ปนกับ standalone Claude/Codex ใช้ remaining_fraction แปลงเป็น used % และ reset_time เป็นเวลานัด reset หน้า Connections ไม่มี key/service-account/project สำหรับ AGY ย้าย active provider และ Enabled เดิมอย่างรักษาข้อมูล และแสดงข้อผิดพลาดที่แก้ต่อได้เมื่อ CLI/ข้อมูลไม่พร้อม
+
+**ขอบเขตที่แทนข้อเดิม:**
+คำสั่งล่าสุดแทน baseline Gemini Cloud Monitoring/PAR-011/PAR-012 และส่วน Gemini ของ R-006 เฉพาะเส้นทางที่ใช้งานจริง ไม่เปลี่ยนประวัติการตรวจรับของข้อเดิม ส่วน Claude/OpenAI เดิมคงอยู่
+
+**ไม่รวม:**
+- ไม่ลบ credentials/settings เก่า ไม่อ่านไฟล์ auth จริงโดยตรง ไม่เปลี่ยน AGY login
+- ไม่ fallback ไป Google API/Gemini CLI/ADC/service account และไม่สร้าง token/spend/history จาก quota
+- ไม่ลบ legacy Gemini source/tests ที่มีงาน uncommitted; เก็บไว้เฉพาะ compatibility/history โดยไม่ register ใช้งาน
+- ไม่เปลี่ยน GaugeControl ไม่ใช้สิทธิ์ reset ไม่ deploy/publish/installer
+
+**ตรวจรับเมื่อ:**
+- [x] runtime/UI ใช้ AGY แทน Gemini Cloud Monitoring และไม่มี fallback เก่า
+- [x] แสดงทุกกลุ่มและรอบ 5h/weekly พร้อม used %, unknown/reset semantics ถูกต้อง
+- [x] process มี deadline/cancellation/output bounds/cleanup และไม่แสดง raw error/credentials
+- [x] settings migration รักษา Enabled/active provider โดยไม่ย้าย key/project ไป AGY
+- [x] synthetic tests, independent Claude/Codex reviews, build/format/render ผ่าน
+- [x] เปิด build ใหม่ให้ผู้ใช้ตรวจรับข้อมูลจริง
+
+**หลักฐาน:** 2026-10-16 — tests 1,486 ผ่าน, build 0 warnings/errors, format ผ่าน, synthetic WPF renders 40 ภาพ; ดู `Docs/HANDOFF_R012.md` ยังรอผู้ใช้ตรวจข้อมูลและหน้าตาจริง
+
+## R-011 · ผูก section ข้อมูลเพิ่มเติมเข้า WPF จริง
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | MainWindow · component ข้อมูลเพิ่มเติม · ProviderTabViewModel · CodexQuotaMapper · synthetic tests |
+| เกี่ยวกับ | R-007 · R-009 · R-010 |
+
+**คุณระบุ:**
+> ผูกเข้าแอพเลยครับ
+
+**ผมเข้าใจว่า:**
+อนุมัติผูกหน้าข้อมูลเพิ่มเติมตามแบบร่างเข้าแอป WPF จริง โดยเพิ่ม component แยกใต้ gauge คงโค้ดวาดเกจและ quota logic เดิม ใช้ข้อมูลจริงจาก snapshot/คำขอ Codex เดิมสำหรับ plan, workspace credits, earned reset count/known expiry และ activity ที่ service ส่งมา พร้อมรายละเอียดที่ขยายได้ ข้อมูลหายต้องแสดงไม่ทราบหรือไม่แสดง ห้ามใช้ข้อมูลจำลองในแอปจริง และ Claude reset แสดงยังตรวจไม่ได้พร้อมคำแนะนำตรวจผ่าน web/Desktop
+
+**ไม่รวม:**
+- ไม่ redeem/reset จริง ไม่มอบ credits หรือเปลี่ยน login/account
+- ไม่เพิ่มคำขอเครือข่ายใหม่ ไม่แก้ widget หรือ GaugeControl
+- AGY/Gemini integration ตาม Docs/AGY-Usage.md เป็นงานแยกถัดไป
+
+**ตรวจรับเมื่อ:**
+- [x] component ใหม่อยู่ใต้ gauge เดิม รองรับ theme และหน้าจอแคบ
+- [x] ข้อมูล Codex present/zero/null/malformed และ count ต่างจากรายการ details แสดงถูกต้อง ไม่สร้างค่าขึ้นเอง
+- [x] Claude แสดงยังตรวจไม่ได้พร้อมคำแนะนำ ไม่มีปุ่มใช้สิทธิ์จริง
+- [x] refresh ไม่เหลือข้อมูลเก่า ไม่ซ้ำกับ legacy stats และไม่เปลี่ยน meters
+- [x] independent reviews และ synthetic tests/build/format ผ่าน (1,457 passed, 0 warnings/errors, render 40 ภาพ; Docs/HANDOFF_R011.md)
+- [x] เปิดแอป Release build ใหม่ให้ผู้ใช้ตรวจรับ (PID 19736)
+- [ ] ผู้ใช้ตรวจรับหน้าจอและข้อมูลบัญชีจริง
+
+**ความคืบหน้า:**
+- 2026-10-15 — เพิ่ม component ข้อมูลเพิ่มเติมแยกใต้ gauge และผูกข้อมูล snapshot จริง; ผ่าน Claude/Codex independent review และแก้ fallback, setup/API mode, expansion persistence, narrow layout และ numeric boundaries แล้ว; integrator รัน build 0 warnings/errors, format ผ่าน, full tests 1,457 passed และ render 40 ภาพ พร้อมเปิด Release build ให้ผู้ใช้ตรวจรับ ดู Docs/HANDOFF_R011.md สำหรับคำสั่งและข้อจำกัดจริง
+
+## R-010 · ปรับแบบร่างให้คง gauge และแยก section ข้อมูลเพิ่มเติม
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับแบบร่าง |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | artifacts/visuals/aimonitor-reset-preview.html · เอกสารส่งต่อ |
+| เกี่ยวกับ | R-009 |
+
+**คุณระบุ:**
+> ปรับตามนั้นครับ และถ้าทดสอบผ่านแล้ว ลองเปิดไว้ให้ผมตรวจสอบ
+> สร้าง section สำหรับแสดงผลใหม่ใต้ guage ครับ เพื่อให้มั่นใจว่าจะไม่กระทบโค้ดส่วนเดิม
+
+**ผมเข้าใจว่า:**
+ปรับแบบร่างให้ gauge วงโค้งเป็นส่วนหลักตามรูปแบบเดิม และแยก section ใหม่ใต้ gauge สำหรับ plan, credits, reset และข้อมูลเสริมเป็นแถวสั้น ๆ พร้อมรายละเอียดที่เปิดเพิ่มได้ ทดสอบด้วยข้อมูลจำลองและเปิดไว้ให้ผู้ใช้ตรวจ
+
+**ไม่รวม:**
+- ไม่แก้ GaugeControl, quota logic, WPF หรือ installer ในรอบแบบร่างนี้
+- ไม่ใช้ข้อมูลบัญชีจริงหรือ redeem reset
+
+**ตรวจรับเมื่อ:**
+- [x] ทั้งสองแบบใช้ gauge วงโค้งและแยก section ข้อมูลเพิ่มเติมอยู่ด้านล่าง
+- [x] สลับ provider/reset state และเปิดรายละเอียดได้ โดยไม่มี overflow ที่ 320/736/1024px (`python artifacts/r009_browser_check.py`)
+- [x] เปิดแบบร่างให้ผู้ใช้ตรวจ และยืนยันว่าไม่มีการแก้โค้ด gauge/WPF ในงานนี้
+- [ ] ผู้ใช้ตรวจรับรูปแบบ
+
+## R-009 · แบบร่างข้อมูลเพิ่มเติมและสิทธิ์ reset ของ Codex/Claude
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับแบบร่าง |
+| วันที่ | 2026-10-15 |
+| แตะส่วนไหน | แบบร่างในบทสนทนา · Docs/HANDOFF_R009.md |
+| เกี่ยวกับ | R-007 · R-008 |
+
+**คุณระบุ:**
+> ได้ครับ ใช้ข้อมูล ลองวาดส่วนแสดงผลข้อมูลอื่นๆ ด้วยครับ และเพิ่มสิทธิ์ reset quota ใน claude ให้ผมด้วยครับ
+> reset quota ทั้งใน codex และ claude ครับ
+
+**ผมเข้าใจว่า:**
+- ทำแบบร่างหน้าข้อมูลเพิ่มเติมด้วยข้อมูลจำลองที่ระบุชัด พร้อมส่วนแสดงสิทธิ์ reset ทั้ง Codex และ Claude ตามคำชี้แจงล่าสุด
+- Codex แสดงจำนวนสิทธิ์และวันหมดอายุเมื่อมีข้อมูล รวม activity streak และ longest running turn ตาม contract ทางการ
+- Claude มี limit reset สำหรับบัญชีที่ได้รับข้อเสนอ; แสดงทางไป Settings > Usage และแยกสถานะยังตรวจไม่ได้ออกจากไม่มีสิทธิ์ ไม่อนุมานจำนวนสิทธิ์จาก quota meters
+- แบบร่างช่วยตรวจการจัดวางและสถานะก่อนผูกข้อมูลจริง; แอปไม่สามารถมอบสิทธิ์ให้บัญชีแทนผู้ให้บริการ
+
+**ไม่รวม:**
+- ไม่ใช้หรือ redeem สิทธิ์ reset ของบัญชีจริง ไม่เพิ่ม credits ไม่แก้แพ็กเกจ
+- ไม่อ่าน credentials หรือเรียก live account; ไม่สร้าง Claude private API จากการคาดเดา
+- รอบแบบร่างนี้ยังไม่เปลี่ยนโปรแกรม WPF หรือ installer
+
+**ตรวจรับเมื่อ:**
+- [x] ดูแบบร่างได้ทั้ง Codex และ Claude พร้อมป้ายข้อมูลจำลอง
+- [x] สลับสถานะมีสิทธิ์ / ไม่มีสิทธิ์ / ยังตรวจไม่ได้ โดยไม่เท่ากับศูนย์เมื่อข้อมูลหาย
+- [x] ระบุทางใช้สิทธิ์ Claude ที่รองรับจริงและข้อมูล Codex ที่ service คืนได้
+- [x] ตรวจ markup/script และ Git diff; ไม่มี live reset หรือ credentials
+- [ ] ผู้ใช้ตรวจรับรูปแบบก่อนผูกข้อมูลเข้าโปรแกรมจริง
+
+**ความคืบหน้า:**
+- 2026-10-15 — Agy สร้างแบบร่าง Cards/Compact rows; ผ่าน independent Claude/Codex review และ Codex integration แก้ stale badge; browser synthetic checks ผ่าน 6 provider/state combinations และ layout 320/736/1024; เอกสาร `Docs/HANDOFF_R009.md`, `Docs/REVIEW_R009.md`. ยังไม่เปลี่ยน WPF หรือใช้สิทธิ์ reset จริง; task-specific CLI sessions ปิดแล้ว

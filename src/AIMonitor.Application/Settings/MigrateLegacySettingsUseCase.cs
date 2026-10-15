@@ -93,7 +93,7 @@ public sealed class MigrateLegacySettingsUseCase(
         ICollection<string> warnings)
     {
         var result = new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase);
-        foreach (var providerId in new[] { "claude", "openai", "gemini" })
+        foreach (var providerId in new[] { "claude", "openai", "gemini", "agy" })
         {
             var enabledKey = $"providers/{providerId}/enabled";
             var extraKey = $"providers/{providerId}/extra";

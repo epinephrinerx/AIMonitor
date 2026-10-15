@@ -1,0 +1,30 @@
+{
+  "providers": [
+    {"id": "claude", "name": "Claude", "meters": [
+      {"kind": "session", "key": "session", "title": "Session", "subtitle": "All models", "percent": 42},
+      {"kind": "weekly", "key": "weekly", "title": "Weekly", "subtitle": "All models", "percent": 78},
+      {"kind": "weekly", "key": "weekly-model", "title": "Weekly", "subtitle": "Model A only", "percent": 92}
+    ]},
+    {"id": "openai", "name": "OpenAI / Codex", "meters": [
+      {"kind": "session", "key": "session", "title": "Session", "subtitle": "Codex", "percent": 42},
+      {"kind": "weekly", "key": "weekly", "title": "Weekly", "subtitle": "Codex", "percent": 78}
+    ]},
+    {"id": "agy", "name": "AGY", "meters": [
+      {"kind": "session", "key": "agy_gemini-5h", "title": "Gemini Models · Session", "subtitle": "5-hour window", "percent": 11.2},
+      {"kind": "weekly", "key": "agy_gemini-weekly", "title": "Gemini Models · Weekly", "subtitle": "Weekly window", "percent": 11.8},
+      {"kind": "session", "key": "agy_3p-5h", "title": "Claude and GPT models · Session", "subtitle": "5-hour window", "percent": 0.0},
+      {"kind": "weekly", "key": "agy_3p-weekly", "title": "Claude and GPT models · Weekly", "subtitle": "Weekly window", "percent": 0.0}
+    ]}
+  ],
+  "stats": [
+    {"label": "Total tokens", "value": "63,000"},
+    {"label": "Output tokens", "value": "21,000"},
+    {"label": "Cache reads", "value": "8,000"},
+    {"label": "Messages", "value": "42"}
+  ],
+  "buckets": [
+    {"day": "2026-10-01", "values": {"Model A": 12000, "Model B": 6000}},
+    {"day": "2026-10-02", "values": {"Model A": 18000, "Model B": 9000}},
+    {"day": "2026-10-03", "values": {"Model A": 12000, "Model B": 6000}}
+  ]
+}

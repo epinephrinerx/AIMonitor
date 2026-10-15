@@ -48,21 +48,33 @@ public sealed record ProviderMeta(
         KeyPlaceholder: "sk-admin-…",
         ExtraLabel: "Monthly budget (USD, optional)",
         ExtraPlaceholder: "e.g. 50 — a local target, not an OpenAI limit",
-        SetupHint: "Sign in to Codex with ChatGPT on this machine to see Codex quota percentages, reset times and available daily token totals. Requires Codex CLI or the Codex desktop app. The existing auth.json is read-only; open Codex to renew an expired login.\n\nA Codex ChatGPT login takes priority over saved or environment keys. Your existing keys are kept. When no Codex ChatGPT login is found, an optional organization Admin key provides API platform spend. Regular project keys cannot read API spend.");
+        SetupHint: "To connect Codex with ChatGPT, sign in via terminal: run `codex login` for browser ChatGPT OAuth, or `codex login --device-auth` for device-code flow (enable it in ChatGPT security/workspace settings if required). Run `codex login status` to check mode, then return to AIMonitor and click Refresh.\n\nThis app reads existing file-backed login (~/.codex/auth.json) read-only and does not initiate OAuth or refresh external tokens; credential-store-only logins may not be detected. Open Codex to renew an expired login.\n\nCodex OAuth always has priority over API keys (including expired logins), and saved keys are retained. For API platform spend instead, provide an optional organization Admin key (sk-admin-…) via Connections or OPENAI_ADMIN_KEY + restart; ordinary project keys cannot read organization spend.");
+
+    public static ProviderMeta Agy { get; } = new(
+        Id: "agy",
+        DisplayName: "AGY",
+        BadgeLetter: "A",
+        Tagline: "Antigravity CLI · shared quota pools",
+        NeedsKey: false,
+        KeyLabel: "",
+        KeyPlaceholder: "",
+        ExtraLabel: "",
+        ExtraPlaceholder: "",
+        SetupHint: "Install AGY and sign in through Antigravity, then click Refresh. Ensure agy.exe is available on PATH; restart AIMonitor after changing PATH. This app reads AGY's /usage JSON output, without starting a model conversation or changing your login. AGY pools are separate from standalone Claude/Codex quotas. No API key or Google Cloud project is needed.");
 
     public static ProviderMeta Gemini { get; } = new(
         Id: "gemini",
         DisplayName: "Gemini",
         BadgeLetter: "G",
-        Tagline: "Gemini CLI · Cloud Monitoring",
+        Tagline: "Gemini API · Cloud Monitoring metrics",
         NeedsKey: true,
-        KeyLabel: "Service account JSON",
-        KeyPlaceholder: @"C:\path\to\service-account.json  (optional)",
-        ExtraLabel: "Google Cloud project id",
-        ExtraPlaceholder: "auto-detected from your login if left blank",
-        SetupHint: "Detected automatically from your Gemini CLI login if you have signed in with gemini — that token already carries the cloud-platform scope this needs.\n\nOtherwise point this at a Google Cloud service account JSON with the Monitoring Viewer role.\n\nEither way, usage comes from Cloud Monitoring, because Google publishes no usage endpoint for Gemini. Gemini Advanced subscription limits are not available from any public API.");
+        KeyLabel: "Service account key JSON (optional)",
+        KeyPlaceholder: "path/to/service-account.json",
+        ExtraLabel: "Google Cloud Project ID (optional)",
+        ExtraPlaceholder: "my-gcp-project-id",
+        SetupHint: "Legacy Gemini provider.");
 
-    public static IReadOnlyList<ProviderMeta> All { get; } = [Claude, OpenAi, Gemini];
+    public static IReadOnlyList<ProviderMeta> All { get; } = [Claude, OpenAi, Agy];
 
     public static ProviderMeta? TryGet(string providerId) =>
         All.FirstOrDefault(m => string.Equals(m.Id, providerId, StringComparison.OrdinalIgnoreCase));

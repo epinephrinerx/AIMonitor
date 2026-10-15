@@ -56,7 +56,7 @@ public static class TrayReadings
     {
         "claude" => "CL",
         "openai" => "OA",
-        "gemini" => "GE",
+        "agy" => "AG",
         _ => "AI",
     };
 }

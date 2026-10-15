@@ -98,4 +98,183 @@ public class ProviderTabViewModelTests
 
         Assert.Equal("Tokens Today: 15,200  |  Cost: $0.45", vm.StatsSummary);
     }
+
+    [Fact]
+    public void UpdateFromSnapshot_WithCodexRateLimitStats_PopulatesSupplementaryRowsAndClearsDuplicatesFromStatTiles()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var stats = new List<Stat>
+        {
+            new("Plan", "Plus", "ChatGPT plan"),
+            new("Credits", "150", "Workspace credits"),
+            new("Limit reason", "Workspace owner credits depleted", "Reported by Codex"),
+            new("Lifetime tokens", "4.5M", "Reported by Codex")
+        };
+        var snapshot = new ProviderSnapshot("openai", configured: true, stats: stats);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        // Plan, Credits, and Limit reason are moved to SupplementaryRows; only Lifetime tokens remains in StatTiles
+        Assert.Single(vm.StatTiles);
+        Assert.Equal("Lifetime tokens", vm.StatTiles[0].Label);
+        Assert.Equal("4.5M", vm.StatTiles[0].Value);
+
+        Assert.True(vm.ShowSupplementary);
+        Assert.NotNull(vm.Supplementary);
+        Assert.Equal(3, vm.SupplementaryRows.Count);
+        Assert.Equal("Plan", vm.SupplementaryRows[0].Label);
+        Assert.Equal("Plus", vm.SupplementaryRows[0].Value);
+        Assert.Equal("Credits", vm.SupplementaryRows[1].Label);
+        Assert.Equal("150", vm.SupplementaryRows[1].Value);
+        Assert.Equal("Limit reason", vm.SupplementaryRows[2].Label);
+        Assert.Equal("Workspace owner credits depleted", vm.SupplementaryRows[2].Value);
+        Assert.Equal("Plan: Plus  |  Credits: 150  |  Limit reason: Workspace owner credits depleted  |  Lifetime tokens: 4.5M", vm.StatsSummary);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenUIRefresh_RemovesStaleRows()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var stats1 = new List<Stat>
+        {
+            new("Codex · Plan", "Plus", "ChatGPT plan"),
+            new("GPT-5 · Plan", "Team", "ChatGPT plan"),
+            new("Credits", "150", "Workspace credits")
+        };
+        vm.UpdateFromSnapshot(new ProviderSnapshot("openai", configured: true, stats: stats1));
+
+        Assert.Equal(3, vm.SupplementaryRows.Count);
+
+        // Refresh with a single bucket plan
+        var stats2 = new List<Stat>
+        {
+            new("Plan", "Pro", "ChatGPT plan")
+        };
+        vm.UpdateFromSnapshot(new ProviderSnapshot("openai", configured: true, stats: stats2));
+
+        // Stale rows from the first snapshot are completely replaced
+        Assert.Equal(2, vm.SupplementaryRows.Count); // 1 plan + 1 fallback credits (none reported)
+        Assert.Equal("Plan", vm.SupplementaryRows[0].Label);
+        Assert.Equal("Pro", vm.SupplementaryRows[0].Value);
+        Assert.DoesNotContain(vm.SupplementaryRows, r => r.Label == "GPT-5 · Plan");
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenMultiBucket_PreservesGroupedLabels()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var stats = new List<Stat>
+        {
+            new("Codex · Plan", "Plus", "ChatGPT plan"),
+            new("Codex · Credits", "150", "Workspace credits"),
+            new("GPT-5 · Plan", "Team", "ChatGPT plan"),
+            new("GPT-5 · Credits", "Unlimited", "Workspace credits"),
+            new("GPT-5 · Limit reason", "Rate limit reached", "Reported by Codex")
+        };
+        var snapshot = new ProviderSnapshot("openai", configured: true, stats: stats);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.Equal(5, vm.SupplementaryRows.Count);
+        Assert.Equal("Codex · Plan", vm.SupplementaryRows[0].Label);
+        Assert.Equal("Codex · Credits", vm.SupplementaryRows[1].Label);
+        Assert.Equal("GPT-5 · Plan", vm.SupplementaryRows[2].Label);
+        Assert.Equal("GPT-5 · Credits", vm.SupplementaryRows[3].Label);
+        Assert.Equal("GPT-5 · Limit reason", vm.SupplementaryRows[4].Label);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenClaude_ResetAlwaysUnknownAndNoDuplicates()
+    {
+        var vm = new ProviderTabViewModel("claude", "Claude");
+        var stats = new List<Stat>
+        {
+            new("Tokens Today", "15,200"),
+            new("Cost", "$0.45")
+        };
+        var snapshot = new ProviderSnapshot("claude", configured: true, stats: stats);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.True(vm.ShowSupplementary);
+        Assert.Equal("Not verified", vm.ResetBadge);
+        Assert.Contains("Check Settings > Usage on Claude web/Desktop", vm.ResetSummary);
+        Assert.Contains("Official Claude Limit Reset Procedure", vm.ResetDetails);
+        Assert.DoesNotContain(vm.ResetSummary, "available");
+
+        // StatTiles has only numeric legacy stats, no duplicate metadata
+        Assert.Equal(2, vm.StatTiles.Count);
+        Assert.Equal("Tokens Today", vm.StatTiles[0].Label);
+        Assert.Equal("Cost", vm.StatTiles[1].Label);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenGemini_NoSupplementarySection()
+    {
+        var vm = new ProviderTabViewModel("gemini", "Gemini");
+        var stats = new List<Stat>
+        {
+            new("Requests today", "128")
+        };
+        var snapshot = new ProviderSnapshot("gemini", configured: true, stats: stats);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.False(vm.ShowSupplementary);
+        Assert.Null(vm.Supplementary);
+        Assert.Empty(vm.SupplementaryRows);
+        Assert.Single(vm.StatTiles);
+        Assert.Equal("Requests today", vm.StatTiles[0].Label);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_MetersUnchangedBeforeAndAfterSupplementaryChanges()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var meter1 = new Meter("session", "session", "Session", "Codex quota", 42.0);
+        var meter2 = new Meter("weekly", "weekly", "Weekly", "Codex quota", 78.0);
+        var stats = new List<Stat>
+        {
+            new("Plan", "Plus", "ChatGPT plan"),
+            new("Rate limit resets", "2", "Next expiry: 2026-10-20 18:00:00Z"),
+            new("Current streak", "8 days", "Reported by Codex")
+        };
+        var snapshot = new ProviderSnapshot("openai", configured: true, meters: [meter1, meter2], stats: stats);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.Equal(2, vm.Meters.Count);
+        Assert.Equal(42.0, vm.Meters[0].Value);
+        Assert.Equal("42%", vm.Meters[0].ValueText);
+        Assert.Equal("Session", vm.Meters[0].Title);
+        Assert.Equal(78.0, vm.Meters[1].Value);
+        Assert.Equal("78%", vm.Meters[1].ValueText);
+        Assert.Equal("Weekly", vm.Meters[1].Title);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenCodexResetAbsentOrMalformed_FallsBackToNotVerified()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var snapshot = new ProviderSnapshot("openai", configured: true, stats: []);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.True(vm.ShowSupplementary);
+        Assert.Equal("Not verified", vm.ResetBadge);
+        Assert.Contains("No confirmed reset data", vm.ResetSummary);
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_WhenCodexResetZero_ConfirmedZero()
+    {
+        var vm = new ProviderTabViewModel("openai", "OpenAI");
+        var snapshot = new ProviderSnapshot("openai", configured: true, stats: [new Stat("Rate limit resets", "0")]);
+
+        vm.UpdateFromSnapshot(snapshot);
+
+        Assert.True(vm.ShowSupplementary);
+        Assert.Equal("0 Credits", vm.ResetBadge);
+        Assert.Contains("Confirmed no reset credits available on this account (count = 0)", vm.ResetSummary);
+    }
 }

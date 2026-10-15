@@ -12,7 +12,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- PE / Explorer metadata (version comes from Directory.Build.props) -->
     <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
-    <Description>AI Usage Monitor — view Claude, OpenAI and Gemini quota at a glance</Description>
+    <Description>AI Usage Monitor — view Claude, OpenAI and AGY quota at a glance</Description>
     <Platforms>x64</Platforms>
     <!-- Ensure the publish output uses the canonical exe name -->
     <AssemblyName>AIUsageMonitor</AssemblyName>
@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AIMonitor.Presentation.Wpf.Tests" />
+    <InternalsVisibleTo Include="AIMonitor.ScreenEvidence" />
   </ItemGroup>
 
 </Project>

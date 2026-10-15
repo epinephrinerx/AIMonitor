@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace AIMonitor.Infrastructure.Providers.Gemini;
 
 /// <summary>
@@ -9,10 +11,18 @@ namespace AIMonitor.Infrastructure.Providers.Gemini;
 internal sealed class GeminiApiException : Exception
 {
     public bool Unauthorized { get; }
+    public HttpStatusCode? StatusCode { get; }
+    public string? Host { get; }
 
-    public GeminiApiException(string message, bool unauthorized = false)
+    public GeminiApiException(
+        string message,
+        bool unauthorized = false,
+        HttpStatusCode? statusCode = null,
+        string? host = null)
         : base(message)
     {
         Unauthorized = unauthorized;
+        StatusCode = statusCode;
+        Host = host;
     }
 }

@@ -109,7 +109,7 @@ public sealed class ConnectionCardViewModelTests
     [Fact]
     public void Update_SourceLine_HandlesCombinationsOfSourceLabelAndHint()
     {
-        var card = new ConnectionCardViewModel(ProviderMeta.Gemini);
+        var card = new ConnectionCardViewModel(ProviderMeta.Agy);
 
         // Both SourceLabel and Hint
         card.Update(new DetectionInfo("gemini", DetectionState.Connected, sourceLabel: "Gemini CLI", hint: "Monitoring Viewer"));
@@ -125,7 +125,7 @@ public sealed class ConnectionCardViewModelTests
 
         // Neither
         card.Update(new DetectionInfo("gemini", DetectionState.Connected, sourceLabel: "", hint: ""));
-        Assert.Equal(ProviderMeta.Gemini.Tagline, card.SourceLine);
+        Assert.Equal(ProviderMeta.Agy.Tagline, card.SourceLine);
     }
 
     [Fact]

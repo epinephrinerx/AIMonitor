@@ -94,7 +94,8 @@ public sealed class MigrateLegacySettingsUseCaseTests
         var settings = Assert.IsType<AppSettings>(store.Value);
         Assert.False(settings.WidgetRotationEnabled);
         Assert.False(settings.ShowConnectionsAtStartup);
-        Assert.Equal("gemini", settings.ActiveProvider);
+        Assert.Equal("agy", settings.ActiveProvider);
+        Assert.Equal(new ProviderPreference(false, ""), settings.Providers["agy"]);
         Assert.Equal(new ProviderPreference(false, "synthetic-project"), settings.Providers["gemini"]);
         Assert.Equal("base64:AQID", settings.LegacyGeometry["dashboard"]);
         Assert.Equal(17, settings.LegacyGeometry.Count); // unscoped + two values for each of 8 layouts

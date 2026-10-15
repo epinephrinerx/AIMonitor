@@ -55,7 +55,16 @@ public sealed record AppSettings
             : "Total tokens";
         var range = ChartRangeDays is 7 or 14 or 30 or 90 ? ChartRangeDays : 14;
         var rememberSize = DashboardWidth == 0 && DashboardHeight == 0;
-        var activeProvider = ActiveProvider is "claude" or "openai" or "gemini" ? ActiveProvider : "claude";
+        var activeProvider = ActiveProvider == "gemini" ? "agy"
+            : ActiveProvider is "claude" or "openai" or "agy" ? ActiveProvider : "claude";
+        var providers = Providers is null
+            ? new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase)
+            : Providers.Where(static pair => pair.Value is not null)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        if (!providers.ContainsKey("agy") && providers.TryGetValue("gemini", out var legacyGemini))
+        {
+            providers["agy"] = new ProviderPreference(legacyGemini.Enabled);
+        }
 
         return this with
         {
@@ -69,11 +78,7 @@ public sealed record AppSettings
             ChartRangeDays = range,
             ChartMetric = metric,
             ActiveProvider = activeProvider,
-            Providers = Providers is null
-                ? new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase)
-                : Providers
-                    .Where(static pair => pair.Value is not null)
-                    .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase),
+            Providers = providers,
             LegacyGeometry = LegacyGeometry is null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : LegacyGeometry
