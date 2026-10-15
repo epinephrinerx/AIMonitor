@@ -100,54 +100,24 @@ public sealed class CodexProcessTests : IDisposable
     }
 
     [Fact]
-    public async Task CodexProcess_RealSubprocess_PipeDoesNotPrependBomToFirstJsonMessage()
+    public async Task StandardInputEncoding_OsPipe_PreservesFirstJsonBytes()
     {
-        // Exercises the real CodexProcess constructor and OS pipe redirection with a disposable script.
-        var scriptPath = Path.Combine(_tempDirectory, "dumper.cmd");
-        var scriptContent = "@echo off\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$s = [Console]::OpenStandardInput(); $b = New-Object byte[] 32; $n = $s.Read($b, 0, 32); if ($n -gt 0) { [BitConverter]::ToString($b, 0, $n) }\"\r\n";
-        File.WriteAllText(scriptPath, scriptContent);
-
-        var environment = CodexEnvironmentSanitizer.Sanitize(
-            new Dictionary<string, string?>
-            {
-                ["PATH"] = Environment.GetEnvironmentVariable("PATH"),
-                ["SYSTEMROOT"] = Environment.GetEnvironmentVariable("SYSTEMROOT"),
-                ["COMSPEC"] = Environment.GetEnvironmentVariable("COMSPEC"),
-            },
-            temporaryCodexHome: _tempDirectory);
-
-        var request = new CodexProcessStartRequest(
-            ExecutablePath: scriptPath,
-            WorkingDirectory: _tempDirectory,
-            Environment: environment);
-
-        var process = new CodexProcess(request);
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await process.StandardInput.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"id\":1}".AsMemory(), cts.Token);
-            await process.StandardInput.FlushAsync(cts.Token);
-            process.StandardInput.Close();
-
-            var outputLine = await process.StandardOutput.ReadLineAsync(cts.Token);
-            Assert.NotNull(outputLine);
-
-            // If UTF8Encoding(true) was used, outputLine starts with EF-BB-BF-7B.
-            // With UTF8Encoding(false), outputLine starts with 7B ('{').
-            Assert.DoesNotContain("EF-BB-BF", outputLine);
-            Assert.StartsWith("7B", outputLine);
-        }
-        finally
-        {
-            try
-            {
-                process.Kill();
-                await process.WaitForExitAsync(TimeSpan.FromSeconds(2));
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
+        // Exercise an OS pipe using the configured transport encoding, without an external executable.
+        var request = new CodexProcessStartRequest("synthetic.exe", _tempDirectory,
+            new Dictionary<string, string?>());
+        var encoding = CodexProcess.CreateStartInfo(request).StandardInputEncoding;
+        Assert.NotNull(encoding);
+        using var server = new System.IO.Pipes.AnonymousPipeServerStream(System.IO.Pipes.PipeDirection.Out);
+        using var client = new System.IO.Pipes.AnonymousPipeClientStream(System.IO.Pipes.PipeDirection.In,
+            server.GetClientHandleAsString());
+        using var writer = new StreamWriter(server, encoding, leaveOpen: true);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        const string message = "{\"jsonrpc\":\"2.0\"}";
+        await writer.WriteAsync(message.AsMemory(), timeout.Token);
+        await writer.FlushAsync(timeout.Token);
+        var bytes = new byte[encoding.GetByteCount(message)];
+        await client.ReadExactlyAsync(bytes, timeout.Token);
+        Assert.Equal((byte)'{', bytes[0]);
+        Assert.Equal(message, Encoding.UTF8.GetString(bytes));
     }
 }

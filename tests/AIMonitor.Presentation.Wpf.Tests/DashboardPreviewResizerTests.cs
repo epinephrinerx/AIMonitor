@@ -13,23 +13,23 @@ public sealed class DashboardPreviewResizerTests
         {
             var window = new System.Windows.Window
             {
-                Width = 1000,
-                Height = 700,
+                Width = 600,
+                Height = 400,
                 WindowState = System.Windows.WindowState.Normal
             };
             using var offscreen = WpfTestHost.ShowOffscreen(window);
 
             var resizer = new DashboardPreviewResizer(() => window);
 
-            // 1. Resize to Wide (1400, 900)
-            resizer.Resize(1400, 900);
-            Assert.Equal(1400, window.Width);
-            Assert.Equal(900, window.Height);
+            // 1. Resize to Wide (800, 600)
+            resizer.Resize(800, 600);
+            Assert.Equal(800, window.Width);
+            Assert.Equal(600, window.Height);
 
-            // 2. Resize to (0, 0) ("Remember last size" on Discard) -> restores original (1000, 700)
+            // 2. Resize to (0, 0) ("Remember last size" on Discard) -> restores original (600, 400)
             resizer.Resize(0, 0);
-            Assert.Equal(1000, window.Width);
-            Assert.Equal(700, window.Height);
+            Assert.Equal(600, window.Width);
+            Assert.Equal(400, window.Height);
         });
     }
 

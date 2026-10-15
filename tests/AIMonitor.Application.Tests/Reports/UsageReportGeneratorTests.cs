@@ -87,7 +87,8 @@ public class UsageReportGeneratorTests
             ["openai"] = new ProviderSnapshot("openai", configured: true, account: "test,user", history: history)
         };
 
-        var report = UsageReportGenerator.Build(providers, snapshots, days: 14, metric: "Total tokens");
+        var report = UsageReportGenerator.Build(providers, snapshots, days: 14, metric: "Total tokens",
+            generatedAt: new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero));
         var csv = UsageReportGenerator.ToCsv(report);
 
         Assert.StartsWith("date,provider,account,source,status,metric,value", csv);
