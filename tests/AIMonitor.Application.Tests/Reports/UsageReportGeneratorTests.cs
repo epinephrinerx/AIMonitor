@@ -93,7 +93,7 @@ public class UsageReportGeneratorTests
 
         Assert.StartsWith("date,provider,account,source,status,metric,value", csv);
         Assert.Contains("2026-09-30", csv);
-        Assert.Contains("\"OpenAI / Codex\"", csv);
+        Assert.Contains(",OpenAI / Codex,", csv);
         Assert.Contains("\"test,user\"", csv);
         Assert.Contains("1500", csv);
     }
