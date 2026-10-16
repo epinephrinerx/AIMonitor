@@ -105,8 +105,12 @@ public sealed class CodexProcessTests : IDisposable
         // Exercise an OS pipe using the configured transport encoding, without an external executable.
         var request = new CodexProcessStartRequest("synthetic.exe", _tempDirectory,
             new Dictionary<string, string?>());
-        var encoding = CodexProcess.CreateStartInfo(request).StandardInputEncoding;
+        var startInfo = CodexProcess.CreateStartInfo(request);
+        var encoding = startInfo.StandardInputEncoding;
         Assert.NotNull(encoding);
+        Assert.Empty(encoding.GetPreamble());
+        Assert.NotNull(startInfo.StandardOutputEncoding);
+        Assert.Empty(startInfo.StandardOutputEncoding.GetPreamble());
         using var server = new System.IO.Pipes.AnonymousPipeServerStream(System.IO.Pipes.PipeDirection.Out);
         using var client = new System.IO.Pipes.AnonymousPipeClientStream(System.IO.Pipes.PipeDirection.In,
             server.GetClientHandleAsString());
