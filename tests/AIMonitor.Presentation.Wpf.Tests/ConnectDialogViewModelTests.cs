@@ -80,7 +80,7 @@ public sealed class ConnectDialogViewModelTests
             new ProviderConnection(null, ""),
             store);
 
-        Assert.Equal("AGY sign-in", vm.Title);
+        Assert.Equal("Gemini / AGY sign-in", vm.Title);
         Assert.False(vm.NeedsKey);
         Assert.False(vm.CanBrowse);
     }

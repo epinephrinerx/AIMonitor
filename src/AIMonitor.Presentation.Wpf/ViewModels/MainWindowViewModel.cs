@@ -35,7 +35,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
-        AgyTab = new ProviderTabViewModel("agy", "AGY");
+        AgyTab = new ProviderTabViewModel("agy", "Gemini / AGY");
 
         ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
         var settings = _settingsSession.Current;

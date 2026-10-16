@@ -69,6 +69,45 @@ public class ProviderTabViewModelTests
     }
 
     [Fact]
+    public void UpdateFromSnapshot_MetersWithoutSection_FormOneUnheadedRow()
+    {
+        var vm = new ProviderTabViewModel("claude", "Claude");
+        vm.UpdateFromSnapshot(new ProviderSnapshot("claude", configured: true, meters:
+        [
+            new Meter("session", "session", "Session", "5-hour window", percent: 10),
+            new Meter("weekly_all", "weekly_all", "Weekly", "All models", percent: 20),
+        ]));
+
+        var section = Assert.Single(vm.MeterSections);
+        Assert.Equal("", section.Heading);
+        Assert.Equal(2, section.Columns);
+        Assert.Equal(["Session", "Weekly"], section.Meters.Select(m => m.GaugeTitle));
+    }
+
+    [Fact]
+    public void UpdateFromSnapshot_SectionedMeters_GroupInFirstSeenOrderWithSharedColumnsAndShortTitles()
+    {
+        var vm = new ProviderTabViewModel("agy", "Gemini / AGY");
+        vm.UpdateFromSnapshot(new ProviderSnapshot("agy", configured: true, meters:
+        [
+            new Meter("session", "g5", "Gemini · Session", "5-hour window", percent: 0, section: "Gemini"),
+            new Meter("weekly", "gw", "Gemini · Weekly", "Weekly window", percent: 10, section: "Gemini"),
+            new Meter("session", "c5", "Claude / GPT · Session", "5-hour window", percent: 0, section: "Claude / GPT"),
+            new Meter("weekly", "cw", "Claude / GPT · Weekly", "Weekly window", percent: 0, section: "Claude / GPT"),
+            new Meter("weekly", "aw", "Gemini 4 Argon · Weekly", "Weekly window", percent: 0, section: "Gemini"),
+        ]));
+
+        Assert.Equal(["Gemini", "Claude / GPT"], vm.MeterSections.Select(s => s.Heading));
+        Assert.All(vm.MeterSections, s => Assert.Equal(3, s.Columns));
+        Assert.Equal(["Session", "Weekly", "Gemini 4 Argon · Weekly"], vm.MeterSections[0].Meters.Select(m => m.GaugeTitle));
+        Assert.Equal(["Session", "Weekly"], vm.MeterSections[1].Meters.Select(m => m.GaugeTitle));
+
+        // Widget and tray read the flat list and keep the full, self-describing titles.
+        Assert.Equal("Gemini · Session", vm.Meters[0].Title);
+        Assert.Equal(5, vm.Meters.Count);
+    }
+
+    [Fact]
     public void UpdateFromSnapshot_WithHistoryBuckets_PopulatesChartData()
     {
         var vm = new ProviderTabViewModel("openai", "OpenAI");

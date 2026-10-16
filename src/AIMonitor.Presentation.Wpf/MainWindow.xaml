@@ -202,27 +202,48 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Gauges row: equal-width cards, one row -->
-                <ItemsControl x:Name="GaugeRow" ItemsSource="{Binding SelectedTab.Meters}" Margin="0,0,0,12">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <UniformGrid Rows="1" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
+                <!-- Gauges: one row of equal-width cards per section (AGY: Gemini, Claude / GPT);
+                     every row shares one column count so cards line up -->
+                <ItemsControl x:Name="GaugeRow" ItemsSource="{Binding SelectedTab.MeterSections}" Margin="0,0,0,12">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="10" Padding="12,10">
-                                <StackPanel>
-                                    <controls:GaugeControl Value="{Binding Value}" ValueText="{Binding ValueText}"
-                                                           Title="{Binding Title}" Subtitle="{Binding Subtitle}"
-                                                           Severity="{Binding Severity}" Height="190" />
-                                    <TextBlock Text="{Binding SeverityText}" HorizontalAlignment="Center" FontWeight="SemiBold"
-                                               Foreground="{Binding GaugeBrush}" Margin="0,4,0,0" />
-                                    <TextBlock Text="{Binding ResetText}" HorizontalAlignment="Center" FontSize="11"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0" TextWrapping="Wrap" TextAlignment="Center" />
-                                </StackPanel>
-                            </Border>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Heading}" FontSize="13" FontWeight="SemiBold" Margin="2,6,0,6"
+                                           Foreground="{DynamicResource TextSecondaryBrush}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Heading}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <ItemsControl ItemsSource="{Binding Meters}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="{Binding Columns}" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1" CornerRadius="10" Padding="12,10">
+                                                <StackPanel>
+                                                    <controls:GaugeControl Value="{Binding Value}" ValueText="{Binding ValueText}"
+                                                                           Title="{Binding GaugeTitle}" Subtitle="{Binding Subtitle}"
+                                                                           Severity="{Binding Severity}" Height="190" />
+                                                    <TextBlock Text="{Binding SeverityText}" HorizontalAlignment="Center" FontWeight="SemiBold"
+                                                               Foreground="{Binding GaugeBrush}" Margin="0,4,0,0" />
+                                                    <TextBlock Text="{Binding ResetText}" HorizontalAlignment="Center" FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0" TextWrapping="Wrap" TextAlignment="Center" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

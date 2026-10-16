@@ -52,7 +52,7 @@ public sealed record ProviderMeta(
 
     public static ProviderMeta Agy { get; } = new(
         Id: "agy",
-        DisplayName: "AGY",
+        DisplayName: "Gemini / AGY",
         BadgeLetter: "A",
         Tagline: "Antigravity CLI · shared quota pools",
         NeedsKey: false,

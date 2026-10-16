@@ -214,7 +214,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal(3, vm.ProviderTabs.Count);
         Assert.Equal("agy", vm.ProviderTabs[2].ProviderId);
-        Assert.Equal("AGY", vm.ProviderTabs[2].DisplayName);
+        Assert.Equal("Gemini / AGY", vm.ProviderTabs[2].DisplayName);
         Assert.Same(vm.AgyTab, vm.ProviderTabs[2]);
     }
 

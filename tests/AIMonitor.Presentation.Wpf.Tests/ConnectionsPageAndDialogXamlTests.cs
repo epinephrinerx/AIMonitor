@@ -129,7 +129,7 @@ public sealed class ConnectionsPageAndDialogXamlTests
             // Provider display names and badge initials
             Assert.Contains("Claude", textBlocks);
             Assert.Contains("OpenAI / Codex", textBlocks);
-            Assert.Contains("AGY", textBlocks);
+            Assert.Contains("Gemini / AGY", textBlocks);
             Assert.Contains("C", textBlocks);
             Assert.Contains("O", textBlocks);
             Assert.Contains("A", textBlocks);
@@ -240,7 +240,7 @@ public sealed class ConnectionsPageAndDialogXamlTests
             using var _ = WpfTestHost.ShowOffscreen(dialog);
             WpfTestHost.Realize(dialog);
 
-            Assert.Equal("AGY sign-in", dialog.Title);
+            Assert.Equal("Gemini / AGY sign-in", dialog.Title);
 
             var browseButton = (Button)dialog.FindName("BrowseButton");
             Assert.NotNull(browseButton);

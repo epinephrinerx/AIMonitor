@@ -212,6 +212,10 @@ public static class AgyUsageMapper
                         "Claude and GPT models" => "Claude / GPT",
                         _ => bucket.GroupName
                     };
+                    // Model-specific Gemini pools (e.g. "Gemini 4 Argon") sit with the shared Gemini pool.
+                    var section = displayGroup.StartsWith("Gemini", StringComparison.OrdinalIgnoreCase)
+                        ? "Gemini"
+                        : displayGroup;
                     string title = bucket.Is5h
                         ? $"{displayGroup} · Session"
                         : $"{displayGroup} · Weekly";
@@ -229,7 +233,8 @@ public static class AgyUsageMapper
                         title: title,
                         subtitle: subtitle,
                         percent: bucket.Percent,
-                        resetsAt: bucket.ResetsAt));
+                        resetsAt: bucket.ResetsAt,
+                        section: section));
                 }
 
                 groupIndex++;

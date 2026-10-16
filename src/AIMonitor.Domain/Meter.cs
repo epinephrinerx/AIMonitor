@@ -19,6 +19,10 @@ public sealed record Meter
     /// <see cref="Kind"/> is not literally "session".</summary>
     public string Group { get; }
 
+    /// <summary>Optional dashboard heading that meters sharing it are shown under (e.g. AGY's
+    /// "Gemini" and "Claude / GPT" pools). Empty when the provider's meters form a single row.</summary>
+    public string Section { get; }
+
     public string Title { get; }
 
     /// <summary>May be empty (a provider legitimately has nothing to say here), but never null.</summary>
@@ -44,11 +48,13 @@ public sealed record Meter
         DateTimeOffset? resetsAt = null,
         string detail = "",
         string? lockedReason = null,
-        string? group = null)
+        string? group = null,
+        string? section = null)
     {
         Kind = DomainGuard.RequireNonBlank(kind, nameof(kind));
         Key = DomainGuard.RequireNonBlank(key, nameof(key));
         Group = string.IsNullOrWhiteSpace(group) ? Kind : group;
+        Section = section?.Trim() ?? string.Empty;
         Title = DomainGuard.RequireNonBlank(title, nameof(title));
         ArgumentNullException.ThrowIfNull(subtitle);
         Subtitle = subtitle;

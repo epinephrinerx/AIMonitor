@@ -350,6 +350,31 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-013 · แบ่ง gauge ของ AGY เป็นกลุ่ม Gemini และ Claude/GPT และเปลี่ยนชื่อเป็น Gemini / AGY
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ |
+| วันที่ | 2026-10-16 |
+| แตะส่วนไหน | `Meter.Section` · `AgyUsageMapper` · `ProviderTabViewModel.MeterSections` · gauge row ใน `MainWindow.xaml` · display name |
+| เกี่ยวกับ | [[R-012]] · [[R-010]] |
+
+**คุณระบุ:**
+> ผมมีปัญหาเรื่อง Design คือ Guage นั้น เมื่อมีหลายๆ มิเตอร์ ก็จะทำให้การจัดหน้าไม่พอดี โดยเฉพาะในหน้าของ AGY ซึ่ง "Gemini - Session" จะยาวจนทับ guage อาจจะต้องแบ่งกลุ่มไหมครับ เป็นกลุ่ม Gemini กลุ่มหนึ่ง และ Claude/GPT กลุ่มหนึ่ง ผมเปิดหน้าจอไว้ให้แล้วครับ ลองตรวจดู และชื่อจาก AGY ให้เปลี่ยนเป็น Gemini/AGY
+
+**ผมเข้าใจว่า:**
+หน้า AGY แสดง gauge เป็นแถวละกลุ่มพร้อมหัวข้อ "Gemini" (รวม pool เฉพาะรุ่นเช่น Gemini 4 Argon) และ "Claude / GPT" ทุกแถวใช้จำนวนคอลัมน์เท่ากันเพื่อให้การ์ดตรงกัน ชื่อบนการ์ดตัดส่วนที่ซ้ำกับหัวข้อออก ("Session", "Weekly") ส่วน widget/tray ใช้ชื่อเต็มเหมือนเดิม ชื่อ provider ที่แสดงเปลี่ยนจาก "AGY" เป็น "Gemini / AGY" (เว้นวรรครอบ / ให้ตรงกับ "OpenAI / Codex")
+
+**ไม่รวม:**
+- ไม่แก้ `GaugeControl` และไม่เปลี่ยนหน้าตา Claude/OpenAI (ไม่มี section จึงเป็นแถวเดียวเหมือนเดิม)
+- ไม่เปลี่ยน provider id `agy`, ข้อความ "AGY CLI" หรือ settings
+
+**ตรวจรับเมื่อ:**
+- [x] หน้า Gemini / AGY แบ่งเป็นกลุ่ม Gemini และ Claude / GPT ชื่อไม่ทับ gauge
+- [x] tab, Connections, Connect dialog และ Usage log ใช้ชื่อ Gemini / AGY
+- [x] regression tests ของ mapper และ ViewModel; full suite 1,489 ผ่าน, build 0 warnings/errors, format ผ่าน
+- [ ] ผู้ใช้ตรวจหน้าตาบนแอปจริง
+
 ## R-012 · แทน Gemini Cloud Monitoring ด้วย AGY อย่างเดียว
 
 | | |

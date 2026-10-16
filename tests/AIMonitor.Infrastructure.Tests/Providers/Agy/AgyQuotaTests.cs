@@ -110,6 +110,36 @@ public class AgyQuotaTests
     }
 
     [Fact]
+    public void MapUsage_GeminiPools_ShareGeminiSection_ClaudeGptHasItsOwn()
+    {
+        const string json = """
+        {
+          "status": "SUCCESS",
+          "command": {
+            "name": "usage",
+            "data": {
+              "groups": [
+                { "name": "Gemini Models", "buckets": [
+                  { "id": "g5", "window": "5h", "remaining_fraction": 1.0, "reset_time": "2026-10-15T17:00:00Z" },
+                  { "id": "gw", "window": "weekly", "remaining_fraction": 0.9, "reset_time": "2026-10-22T00:00:00Z" } ] },
+                { "name": "Claude and GPT models", "buckets": [
+                  { "id": "c5", "window": "5h", "remaining_fraction": 1.0, "reset_time": "2026-10-15T17:00:00Z" } ] },
+                { "name": "Gemini 4 Argon", "buckets": [
+                  { "id": "aw", "window": "weekly", "remaining_fraction": 1.0, "reset_time": "2026-10-22T00:00:00Z" } ] }
+              ]
+            }
+          }
+        }
+        """;
+
+        var meters = AgyUsageMapper.MapUsage(json);
+
+        Assert.Equal(["Gemini", "Gemini", "Claude / GPT", "Gemini"], meters.Select(m => m.Section));
+        Assert.Equal("Gemini · Session", meters[0].Title);
+        Assert.Equal("Gemini 4 Argon · Weekly", meters[3].Title);
+    }
+
+    [Fact]
     public void MapUsage_WeeklyFirstInput_Yields5hFirst()
     {
         const string json = """

@@ -9,6 +9,19 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 public sealed class MeterDisplayItem : ViewModelBase
 {
     public string Title { get; init; } = "";
+
+    /// <summary>The dashboard card's label: <see cref="Title"/> without the "Section · " prefix its
+    /// section heading already shows. Widget and tray keep the full <see cref="Title"/>.</summary>
+    public string GaugeTitle
+    {
+        get => string.IsNullOrEmpty(_gaugeTitle) ? Title : _gaugeTitle;
+        init => _gaugeTitle = value;
+    }
+
+    private readonly string _gaugeTitle = "";
+
+    public string Section { get; init; } = "";
+
     public string Subtitle { get; init; } = "";
     public double Value { get; init; }
     public string ValueText { get; init; } = "0%";
@@ -37,6 +50,10 @@ public sealed class MeterDisplayItem : ViewModelBase
     public string? LockedReason { get; init; }
 }
 
+/// <summary>One row of gauge cards under an optional heading. <see cref="Columns"/> is shared by
+/// every section of a tab so cards line up across rows.</summary>
+public sealed record MeterSection(string Heading, IReadOnlyList<MeterDisplayItem> Meters, int Columns);
+
 /// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
 public sealed record StatTile(string Label, string Value, string Detail);
 
@@ -46,6 +63,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statusDetail = "";
     private Severity _severity = Severity.Normal;
     private IReadOnlyList<MeterDisplayItem> _meters = [];
+    private IReadOnlyList<MeterSection> _meterSections = [];
     private IReadOnlyList<UsageHistoryBucket> _chartBuckets = [];
     private IReadOnlyList<string> _chartSeries = [];
     private IReadOnlyList<UsageHistoryBreakdown> _modelRows = [];
@@ -191,7 +209,28 @@ public sealed class ProviderTabViewModel : ViewModelBase
     public IReadOnlyList<MeterDisplayItem> Meters
     {
         get => _meters;
-        set => SetProperty(ref _meters, value);
+        set
+        {
+            if (SetProperty(ref _meters, value))
+            {
+                MeterSections = BuildSections(value);
+            }
+        }
+    }
+
+    private static IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
+    {
+        var groups = meters.GroupBy(m => m.Section, StringComparer.Ordinal).ToList();
+        var columns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        return groups.Select(g => new MeterSection(g.Key, g.ToList(), columns)).ToList();
+    }
+
+    /// <summary><see cref="Meters"/> grouped by <see cref="Meter.Section"/> in first-seen order;
+    /// a provider without sections yields one unheaded row, as before.</summary>
+    public IReadOnlyList<MeterSection> MeterSections
+    {
+        get => _meterSections;
+        private set => SetProperty(ref _meterSections, value);
     }
 
     /// <summary>Day buckets for the stacked chart (oldest first).</summary>
@@ -368,6 +407,10 @@ public sealed class ProviderTabViewModel : ViewModelBase
             meterList.Add(new MeterDisplayItem
             {
                 Title = m.Title,
+                GaugeTitle = m.Section.Length > 0 && m.Title.StartsWith(m.Section + " · ", StringComparison.Ordinal)
+                    ? m.Title[(m.Section.Length + 3)..]
+                    : m.Title,
+                Section = m.Section,
                 Subtitle = m.Subtitle,
                 Value = m.Percent ?? 0.0,
                 ValueText = valText,

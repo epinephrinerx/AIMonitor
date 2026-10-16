@@ -50,7 +50,7 @@ public sealed class ProviderMetaTests
     {
         var meta = ProviderMeta.Agy;
         Assert.Equal("agy", meta.Id);
-        Assert.Equal("AGY", meta.DisplayName);
+        Assert.Equal("Gemini / AGY", meta.DisplayName);
         Assert.False(meta.NeedsKey);
         Assert.Empty(meta.KeyLabel);
         Assert.Empty(meta.KeyPlaceholder);
@@ -74,7 +74,7 @@ public sealed class ProviderMetaTests
     [InlineData("claude", "Claude")]
     [InlineData("CLAUDE", "Claude")]
     [InlineData("openai", "OpenAI / Codex")]
-    [InlineData("agy", "AGY")]
+    [InlineData("agy", "Gemini / AGY")]
     public void TryGet_CaseInsensitive_ReturnsCorrectMetadata(string providerId, string expectedDisplayName)
     {
         var meta = ProviderMeta.TryGet(providerId);

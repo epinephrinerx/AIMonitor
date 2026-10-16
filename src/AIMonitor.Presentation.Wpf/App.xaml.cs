@@ -352,7 +352,7 @@ public partial class App : System.Windows.Application
             {
                 ("claude", "Claude"),
                 ("openai", "OpenAI / Codex"),
-                ("agy", "AGY")
+                ("agy", "Gemini / AGY")
             };
 
             var snapshots = _mainViewModel?.LatestSnapshots ?? new Dictionary<string, Domain.ProviderSnapshot>();
