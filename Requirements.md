@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-10-15
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-10-16
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -215,7 +215,7 @@
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ connection จริง (แก้ transport stdin BOM และผ่าน offline handshake/regressions แล้ว 2026-10-15) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ยืนยัน connection จริงบน Debug build 2026-10-16) |
 | วันที่ | 2026-10-14 |
 | แตะส่วนไหน | credential discovery/selection · OpenAI/Gemini provider clients · Connections/Connect dialogs · regression tests |
 | เกี่ยวกับ | [[R-002]] · [[R-004]] · [[R-005]] · PAR-002/008/010/011/012/029 |
@@ -237,11 +237,11 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่ทำให้ project API key ดูเสมือนมีสิทธิ์ Admin หรือสร้าง usage/quota ที่ provider ไม่เปิดเผย
 
 **ตรวจรับเมื่อ:**
-- [ ] Agy มีรายงานวิเคราะห์และขั้นตอน reproduce ด้วย synthetic fixtures สำหรับสอง provider
-- [ ] OpenAI แยก project/Admin key, permission/auth failures และ OAuth precedence ได้พร้อม actionable UI
-- [ ] Gemini แยก CLI/service-account/ADC/project/Cloud Monitoring permission failures ได้พร้อม actionable UI
-- [ ] บั๊กที่ยืนยันได้มี regression tests ที่ fail ก่อน fix และ pass หลัง fix
-- [ ] ผ่าน independent review, full tests/build/format และผู้ใช้ยืนยัน connection บนแอปจริงโดยไม่เปิดเผย key
+- [x] Agy มีรายงานวิเคราะห์และขั้นตอน reproduce ด้วย synthetic fixtures สำหรับสอง provider
+- [x] OpenAI แยก project/Admin key, permission/auth failures และ OAuth precedence ได้พร้อม actionable UI
+- [x] ~~Gemini แยก CLI/service-account/ADC/project/Cloud Monitoring permission failures ได้พร้อม actionable UI~~ — แทนด้วย [[R-012]] (AGY) และผู้ใช้ยืนยันว่า AGY แสดง pool ได้
+- [x] บั๊กที่ยืนยันได้มี regression tests ที่ fail ก่อน fix และ pass หลัง fix
+- [x] ผ่าน independent review, full tests/build/format และผู้ใช้ยืนยัน connection บนแอปจริงโดยไม่เปิดเผย key
 
 **Pipeline:**
 1. Agy วิเคราะห์และ Coding Owner triage สาเหตุเทียบ official documentation
@@ -252,6 +252,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 **ความคืบหน้า:**
 - 2026-10-15 — ตรวจพบสาเหตุหน้า OpenAI ดึงข้อมูลไม่ได้: ใน production `CodexProcess` ตั้งค่า `StandardInputEncoding = Encoding.UTF8` ซึ่งใน .NET มีค่าเริ่มต้นปล่อย UTF-8 BOM (`0xEF, 0xBB, 0xBF`) ส่งผลให้ child process (`codex app-server --listen stdio://`) ได้รับ BOM นำหน้าข้อความ JSON-RPC แรก (`initialize`) และล้มเหลวด้วย `Failed to deserialize JSONRPCMessage: expected value at line 1 column 1` จนไม่ตอบกลับ stdout; ปรับปรุง `StandardInputEncoding` และ `StandardOutputEncoding` ใน `CodexProcess` เป็น BOM-less UTF-8 (`new UTF8Encoding(false)`) พร้อมเพิ่ม regression tests ครอบคลุม byte-boundary, UTF-8 non-ASCII text preservation และ child process OS pipe redirection (ดู `Docs/HANDOFF_OPENAI_TRANSPORT.md`)
+- 2026-10-16 — เพิ่ม assertion ว่า encoding ของ stdin/stdout ไม่มี preamble (`b37c7f1`); ผู้ใช้ตรวจบน Debug build แล้วผ่านทุกข้อ: OpenAI ผ่าน Codex login, OpenAI API key และ AGY แทน Gemini
 
 ## R-007 · แสดง ChatGPT plan, workspace credits และ reached-limit reason ของ Codex
 
@@ -351,7 +352,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ — เปิด Debug build AGY แล้ว |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ยืนยันข้อมูลจริงบน Debug build 2026-10-16) |
 | วันที่ | 2026-10-15 |
 | แตะส่วนไหน | AGY CLI provider · composition · tab/connections/tray/reports · settings compatibility · tests/docs |
 | เกี่ยวกับ | R-001/R-006 เฉพาะ Gemini slice · Docs/AGY-Usage.md |
@@ -379,7 +380,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - [x] synthetic tests, independent Claude/Codex reviews, build/format/render ผ่าน
 - [x] เปิด build ใหม่ให้ผู้ใช้ตรวจรับข้อมูลจริง
 
-**หลักฐาน:** 2026-10-16 — tests 1,486 ผ่าน, build 0 warnings/errors, format ผ่าน, synthetic WPF renders 40 ภาพ; ดู `Docs/HANDOFF_R012.md` ยังรอผู้ใช้ตรวจข้อมูลและหน้าตาจริง
+**หลักฐาน:** 2026-10-16 — tests 1,486 ผ่าน, build 0 warnings/errors, format ผ่าน, synthetic WPF renders 40 ภาพ; ดู `Docs/HANDOFF_R012.md`; 2026-10-16 ผู้ใช้ตรวจข้อมูลจริงบน Debug build แล้วผ่าน
 
 ## R-011 · ผูก section ข้อมูลเพิ่มเติมเข้า WPF จริง
 
