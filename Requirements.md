@@ -354,7 +354,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจบนแอปจริง 2026-10-16; ออกใน 2.0.2) |
 | วันที่ | 2026-10-16 |
 | แตะส่วนไหน | `Meter.Section` · `AgyUsageMapper` · `ProviderTabViewModel.MeterSections` · gauge row ใน `MainWindow.xaml` · display name |
 | เกี่ยวกับ | [[R-012]] · [[R-010]] |
@@ -373,7 +373,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - [x] หน้า Gemini / AGY แบ่งเป็นกลุ่ม Gemini และ Claude / GPT ชื่อไม่ทับ gauge
 - [x] tab, Connections, Connect dialog และ Usage log ใช้ชื่อ Gemini / AGY
 - [x] regression tests ของ mapper และ ViewModel; full suite 1,489 ผ่าน, build 0 warnings/errors, format ผ่าน
-- [ ] ผู้ใช้ตรวจหน้าตาบนแอปจริง
+- [x] ผู้ใช้ตรวจหน้าตาบนแอปจริง
 
 ## R-012 · แทน Gemini Cloud Monitoring ด้วย AGY อย่างเดียว
 
