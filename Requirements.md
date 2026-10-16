@@ -258,7 +258,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (แก้ไขและ synthetic verification แล้ว 2026-10-15) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจบน Debug build 2026-10-16) |
 | วันที่ | 2026-10-15 |
 | แตะส่วนไหน | `CodexQuotaMapper` · `OpenAiLiveQuotaClient` · UI mapping/stats · tests · docs |
 | เกี่ยวกับ | [[R-001]] · [[R-002]] · [[R-006]] · PAR-009 |
@@ -302,12 +302,13 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 **ความคืบหน้า:**
 - 2026-10-15 — เพิ่ม R-007 ตามที่ผู้ใช้อนุมัติข้อเสนอแนะ; ตรวจสอบ schema ทางการจาก `codex app-server generate-json-schema` และเอกสารทางการ; เพิ่ม `RateLimitStats` ใน `CodexQuotaMapper` และเชื่อมต่อใน `OpenAiLiveQuotaClient`; เพิ่ม regression tests ครอบคลุม present/absent/malformed/zero/unlimited/multiple buckets และ metadata survival เมื่อไม่มี history; full suite 1,373 tests, build 0 warnings/errors และ format ผ่านครบถ้วน (ดู `Docs/HANDOFF_R007.md`)
+- 2026-10-16 — ผู้ใช้ตรวจ plan, workspace credits, reached-limit reason และ gauge เดิมบน Debug build แล้วผ่าน
 
 ## R-008 · เพิ่มคำแนะนำสำหรับการ login เข้าสู่ Codex / OpenAI และสำรวจข้อมูลส่วนที่แสดงเพิ่มเติมได้
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (ปรับปรุงคำแนะนำ login ใน UI เรียบร้อย และสรุปข้อมูลเพิ่มเติมเชิงข้อมูล 2026-10-15) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจคำแนะนำ login บน Debug build 2026-10-16) |
 | วันที่ | 2026-10-15 |
 | แตะส่วนไหน | `ProviderMeta.OpenAi.SetupHint` · `OpenAiLiveQuotaClient.SetupHint` · `tests/AIMonitor.Presentation.Wpf.Tests/ProviderMetaTests.cs` · `Docs/HANDOFF_R008.md` |
 | เกี่ยวกับ | [[R-001]] · [[R-002]] · [[R-006]] · [[R-007]] · PAR-008/009/010 |
@@ -343,10 +344,11 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - [x] ข้อความอ่านง่าย กระชับ ถูกต้องตามสไตล์ UI ภาษาอังกฤษเดิม
 - [x] บันทึก R-008 ใน `Requirements.md` พร้อม verbatim user quote และสถานะรอตรวจรับ (waiting owner acceptance after copy verification)
 - [x] สร้าง `Docs/HANDOFF_R008.md` สรุปไฟล์ที่เปลี่ยน ผลการตรวจสอบ build/format และรายการข้อมูลเพิ่มเติมเชิงข้อมูล
-- [ ] ผู้ใช้ตรวจรับคำแนะนำใน UI ของจริง
+- [x] ผู้ใช้ตรวจรับคำแนะนำใน UI ของจริง
 
 **ความคืบหน้า:**
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
+- 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
 ## R-012 · แทน Gemini Cloud Monitoring ด้วย AGY อย่างเดียว
 
