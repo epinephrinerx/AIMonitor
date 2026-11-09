@@ -159,7 +159,7 @@ public partial class App : System.Windows.Application
         _refreshCoordinator = new LatestRefreshCoordinator(refreshUseCase);
 
         // 5. ViewModels
-        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession);
+        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, agentUsage: _agentUsageSource);
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
         _mainViewModel.RequestCheckUpdates += () => _ = _updateCoordinator?.CheckAsync(interactive: true);

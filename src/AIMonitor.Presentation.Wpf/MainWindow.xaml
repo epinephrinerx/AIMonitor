@@ -114,7 +114,7 @@
                     </Style.Triggers>
                 </Style>
             </Border.Style>
-            <ListBox ItemsSource="{Binding ProviderTabs}" SelectedItem="{Binding SelectedTab}"
+            <ListBox ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTabItem, Mode=TwoWay}"
                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -158,6 +158,9 @@
                     <Setter Property="Visibility" Value="Visible" />
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsConnectionsPageVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsAllAgentsSelected}" Value="True">
                             <Setter Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
                     </Style.Triggers>
@@ -388,7 +391,25 @@
                 </TextBlock>
             </StackPanel>
         </ScrollViewer>
- 
+
+        <!-- All agents content -->
+        <ScrollViewer x:Name="AllAgentsScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsAllAgentsSelected}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsConnectionsPageVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
+            <local:AllAgentsView DataContext="{Binding AllAgentsTab}" Margin="0,0,0,16" />
+        </ScrollViewer>
+
         <!-- Connections Page Wrapper -->
         <Grid x:Name="ConnectionsWrapper"
               Grid.Row="1"
