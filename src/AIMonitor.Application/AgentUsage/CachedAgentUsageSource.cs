@@ -13,9 +13,10 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
     private readonly IClock _clock;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    private AgentUsageReport? _lastReport;
-    private DateOnly? _lastSince;
-    private DateTimeOffset _lastSuccessAt;
+    // Cache state is one immutable snapshot read as a single reference (R6).
+    private CacheSnapshot? _snapshot;
+
+    private sealed record CacheSnapshot(AgentUsageReport Report, DateOnly? Since, DateTimeOffset SuccessAt);
 
     /// <summary>
     /// Minimum age of the cached report before a new read is attempted.
@@ -25,7 +26,7 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
     /// <summary>
     /// The last successful report, if any.
     /// </summary>
-    public AgentUsageReport? LastGood => _lastReport;
+    public AgentUsageReport? LastGood => _snapshot?.Report;
 
     /// <summary>
     /// The last failure, if any.
@@ -54,9 +55,7 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
             if (!force && TryUseCached(since, out cached)) return cached;
 
             var report = await _inner.ReadAsync(since, ct).ConfigureAwait(false);
-            _lastReport = report;
-            _lastSince = since;
-            _lastSuccessAt = _clock.UtcNow;
+            _snapshot = new CacheSnapshot(report, since, _clock.UtcNow);
             LastError = null;
             return report;
         }
@@ -88,13 +87,14 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
     private bool TryUseCached(DateOnly? since, out AgentUsageReport report)
     {
         report = null!;
-        if (_lastReport is null) return false;
-        if (!SameSince(_lastSince, since)) return false;
+        var snapshot = _snapshot;
+        if (snapshot is null) return false;
+        if (!SameSince(snapshot.Since, since)) return false;
 
-        var age = _clock.UtcNow - _lastSuccessAt;
+        var age = _clock.UtcNow - snapshot.SuccessAt;
         if (age >= MinInterval) return false;
 
-        report = _lastReport;
+        report = snapshot.Report;
         return true;
     }
 

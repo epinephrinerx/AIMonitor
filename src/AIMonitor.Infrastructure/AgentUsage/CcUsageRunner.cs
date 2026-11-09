@@ -11,17 +11,16 @@ namespace AIMonitor.Infrastructure.AgentUsage;
 /// </summary>
 public sealed class CcUsageRunner : ICcUsageRunner
 {
-    internal const int DefaultStdoutLimit = 32 * 1024 * 1024;
-    internal const int DefaultStderrLimit = 1 * 1024 * 1024;
+    internal const int DefaultOutputLimit = 32 * 1024 * 1024;
+    internal const int StderrLimit = 1 * 1024 * 1024;
 
     private readonly Func<string?> _resolve;
     private readonly Func<ProcessStartInfo, ICcUsageProcess> _start;
     private readonly TimeSpan _timeout;
-    private readonly int _stdoutLimit;
-    private readonly int _stderrLimit;
+    private readonly int _outputLimit;
 
     public CcUsageRunner()
-        : this(ResolveExecutable, info => new CcUsageProcess(info), TimeSpan.FromSeconds(120), DefaultStdoutLimit, DefaultStderrLimit)
+        : this(ResolveExecutable, info => new CcUsageProcess(info), TimeSpan.FromSeconds(120), DefaultOutputLimit)
     {
     }
 
@@ -29,24 +28,21 @@ public sealed class CcUsageRunner : ICcUsageRunner
         Func<string?> resolve,
         Func<ProcessStartInfo, ICcUsageProcess> start,
         TimeSpan timeout,
-        int stdoutLimit = DefaultStdoutLimit,
-        int stderrLimit = DefaultStderrLimit)
+        int outputLimit = DefaultOutputLimit)
     {
         ArgumentNullException.ThrowIfNull(resolve);
         ArgumentNullException.ThrowIfNull(start);
         if (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > uint.MaxValue - 1)
             throw new ArgumentOutOfRangeException(nameof(timeout));
-        if (stdoutLimit <= 0) throw new ArgumentOutOfRangeException(nameof(stdoutLimit));
-        if (stderrLimit <= 0) throw new ArgumentOutOfRangeException(nameof(stderrLimit));
+        if (outputLimit <= 0) throw new ArgumentOutOfRangeException(nameof(outputLimit));
 
         _resolve = resolve;
         _start = start;
         _timeout = timeout;
-        _stdoutLimit = stdoutLimit;
-        _stderrLimit = stderrLimit;
+        _outputLimit = outputLimit;
     }
 
-    async Task<CcUsageRunResult> ICcUsageRunner.RunAsync(DateOnly? since, CancellationToken cancellationToken)
+    public async Task<CcUsageRunResult> RunAsync(DateOnly? since, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -54,8 +50,8 @@ public sealed class CcUsageRunner : ICcUsageRunner
         if (first.IsSuccess)
             return new CcUsageRunResult(first.Output!, AgentUsagePricing.OnlineRequested);
 
-        // Retry with --offline only on timeout or non-zero exit (A6).
-        if (first.Error!.Kind is AgentUsageErrorKind.Timeout or AgentUsageErrorKind.Failed)
+        // Retry with --offline only on timeout or non-zero exit (R1).
+        if (first.IsRetryable)
         {
             var second = await RunOnceAsync(since, offline: true, cancellationToken).ConfigureAwait(false);
             if (second.IsSuccess)
@@ -80,53 +76,64 @@ public sealed class CcUsageRunner : ICcUsageRunner
             var path = _resolve();
             if (string.IsNullOrWhiteSpace(path))
             {
-                throw new AgentUsageUnavailableException(
-                    AgentUsageErrorKind.NotInstalled,
-                    "ccusage was not found. Install it with `npm i -g ccusage`, then restart AIMonitor.");
+                return CcUsageRunOnceResult.Failure(
+                    new AgentUsageUnavailableException(
+                        AgentUsageErrorKind.NotInstalled,
+                        "ccusage was not found. Install it with `npm i -g ccusage`, then restart AIMonitor."),
+                    isRetryable: false);
             }
 
-            process = _start(BuildStartInfo(path, since, offline));
-            stdout = ReadPipeAsync(process.Output, _stdoutLimit, retain: true, deadline);
-            stderr = ReadPipeAsync(process.Error, _stderrLimit, retain: false, deadline);
+            try
+            {
+                process = _start(BuildStartInfo(path, since, offline));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or System.ComponentModel.Win32Exception or DecoderFallbackException)
+            {
+                return CcUsageRunOnceResult.Failure(
+                    new AgentUsageUnavailableException(
+                        AgentUsageErrorKind.Failed,
+                        "Could not run ccusage. Check that ccusage is installed, then refresh.",
+                        ex),
+                    isRetryable: false);
+            }
+
+            stdout = ReadPipeAsync(process.Output, _outputLimit, retain: true, deadline);
+            stderr = ReadPipeAsync(process.Error, StderrLimit, retain: false, deadline);
             var exited = process.WaitForExitAsync(deadline.Token);
 
             await Task.WhenAll(stdout, stderr, exited).WaitAsync(deadline.Token).ConfigureAwait(false);
 
             if (process.ExitCode != 0)
             {
-                throw new AgentUsageUnavailableException(
-                    AgentUsageErrorKind.Failed,
-                    "ccusage could not read usage. Run `ccusage daily` in a terminal to see why.");
+                return CcUsageRunOnceResult.Failure(
+                    new AgentUsageUnavailableException(
+                        AgentUsageErrorKind.Failed,
+                        "ccusage could not read usage. Run `ccusage daily` in a terminal to see why."),
+                    isRetryable: true);
             }
 
             return CcUsageRunOnceResult.Success(await stdout.ConfigureAwait(false));
         }
         catch (CcUsageOutputLimitExceededException)
         {
-            throw new AgentUsageUnavailableException(
-                AgentUsageErrorKind.OutputTooLarge,
-                "ccusage output exceeded the maximum allowed size.");
+            return CcUsageRunOnceResult.Failure(
+                new AgentUsageUnavailableException(
+                    AgentUsageErrorKind.OutputTooLarge,
+                    "ccusage output exceeded the maximum allowed size."),
+                isRetryable: false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new AgentUsageUnavailableException(
-                AgentUsageErrorKind.Timeout,
-                "ccusage did not respond in time. Check ccusage, then refresh.");
+            return CcUsageRunOnceResult.Failure(
+                new AgentUsageUnavailableException(
+                    AgentUsageErrorKind.Timeout,
+                    "ccusage did not respond in time. Check ccusage, then refresh."),
+                isRetryable: true);
         }
         catch (OperationCanceledException)
         {
             throw;
-        }
-        catch (AgentUsageUnavailableException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
-                                   or System.ComponentModel.Win32Exception or DecoderFallbackException)
-        {
-            throw new AgentUsageUnavailableException(
-                AgentUsageErrorKind.Failed,
-                "Could not run ccusage. Check that ccusage is installed, then refresh.");
         }
         finally
         {
@@ -221,7 +228,12 @@ public sealed class CcUsageRunner : ICcUsageRunner
             {
                 if (retain)
                 {
-                    deadline.Cancel();
+                    // If the deadline already fired, the result is Timeout, not OutputTooLarge (R2).
+                    if (deadline.Token.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException(deadline.Token);
+                    }
+
                     throw new CcUsageOutputLimitExceededException();
                 }
 
@@ -243,7 +255,9 @@ public sealed class CcUsageRunner : ICcUsageRunner
             try
             {
                 var fullDirectory = directory.Trim().Trim('"');
-                if (!Path.IsPathFullyQualified(fullDirectory)) continue;
+                if (string.IsNullOrEmpty(fullDirectory)) continue;
+                if (!Path.IsPathRooted(fullDirectory)) continue;
+                if (IsDriveRelative(fullDirectory)) continue;
 
                 var exePath = Path.Combine(fullDirectory, "ccusage.exe");
                 if (File.Exists(exePath)) return exePath;
@@ -257,12 +271,23 @@ public sealed class CcUsageRunner : ICcUsageRunner
         return null;
     }
 
+    private static bool IsDriveRelative(string path)
+    {
+        // Drive-relative: "C:" or "C:foo", not "C:\foo".
+        if (path.Length >= 2 && path[1] == ':' && char.IsLetter(path[0]))
+        {
+            return path.Length == 2 || path[2] != Path.DirectorySeparatorChar && path[2] != Path.AltDirectorySeparatorChar;
+        }
+
+        return false;
+    }
+
     private sealed class CcUsageOutputLimitExceededException : Exception
     {
     }
 }
 
-internal sealed record CcUsageRunResult(string Output, AgentUsagePricing Pricing);
+public sealed record CcUsageRunResult(string Output, AgentUsagePricing Pricing);
 
 internal interface ICcUsageRunner
 {
@@ -318,7 +343,10 @@ internal sealed class CcUsageProcess : ICcUsageProcess
     }
 }
 
-internal sealed record CcUsageRunOnceResult(bool IsSuccess, string? Output, AgentUsageUnavailableException? Error)
+internal sealed record CcUsageRunOnceResult(bool IsSuccess, string? Output, AgentUsageUnavailableException? Error, bool IsRetryable)
 {
-    public static CcUsageRunOnceResult Success(string output) => new(true, output, null);
+    public static CcUsageRunOnceResult Success(string output) => new(true, output, null, false);
+
+    public static CcUsageRunOnceResult Failure(AgentUsageUnavailableException error, bool isRetryable)
+        => new(false, null, error, isRetryable);
 }

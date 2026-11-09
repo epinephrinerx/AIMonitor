@@ -39,6 +39,7 @@ public static class CcUsageJsonParser
 
             EnforceModelBreakdownLimit(dailyArray);
             EnforceModelBreakdownLimit(monthlyArray);
+            EnforceModelBreakdownLimit(sessionArray);
 
             var skipped = 0;
             var daily = new List<DailyAgentUsage>();
@@ -99,10 +100,26 @@ public static class CcUsageJsonParser
         foreach (var row in section.EnumerateArray())
         {
             if (row.ValueKind != JsonValueKind.Object) continue;
-            if (!row.TryGetProperty("modelBreakdowns", out var models)) continue;
-            if (models.ValueKind != JsonValueKind.Array) continue;
-            if (models.GetArrayLength() > MaxModelsPerRow) throw Invalid();
+
+            // Row-level modelBreakdowns (daily/monthly "all" totals and session rows).
+            EnforceModelBreakdownLimitOnElement(row);
+
+            // Each agents[i].modelBreakdowns is also subject to the limit (R5).
+            if (row.TryGetProperty("agents", out var agents) && agents.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var agent in agents.EnumerateArray())
+                {
+                    EnforceModelBreakdownLimitOnElement(agent);
+                }
+            }
         }
+    }
+
+    private static void EnforceModelBreakdownLimitOnElement(JsonElement element)
+    {
+        if (!element.TryGetProperty("modelBreakdowns", out var models)) return;
+        if (models.ValueKind != JsonValueKind.Array) return;
+        if (models.GetArrayLength() > MaxModelsPerRow) throw Invalid();
     }
 
     private static bool TryParseDailyRow(JsonElement row, out DailyAgentUsage usage, ref int skipped)
@@ -166,7 +183,7 @@ public static class CcUsageJsonParser
         if (!metadata.TryGetProperty("lastActivity", out var lastActivity) || lastActivity.ValueKind != JsonValueKind.String) { skipped++; return false; }
         if (!TryParseIsoOffset(lastActivity.GetString(), out var lastActivityOffset)) { skipped++; return false; }
 
-        if (!TryParseAgentUsage(row, false, out var usageData)) { skipped++; return false; }
+        if (!TryParseAgentUsage(row, true, out var usageData)) { skipped++; return false; }
 
         usage = new SessionAgentUsage(
             sessionId,
@@ -278,13 +295,19 @@ public static class CcUsageJsonParser
         var span = value.AsSpan().Trim();
         if (span.IsEmpty) return false;
 
-        bool hasOffset = span[^1] == 'Z' || span[^1] == 'z';
+        // The explicit offset or Z must be in the time part, after the 'T' (R3).
+        var tPos = span.IndexOf('T');
+        if (tPos < 0) tPos = span.IndexOf('t');
+        if (tPos < 0) return false;
+
+        var timePart = span.Slice(tPos);
+        bool hasOffset = timePart[^1] == 'Z' || timePart[^1] == 'z';
         if (!hasOffset)
         {
-            var lastPlus = span.LastIndexOf('+');
-            var lastMinus = span.LastIndexOf('-');
+            var lastPlus = timePart.LastIndexOf('+');
+            var lastMinus = timePart.LastIndexOf('-');
             var signPos = Math.Max(lastPlus, lastMinus);
-            if (signPos > 0 && span.Slice(signPos).Contains(':'))
+            if (signPos > 0 && timePart.Slice(signPos).Contains(':'))
             {
                 hasOffset = true;
             }
