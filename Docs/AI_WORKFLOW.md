@@ -27,9 +27,9 @@
 - Writing Owner 2 : `opencode`
 - Writing Owner 2 Model : `opencode-go/kimi-k2.7-code`
 - Writing Owner 2 Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
-- Writing Owner 3 : `agy` (Antigravity, Google)
-- Writing Owner 3 Model : `Gemini 3.8 Flash`
-- Writing Owner 3 Effort : `Medium`
+- Writing Owner 3 : `opencode`
+- Writing Owner 3 Model : `opencode-go/deepseek-v4.1-flash`
+- Writing Owner 3 Effort : `High` (`opencode run` ไม่มี flag กำหนด effort; เปลี่ยนจาก agy Gemini 3.8 Flash เมื่อ 2026-11-09)
 - Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
 - Test Author Model : `opencode-go/qwen3.8-flash`
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
