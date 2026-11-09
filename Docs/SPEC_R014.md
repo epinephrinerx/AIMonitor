@@ -420,3 +420,12 @@ Trial merge (integration HEAD + `7c4589a` + `c1f8c76`): build clean, 1,890 pass,
 | B19 | A record that **replaces** a kept one is not "added": `TryIngest` returns `false` for it and `RefreshAsync`'s count excludes it (its counters still change). | Test Author (assert), WO3 (already so) |
 | B20 | `version: "2.1"` (two components) is not a semver prefix → record skipped (ccusage needs `<d>.<d>.<d>`). | Test Author |
 | B21 | `ClaudeLiveQuotaClient` ctors take an optional trailing `string? xdgConfigHome = null` (already in `7c4589a`); tests may feed it. | Test Author |
+
+## Coding Owner decisions after P4 code review (2026-11-09)
+
+| # | Decision |
+|---|---|
+| C19 | `SupplementaryDetailsViewModel.HasResetInfo` = any of `ResetTitle`, `ResetBadge`, `ResetSummary`, `ResetDetails` non-empty; the reset row `Border` in `SupplementaryDetailsView.xaml` collapses when false (same trigger style as the activity border), and `ProviderTabViewModel` forwards `HasResetInfo` with the other dependent properties. A ccusage-only section therefore shows the header and the ccusage rows only (Reviewer1 MAJOR 1, Reviewer2 MAJOR-1). WO3 may edit those two files for this. |
+| C20 | Claude/OpenAI: when the existing rule would hide the section (`_baseShowSupplementary == false`, including "no snapshot yet"), a summary with a line creates a **ccusage-only** section exactly like AGY (no placeholder Plan/Credits rows, no reset part, no default "Rate Limit Resets" title). When the existing rule shows the section, the rows are appended as now. |
+| C21 | Skip rebuilding `Supplementary` when the computed ccusage rows equal the current ones (no churn on every refresh). |
+| C22 | P4 tests are the Test Author's and gate the merge (Reviewer2 MAJOR-2): ordered after the P3 tests. |
