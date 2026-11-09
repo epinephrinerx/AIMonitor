@@ -23,7 +23,6 @@ public sealed record ClaudeModelRate
 {
     private const decimal CacheWrite5mMultiplier = 1.25m;
     private const decimal CacheWrite1hMultiplier = 2.0m;
-    private const decimal CacheReadMultiplier = 0.1m;
 
     public decimal InputPerMillion { get; }
 
@@ -35,9 +34,9 @@ public sealed record ClaudeModelRate
 
     public decimal CacheWrite1hPerMillion => InputPerMillion * CacheWrite1hMultiplier;
 
-    public decimal CacheReadPerMillion => InputPerMillion * CacheReadMultiplier;
+    public decimal CacheReadPerMillion { get; }
 
-    public ClaudeModelRate(decimal inputPerMillion, decimal outputPerMillion, string displayName)
+    public ClaudeModelRate(decimal inputPerMillion, decimal outputPerMillion, string displayName, decimal cacheReadPerMillion)
     {
         if (inputPerMillion < 0)
         {
@@ -49,9 +48,15 @@ public sealed record ClaudeModelRate
             throw new ArgumentOutOfRangeException(nameof(outputPerMillion), outputPerMillion, "Rate cannot be negative.");
         }
 
+        if (cacheReadPerMillion < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cacheReadPerMillion), cacheReadPerMillion, "Rate cannot be negative.");
+        }
+
         InputPerMillion = inputPerMillion;
         OutputPerMillion = outputPerMillion;
         DisplayName = DomainGuard.RequireNonBlank(displayName, nameof(displayName));
+        CacheReadPerMillion = cacheReadPerMillion;
     }
 }
 
@@ -67,35 +72,46 @@ public static class ClaudeModelPricing
 {
     private const int Million = 1_000_000;
     private const int DateSuffixLength = 8;
+    private const long Haiku55TierThreshold = 100_000;
 
     private static readonly IReadOnlyDictionary<string, ClaudeModelRate> ExactRates =
         new Dictionary<string, ClaudeModelRate>(StringComparer.Ordinal)
         {
-            ["claude-fable-5-1"] = new(10.00m, 50.00m, "Fable 5.1"),
-            ["claude-fable-5"] = new(10.00m, 50.00m, "Fable 5"),
-            ["claude-mythos-5-1"] = new(10.00m, 50.00m, "Mythos 5.1"),
-            ["claude-mythos-5"] = new(10.00m, 50.00m, "Mythos 5"),
-            ["claude-opus-5"] = new(5.00m, 25.00m, "Opus 5"),
-            ["claude-opus-4-8"] = new(5.00m, 25.00m, "Opus 4.8"),
-            ["claude-opus-4-7"] = new(5.00m, 25.00m, "Opus 4.7"),
-            ["claude-opus-4-6"] = new(5.00m, 25.00m, "Opus 4.6"),
-            ["claude-sonnet-5"] = new(2.00m, 10.00m, "Sonnet 5"),
-            ["claude-sonnet-4-6"] = new(3.00m, 15.00m, "Sonnet 4.6"),
-            ["claude-haiku-4-5"] = new(1.00m, 5.00m, "Haiku 4.5"),
+            ["claude-fable-5-1"] = new(10.00m, 50.00m, "Fable 5.1", 0.25m),
+            ["claude-fable-5"] = new(10.00m, 50.00m, "Fable 5", 1.00m),
+            ["claude-mythos-5-1"] = new(10.00m, 50.00m, "Mythos 5.1", 0.25m),
+            ["claude-mythos-5"] = new(10.00m, 50.00m, "Mythos 5", 1.00m),
+            ["claude-opus-5-5"] = new(4.00m, 20.00m, "Opus 5.5", 0.20m),
+            ["claude-opus-5"] = new(5.00m, 25.00m, "Opus 5", 0.50m),
+            ["claude-opus-4-8"] = new(5.00m, 25.00m, "Opus 4.8", 0.50m),
+            ["claude-opus-4-7"] = new(5.00m, 25.00m, "Opus 4.7", 0.50m),
+            ["claude-opus-4-6"] = new(5.00m, 25.00m, "Opus 4.6", 0.50m),
+            ["claude-opus-4-5"] = new(5.00m, 25.00m, "Opus 4.5", 0.50m),
+            ["claude-opus-4-1"] = new(15.00m, 75.00m, "Opus 4.1", 1.50m),
+            ["claude-opus-4"] = new(15.00m, 75.00m, "Opus 4", 1.50m),
+            ["claude-sonnet-5-5"] = new(2.00m, 10.00m, "Sonnet 5.5", 0.10m),
+            ["claude-sonnet-5"] = new(2.00m, 10.00m, "Sonnet 5", 0.20m),
+            ["claude-sonnet-4-6"] = new(3.00m, 15.00m, "Sonnet 4.6", 0.30m),
+            ["claude-sonnet-4-5"] = new(3.00m, 15.00m, "Sonnet 4.5", 0.30m),
+            ["claude-sonnet-4"] = new(3.00m, 15.00m, "Sonnet 4", 0.30m),
+            ["claude-haiku-5-5"] = new(0.10m, 0.50m, "Haiku 5.5", 0.01m),
+            ["claude-haiku-4-5"] = new(1.00m, 5.00m, "Haiku 4.5", 0.10m),
         };
+
+    private static readonly ClaudeModelRate Haiku55HighTier = new(0.50m, 2.50m, "Haiku 5.5", 0.05m);
 
     /// <summary>Prefix fallbacks for ids this table predates (e.g. a future Opus point release).
     /// Order matters only in that every prefix here happens to be unambiguous; the first (only) match wins.</summary>
     private static readonly (string Prefix, ClaudeModelRate Rate)[] PrefixRates =
     [
-        ("claude-fable", new ClaudeModelRate(10.00m, 50.00m, "Fable")),
-        ("claude-mythos", new ClaudeModelRate(10.00m, 50.00m, "Mythos")),
-        ("claude-opus", new ClaudeModelRate(5.00m, 25.00m, "Opus")),
-        ("claude-sonnet", new ClaudeModelRate(3.00m, 15.00m, "Sonnet")),
-        ("claude-haiku", new ClaudeModelRate(1.00m, 5.00m, "Haiku")),
+        ("claude-fable", new ClaudeModelRate(10.00m, 50.00m, "Fable", 0.25m)),
+        ("claude-mythos", new ClaudeModelRate(10.00m, 50.00m, "Mythos", 0.25m)),
+        ("claude-opus", new ClaudeModelRate(4.00m, 20.00m, "Opus", 0.20m)),
+        ("claude-sonnet", new ClaudeModelRate(2.00m, 10.00m, "Sonnet", 0.10m)),
+        ("claude-haiku", new ClaudeModelRate(0.10m, 0.50m, "Haiku", 0.01m)),
     ];
 
-    private static readonly ClaudeModelRate UnknownRate = new(0m, 0m, "Unknown");
+    private static readonly ClaudeModelRate UnknownRate = new(0m, 0m, "Unknown", 0m);
 
     /// <summary>The rate to use, and how much faith to put in it.</summary>
     public static (ClaudeModelRate Rate, PricingKind Kind) Resolve(string? model)
@@ -166,6 +182,12 @@ public static class ClaudeModelPricing
         long cacheReadTokens = 0)
     {
         var rate = RateFor(model);
+        var prompt = inputTokens + cacheWrite5mTokens + cacheWrite1hTokens + cacheReadTokens;
+        if (IsHaiku55Exact(model) && prompt > Haiku55TierThreshold)
+        {
+            rate = Haiku55HighTier;
+        }
+
         var total =
             inputTokens * rate.InputPerMillion +
             outputTokens * rate.OutputPerMillion +
@@ -173,6 +195,33 @@ public static class ClaudeModelPricing
             cacheWrite1hTokens * rate.CacheWrite1hPerMillion +
             cacheReadTokens * rate.CacheReadPerMillion;
         return total / Million;
+    }
+
+    private static bool IsHaiku55Exact(string? model)
+    {
+        if (string.IsNullOrEmpty(model))
+        {
+            return false;
+        }
+
+        if (model == "claude-haiku-5-5")
+        {
+            return true;
+        }
+
+        var lastHyphen = model.LastIndexOf('-');
+        if (lastHyphen < 0)
+        {
+            return false;
+        }
+
+        var tail = model[(lastHyphen + 1)..];
+        if (tail.Length != DateSuffixLength || !IsAllAsciiDigits(tail))
+        {
+            return false;
+        }
+
+        return model[..lastHyphen] == "claude-haiku-5-5";
     }
 
     private static bool IsAllAsciiDigits(string value)
