@@ -104,6 +104,28 @@ public sealed record UsageCounters
         }
     }
 
+    /// <summary>Removes one previously folded record's contribution. Used when a de-duplication
+    /// replacement swaps one transcript record for another (the old contribution is withdrawn before
+    /// the new one is folded). Checked like <see cref="Combine"/>: a field that would go negative is a
+    /// caller bug and throws rather than silently wrapping or clamping.</summary>
+    public UsageCounters Subtract(UsageCounters other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        checked
+        {
+            return new UsageCounters(
+                Messages - other.Messages,
+                InputTokens - other.InputTokens,
+                OutputTokens - other.OutputTokens,
+                CacheWriteTokens - other.CacheWriteTokens,
+                CacheReadTokens - other.CacheReadTokens,
+                CostUsd - other.CostUsd,
+                UnpricedTokens - other.UnpricedTokens,
+                EstimatedTokens - other.EstimatedTokens);
+        }
+    }
+
     private static int RequireNonNegative(int value, string paramName)
     {
         if (value < 0)
