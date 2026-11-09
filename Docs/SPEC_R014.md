@@ -182,3 +182,19 @@ Inspector A report (opencode, qwen3.7-plus, plan agent, spec-only) raised 13 poi
 | OP3 | P1.1/P1.3 | Verified in ccusage source (`ccusage-core/src/pricing.rs` `load_with_overrides`): a failed online price fetch **silently falls back to embedded prices with exit 0**. So `AgentUsagePricing` becomes `OnlineRequested` / `Offline`; UI must word `OnlineRequested` as "online prices requested (ccusage uses its built-in prices if the fetch fails)". No stderr parsing. |
 | OP4 | P2a | Haiku 5.5 tier needs the per-record prompt size, so cost is computed **per record at ingest** and accumulated as a cost counter per day×model and day×project (decimal), next to the token counters. P2b's dedup replacement subtracts the replaced record's stored tokens **and** cost. |
 | OP1 | P1.1 | Keep `Other = Total − bucket sum` as specified. |
+
+## Coding Owner decisions after the first P1 trial merge (2026-11-09) — override anything above
+
+Trial merge of `ce716d5` (WO2 code) + `16aab15` (Test Author tests): 72 compile errors, all API-surface mismatches.
+
+| # | Decision | Who changes |
+|---|---|---|
+| M1 | `AgentUsageUnavailableException(AgentUsageErrorKind kind, string message)` — kind first, as P1.2 says (an overload adding `Exception inner` last is fine). | WO2 |
+| M2 | `CachedAgentUsageSource(IAgentUsageSource inner, IClock clock, TimeSpan? minInterval = null)`; null → 15 min. | WO2 |
+| M3 | Runner API is WO2's: `internal interface ICcUsageRunner { Task<CcUsageRunResult> RunAsync(DateOnly? since, CancellationToken ct); }`, `internal sealed record CcUsageRunResult(string Output, AgentUsagePricing Pricing)`, `CcUsageRunner(Func<string?> resolve, Func<ProcessStartInfo, ICcUsageProcess> start, TimeSpan timeout, int outputLimit)`. | Test Author |
+| M4 | Source ctor: public `CcUsageAgentUsageSource(IClock clock)`; internal `CcUsageAgentUsageSource(IClock clock, ICcUsageRunner runner)`. | Test Author |
+| E1 | Model entry with `cost` absent (and no `missingPricing: true`) → invalid model → row skipped. | WO2 (currently treats as unknown price) |
+| E2 | A `totalTokens` on a model entry is an ignored extra property. | — |
+| E3 | `agents[]` entry with missing/blank/non-string `agent` → row skipped. `agents: []` → valid row with zero agents. Agent object without a `modelBreakdowns` array → row skipped. | WO2 + Test Author |
+| E4 | A successful read (forced or not) clears `LastError`. A failed forced read does not evict the cache: a later non-forced call within MinInterval of the last success returns `LastGood`. | WO2 + Test Author |
+| E5 | Non-string or missing `period` on daily/monthly rows → row skipped. | WO2 + Test Author |

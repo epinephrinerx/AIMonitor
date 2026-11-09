@@ -70,8 +70,11 @@
 - Writing Owner 1, Test Author และ Inspector เป็นตระกูล Qwen ทั้งสามตัว (คนละโมเดล จึงไม่ผิดกฎ)
   แต่อาจมองข้ามจุดเดียวกัน — เฟสที่ Writing Owner 1 เขียน ให้ Reviewer ทั้งสองตัวตรวจครบเสมอ
   และไม่ใช้ Writing Owner 1 เป็นผู้ตรวจงานที่ Test Author/Inspector ส่งกลับ
-- Writing Owner 1 ชื่อโมเดลบ่งว่ามี context ราว 12k token — ส่งงานที่ scope แคบ (ไม่กี่ไฟล์) ให้ตัวนี้
-  และให้ยืนยันกับผู้ใช้ก่อนใช้ค่า Effort `High` ถ้า opencode/Ollama ไม่รองรับ
+- Writing Owner 1 ใช้ผ่าน opencode เป็น `ollama/qwen-coder-12k-tools:latest` (สร้างบน Ollama 2026-11-09:
+  น้ำหนักเดียวกับ qwen-coder-12k แต่ template ให้ tool call เป็น JSON เปล่า เพราะโมเดลไม่ใส่แท็ก `<tool_call>`,
+  `num_ctx 24576` เพราะ prompt ของ opencode ใช้ราว 9.3k token และ `temperature 0` เพราะค่าเดิมแก้ไฟล์ได้ไม่สม่ำเสมอ)
+  ล้นออก CPU ราว 1.2 GiB จึงช้ากว่าโมเดลอื่น — ส่งงานที่ scope แคบ (ไม่กี่ไฟล์) ให้ตัวนี้
+  ค่า Effort `High` ไม่มีผลกับ Ollama
 
 ### ขอบเขตการทำงานของ agent
 
