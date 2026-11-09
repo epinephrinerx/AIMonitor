@@ -22,6 +22,11 @@ namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 /// limit named <c>outputLimit</c>, which the separate
 /// <c>CcUsageRunnerSeamR7Tests</c> pins by calling it directly on <c>CcUsageRunner</c> — that file
 /// only compiles once WO2 applies R7, so the tests here keep the M3 reachability.
+/// Decision R8 (PATH entries that are drive-relative — <c>C:</c>, <c>C:x</c> — are skipped) is NOT
+/// unit-testable through this seam: the scanning lives in the runner's private <c>ResolveExecutable</c>
+/// which reads <c>Environment.GetEnvironmentVariable("PATH")</c> directly, and <c>resolve</c> injects
+/// only the final path, never the PATH entries; faking environment state would violate TESTING.md.
+/// It is recorded in the handoff report and left for review/Integrator verification.
 /// </summary>
 public sealed class CcUsageRunnerTests
 {
@@ -519,14 +524,20 @@ public sealed class CcUsageRunnerTests
     public async Task ExcessiveStdout_AsyncPipeReader_ThrowsOutputTooLarge_NotTimeout_AndNeverRetries()
     {
         // Decision R2: "stdout over the limit is always OutputTooLarge, never Timeout, including with
-        // an asynchronous (pipe-like) reader". The fake reader yields on every read, so the limit is
-        // hit while the runner is suspended mid-await — exactly the race that misplaces the
-        // classification. The StringReader shape above passes today; this shape must pass too.
-        // Decision R1: OutputTooLarge is not a retry trigger — exactly one start.
+        // an asynchronous (pipe-like) reader" — "fakes must include an async TextReader that yields,
+        // not only StringReader". Every read suspends on Task.Yield(), so the limit is hit while the
+        // runner itself is suspended inside WhenAll(...).WaitAsync(deadline): the child has exited
+        // (exit 0, the completed task the other two reads already joined) while its stdout is still
+        // being drained — the exact scheduling a real piped process shows. Red at 083120e: its
+        // limit path calls deadline.Cancel() before throwing, which fires the runner's own
+        // WaitAsync cancellation registration while WhenAll is still pending, so the observed kind
+        // is Timeout and the (retryable) second run starts. Green once over-limit stdout decides the
+        // kind on its own (R2). Decision R1: OutputTooLarge is not a retry trigger — exactly one
+        // start; the StringReader shape above must keep passing too.
         var first = new Child
         {
             Output = new YieldingTextReader(new string('x', 256), chunkSize: 8),
-            Hang = true, // pipe-like: the process cannot exit before its stdout is drained
+            ExitCode = 0, // exited cleanly while its async stdout is still draining
         };
         var factory = new Factory();
         factory.Enqueue(first);
@@ -537,7 +548,7 @@ public sealed class CcUsageRunnerTests
 
         Assert.Equal(AgentUsageErrorKind.OutputTooLarge, error.Kind); // R2: never Timeout here
         Assert.Equal(1, factory.Starts); // R1: OutputTooLarge does not retry
-        Assert.True(first.Killed);
+        Assert.True(first.Killed); // SPEC P1.3: "exceeding → kill"
         Assert.True(first.Disposed);
     }
 
