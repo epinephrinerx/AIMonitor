@@ -1,4 +1,3 @@
-using System.Globalization;
 using AIMonitor.Application.AgentUsage;
 using AIMonitor.Domain;
 
@@ -19,6 +18,9 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
     private bool _showInstallHint;
     private string _pricingText = "";
     private string? _pricingToolTip;
+    private bool _hasDays;
+    private bool _hasMonths;
+    private bool _hasSessions;
 
     public string TabTitle => "All agents";
     public string TabId => "all-agents";
@@ -53,6 +55,24 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
         private set => SetProperty(ref _sessions, value);
     }
 
+    public bool HasDays
+    {
+        get => _hasDays;
+        private set => SetProperty(ref _hasDays, value);
+    }
+
+    public bool HasMonths
+    {
+        get => _hasMonths;
+        private set => SetProperty(ref _hasMonths, value);
+    }
+
+    public bool HasSessions
+    {
+        get => _hasSessions;
+        private set => SetProperty(ref _hasSessions, value);
+    }
+
     public string StatusText
     {
         get => _statusText;
@@ -67,16 +87,28 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
             if (SetProperty(ref _errorText, value))
             {
                 OnPropertyChanged(nameof(HasError));
+                OnPropertyChanged(nameof(ShowError));
             }
         }
     }
 
     public bool HasError => !string.IsNullOrEmpty(_errorText);
 
+    public bool ShowError => HasError && !ShowInstallHint;
+
+    public bool ShowContent => !ShowInstallHint;
+
     public bool ShowInstallHint
     {
         get => _showInstallHint;
-        private set => SetProperty(ref _showInstallHint, value);
+        private set
+        {
+            if (SetProperty(ref _showInstallHint, value))
+            {
+                OnPropertyChanged(nameof(ShowContent));
+                OnPropertyChanged(nameof(ShowError));
+            }
+        }
     }
 
     public string PricingText
@@ -91,7 +123,12 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
         private set => SetProperty(ref _pricingToolTip, value);
     }
 
-    public void Update(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError, DateOnly today, int rangeDays)
+    public void Update(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        DateOnly today,
+        int rangeDays,
+        TimeZoneInfo zone)
     {
         Today = lastGood?.Daily.FirstOrDefault(d => d.Date == today) is { } day
             ? AgentUsagePresenter.BuildDay(day)
@@ -108,6 +145,7 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
                    .Select(AgentUsagePresenter.BuildDay)
                    .ToList()
                ?? [];
+        HasDays = Days.Count > 0;
 
         Months = lastGood?.Monthly
                      .OrderByDescending(m => m.Year)
@@ -115,12 +153,14 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
                      .Select(AgentUsagePresenter.BuildMonth)
                      .ToList()
                  ?? [];
+        HasMonths = Months.Count > 0;
 
         Sessions = lastGood?.Sessions
                        .Take(20)
-                       .Select(AgentUsagePresenter.BuildSession)
+                       .Select(s => AgentUsagePresenter.BuildSession(s, zone))
                        .ToList()
                    ?? [];
+        HasSessions = Sessions.Count > 0;
 
         if (lastGood is null && lastError is null)
         {
@@ -133,7 +173,7 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
             var parts = new List<string>();
             if (lastGood is not null)
             {
-                var localTime = TimeZoneInfo.ConvertTime(lastGood.RetrievedAt, TimeZoneInfo.Local);
+                var localTime = TimeZoneInfo.ConvertTime(lastGood.RetrievedAt, zone);
                 parts.Add($"Updated {localTime:HH:mm}");
                 parts.Add(AgentUsagePresenter.PricingText(lastGood.Pricing));
                 if (lastGood.SkippedRows > 0)
@@ -164,7 +204,7 @@ public sealed class AllAgentsTabViewModel : ViewModelBase
             var message = AgentUsagePresenter.ErrorText(lastError.Kind, lastError.Message);
             if (lastGood is not null)
             {
-                var localTime = TimeZoneInfo.ConvertTime(lastGood.RetrievedAt, TimeZoneInfo.Local);
+                var localTime = TimeZoneInfo.ConvertTime(lastGood.RetrievedAt, zone);
                 message += $" Showing data from {localTime:HH:mm}.";
             }
 

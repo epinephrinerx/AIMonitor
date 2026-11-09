@@ -145,6 +145,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+
     public bool IsAllAgentsSelected
     {
         get => _isAllAgentsSelected;
@@ -161,9 +162,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedTab;
         set
         {
-            if (value is null || !SetProperty(ref _selectedTab, value))
+            if (value is null)
             {
                 return;
+            }
+
+            SetProperty(ref _selectedTab, value);
+
+            if (_selectedTabItem != value)
+            {
+                _selectedTabItem = value;
+                OnPropertyChanged(nameof(SelectedTabItem));
+            }
+
+            if (_isAllAgentsSelected)
+            {
+                _isAllAgentsSelected = false;
+                OnPropertyChanged(nameof(IsAllAgentsSelected));
             }
 
             if (!_syncingFromSettings)
@@ -362,8 +377,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.Local));
-        AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.Local).DateTime);
+        AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
         // P4: ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
         // P4: OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
         // P4: AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
@@ -417,13 +432,6 @@ public sealed class MainWindowViewModel : ViewModelBase
             // In AIMonitor, re-detect triggers a unified refresh across all providers in a single pass.
             Connections.Update(snapshots);
 
-            // Start a background ccusage read for the All agents tab without delaying provider UI.
-            if (_agentUsageRefresher is not null && onlyProviderId is null)
-            {
-                var force = manual && IsAllAgentsSelected;
-                _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
-            }
-
             // Update tray readings
             var trayReadings = TrayReadings.Build(ProviderTabs, _lastGoodMeters);
             _latestTrayReadings = trayReadings;
@@ -447,6 +455,14 @@ public sealed class MainWindowViewModel : ViewModelBase
                 _pendingRefresh = false;
                 await RefreshAsync();
             }
+        }
+
+        // Start a background ccusage read for the All agents tab after the provider refresh
+        // (success or failure) so the All agents UI never depends on provider state.
+        if (_agentUsageRefresher is not null && onlyProviderId is null)
+        {
+            var force = manual && IsAllAgentsSelected;
+            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
         }
     }
 }

@@ -140,13 +140,13 @@ public static class AgentUsagePresenter
             lines);
     }
 
-    public static AgentUsageSessionLine BuildSession(SessionAgentUsage session)
+    public static AgentUsageSessionLine BuildSession(SessionAgentUsage session, TimeZoneInfo zone)
     {
         var displayName = AgentDisplayName(session.Usage.Agent);
         var shortId = session.SessionId.Length <= 8
             ? session.SessionId
             : session.SessionId[..8];
-        var localTime = session.LastActivity.ToLocalTime().ToString("yyyy-MM-dd HH:mm", Inv);
+        var localTime = TimeZoneInfo.ConvertTime(session.LastActivity, zone).ToString("yyyy-MM-dd HH:mm", Inv);
         return new AgentUsageSessionLine(
             displayName,
             shortId,

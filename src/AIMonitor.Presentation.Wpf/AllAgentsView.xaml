@@ -8,6 +8,8 @@
              d:DataContext="{d:DesignInstance Type=vm:AllAgentsTabViewModel}">
 
     <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
         <Style TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
@@ -63,6 +65,28 @@
             </StackPanel>
         </DataTemplate>
 
+        <DataTemplate x:Key="SummaryPeriodTemplate" DataType="{x:Type vm:AgentUsagePeriod}">
+            <StackPanel>
+                <TextBlock Text="{Binding Title}"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           Margin="0,0,0,8" />
+                <TextBlock Text="{Binding TokensText}"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           Margin="0,0,0,4" />
+                <TextBlock Text="{Binding CostText}"
+                           FontSize="14"
+                           Foreground="{DynamicResource AccentBrush}"
+                           TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{Binding Agents}"
+                              ItemTemplate="{StaticResource AgentLineTemplate}"
+                              Margin="0,8,0,0" />
+            </StackPanel>
+        </DataTemplate>
+
         <DataTemplate x:Key="PeriodCardTemplate" DataType="{x:Type vm:AgentUsagePeriod}">
             <Border Background="{DynamicResource CardBackgroundBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
@@ -78,192 +102,175 @@
     </UserControl.Resources>
 
     <StackPanel>
-        <!-- Status line -->
-        <TextBlock Text="{Binding StatusText}"
-                   FontSize="11"
-                   Foreground="{DynamicResource TextMutedBrush}"
-                   ToolTip="{Binding PricingToolTip}"
-                   Margin="0,0,0,8" />
-
-        <!-- Error / install hint card -->
+        <!-- Install hint -->
         <Border Background="{DynamicResource CardBackgroundBrush}"
                 BorderBrush="{DynamicResource SeverityWarningBrush}"
                 BorderThickness="1"
                 CornerRadius="10"
                 Padding="16,12"
-                Margin="0,0,0,12">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Visibility" Value="Collapsed" />
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding HasError}" Value="True">
-                            <Setter Property="Visibility" Value="Visible" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
+                Margin="0,0,0,12"
+                Visibility="{Binding ShowInstallHint, Converter={StaticResource BoolToVisibility}}">
             <TextBlock Text="{Binding ErrorText}"
                        FontSize="12"
                        Foreground="{DynamicResource TextPrimaryBrush}" />
         </Border>
 
-        <!-- Summary cards -->
-        <UniformGrid Rows="1" Margin="0,0,0,12">
+        <!-- Everything else is hidden while the install hint is shown -->
+        <StackPanel Visibility="{Binding ShowContent, Converter={StaticResource BoolToVisibility}}">
+            <!-- Status line -->
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       ToolTip="{Binding PricingToolTip}"
+                       Margin="0,0,0,8" />
+
+            <!-- Error card -->
             <Border Background="{DynamicResource CardBackgroundBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderBrush="{DynamicResource SeverityWarningBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
                     Padding="16,12"
-                    Margin="0,0,6,0">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Setter Property="Visibility" Value="Visible" />
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Today}" Value="{x:Null}">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-                <StackPanel>
-                    <TextBlock Text="Today"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Margin="0,0,0,6" />
-                    <ContentControl Content="{Binding Today}"
-                                    ContentTemplate="{StaticResource PeriodContentTemplate}"
-                                    Focusable="False" />
-                </StackPanel>
+                    Margin="0,0,0,12"
+                    Visibility="{Binding ShowError, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="{Binding ErrorText}"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
             </Border>
 
-            <Border Background="{DynamicResource CardBackgroundBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="16,12"
-                    Margin="6,0,0,0">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Setter Property="Visibility" Value="Visible" />
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding ThisMonth}" Value="{x:Null}">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-                <StackPanel>
-                    <TextBlock Text="This month"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextSecondaryBrush}"
-                               Margin="0,0,0,6" />
-                    <ContentControl Content="{Binding ThisMonth}"
-                                    ContentTemplate="{StaticResource PeriodContentTemplate}"
-                                    Focusable="False" />
-                </StackPanel>
-            </Border>
-        </UniformGrid>
+            <!-- Summary cards -->
+            <UniformGrid Rows="1" Margin="0,0,0,12">
+                <Border Background="{DynamicResource CardBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="16,12"
+                        Margin="0,0,6,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Today}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="Today"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Margin="0,0,0,6" />
+                        <ContentControl Content="{Binding Today}"
+                                        ContentTemplate="{StaticResource SummaryPeriodTemplate}"
+                                        Focusable="False" />
+                    </StackPanel>
+                </Border>
 
-        <!-- Daily -->
-        <TextBlock Text="Daily"
-                   FontSize="14"
-                   FontWeight="SemiBold"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,0,0,8" />
-        <ItemsControl ItemsSource="{Binding Days}" ItemTemplate="{StaticResource PeriodCardTemplate}">
-            <ItemsControl.Style>
-                <Style TargetType="ItemsControl">
-                    <Setter Property="Visibility" Value="Visible" />
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding Days.Count}" Value="0">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </ItemsControl.Style>
-        </ItemsControl>
+                <Border Background="{DynamicResource CardBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="16,12"
+                        Margin="6,0,0,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ThisMonth}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="This month"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Margin="0,0,0,6" />
+                        <ContentControl Content="{Binding ThisMonth}"
+                                        ContentTemplate="{StaticResource SummaryPeriodTemplate}"
+                                        Focusable="False" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
 
-        <!-- Monthly -->
-        <TextBlock Text="Monthly"
-                   FontSize="14"
-                   FontWeight="SemiBold"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,8,0,8" />
-        <ItemsControl ItemsSource="{Binding Months}" ItemTemplate="{StaticResource PeriodCardTemplate}">
-            <ItemsControl.Style>
-                <Style TargetType="ItemsControl">
-                    <Setter Property="Visibility" Value="Visible" />
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding Months.Count}" Value="0">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </ItemsControl.Style>
-        </ItemsControl>
+            <!-- Daily -->
+            <TextBlock Text="Daily"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,0,0,8"
+                       Visibility="{Binding HasDays, Converter={StaticResource BoolToVisibility}}" />
+            <ItemsControl ItemsSource="{Binding Days}"
+                          ItemTemplate="{StaticResource PeriodCardTemplate}"
+                          Visibility="{Binding HasDays, Converter={StaticResource BoolToVisibility}}" />
 
-        <!-- Recent sessions -->
-        <TextBlock Text="Recent sessions"
-                   FontSize="14"
-                   FontWeight="SemiBold"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   Margin="0,8,0,8" />
-        <ItemsControl ItemsSource="{Binding Sessions}">
-            <ItemsControl.Style>
-                <Style TargetType="ItemsControl">
-                    <Setter Property="Visibility" Value="Visible" />
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding Sessions.Count}" Value="0">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </ItemsControl.Style>
-            <ItemsControl.ItemTemplate>
-                <DataTemplate DataType="{x:Type vm:AgentUsageSessionLine}">
-                    <Border Background="{DynamicResource CardBackgroundBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="10"
-                            Padding="16,12"
-                            Margin="0,0,0,12">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="{Binding DisplayName}"
-                                           FontSize="12"
+            <!-- Monthly -->
+            <TextBlock Text="Monthly"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,8,0,8"
+                       Visibility="{Binding HasMonths, Converter={StaticResource BoolToVisibility}}" />
+            <ItemsControl ItemsSource="{Binding Months}"
+                          ItemTemplate="{StaticResource PeriodCardTemplate}"
+                          Visibility="{Binding HasMonths, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- Recent sessions -->
+            <TextBlock Text="Recent sessions"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       Margin="0,8,0,8"
+                       Visibility="{Binding HasSessions, Converter={StaticResource BoolToVisibility}}" />
+            <ItemsControl ItemsSource="{Binding Sessions}"
+                          Visibility="{Binding HasSessions, Converter={StaticResource BoolToVisibility}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:AgentUsageSessionLine}">
+                        <Border Background="{DynamicResource CardBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="16,12"
+                                Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="{Binding DisplayName}"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="{Binding ShortId}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                    <TextBlock Text="{Binding LastActivityText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding TokensText}"
+                                           FontSize="14"
                                            FontWeight="SemiBold"
-                                           Foreground="{DynamicResource TextPrimaryBrush}" />
-                                <TextBlock Text="{Binding ShortId}"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource TextMutedBrush}" />
-                                <TextBlock Text="{Binding LastActivityText}"
-                                           FontSize="11"
-                                           Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </StackPanel>
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding TokensText}"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimaryBrush}"
-                                       Margin="12,0,0,0"
-                                       VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2"
-                                       Text="{Binding CostText}"
-                                       FontSize="14"
-                                       Foreground="{DynamicResource AccentBrush}"
-                                       Margin="12,0,0,0"
-                                       VerticalAlignment="Center" />
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding CostText}"
+                                           FontSize="14"
+                                           Foreground="{DynamicResource AccentBrush}"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
     </StackPanel>
 </UserControl>

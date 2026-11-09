@@ -1,4 +1,3 @@
-using System.Globalization;
 using AIMonitor.Application.AgentUsage;
 using AIMonitor.Domain;
 
@@ -35,7 +34,9 @@ public sealed class AgentUsageRefresher
     /// </summary>
     public async Task RefreshAsync(bool force)
     {
-        await _gate.WaitAsync().ConfigureAwait(true);
+        var capturedContext = SynchronizationContext.Current;
+
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_running)
@@ -55,32 +56,47 @@ public sealed class AgentUsageRefresher
             _gate.Release();
         }
 
-        do
+        try
         {
-            await RunOnceAsync(force).ConfigureAwait(true);
+            do
+            {
+                await RunOnceAsync(force, capturedContext).ConfigureAwait(false);
 
-            await _gate.WaitAsync().ConfigureAwait(true);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    if (_pendingForce)
+                    {
+                        _pendingForce = false;
+                        force = true;
+                        continue;
+                    }
+
+                    _running = false;
+                    break;
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+            }
+            while (true);
+        }
+        finally
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_pendingForce)
-                {
-                    _pendingForce = false;
-                    force = true;
-                    continue;
-                }
-
                 _running = false;
-                break;
             }
             finally
             {
                 _gate.Release();
             }
         }
-        while (true);
     }
 
-    private async Task RunOnceAsync(bool force)
+    private async Task RunOnceAsync(bool force, SynchronizationContext? context)
     {
         AgentUsageReport? report = null;
         AgentUsageUnavailableException? error = null;
@@ -106,7 +122,15 @@ public sealed class AgentUsageRefresher
         }
 
         report ??= _source.LastGood;
-        RaiseUpdated(report, error);
+
+        try
+        {
+            RaiseUpdated(report, error, context);
+        }
+        catch
+        {
+            // Handler exceptions must not prevent the refresher from recovering.
+        }
     }
 
     private DateOnly ComputeSince()
@@ -116,8 +140,43 @@ public sealed class AgentUsageRefresher
         return new DateOnly(today.Year, today.Month, 1).AddMonths(-2);
     }
 
-    private void RaiseUpdated(AgentUsageReport? report, AgentUsageUnavailableException? error)
+    private void RaiseUpdated(
+        AgentUsageReport? report,
+        AgentUsageUnavailableException? error,
+        SynchronizationContext? context)
     {
-        Updated?.Invoke(report, error);
+        var handlers = Updated;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        if (context is not null)
+        {
+            context.Post(
+                _ =>
+                {
+                    try
+                    {
+                        handlers(report, error);
+                    }
+                    catch
+                    {
+                        // Handlers are independent; one throwing must not break the refresher.
+                    }
+                },
+                null);
+        }
+        else
+        {
+            try
+            {
+                handlers(report, error);
+            }
+            catch
+            {
+                // Handlers are independent; one throwing must not break the refresher.
+            }
+        }
     }
 }
