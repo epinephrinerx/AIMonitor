@@ -214,3 +214,4 @@ Reviewed `083120e`. Both reviewers found R1 independently; R1–R4 block the mer
 | R7 | Runner seam exactly as M3: `CcUsageRunner(Func<string?> resolve, Func<ProcessStartInfo, ICcUsageProcess> start, TimeSpan timeout, int outputLimit)` (stderr cap is a 1 MiB constant), and `RunAsync` is a **public** (implicit) interface implementation. | WO2 |
 | R8 | PATH entries that are drive-relative (`C:`, `C:x`) are skipped (A2). | WO2 |
 | R9 | Accepted as is: the stdout limit counts UTF-16 chars (ccusage JSON is ASCII). | — |
+| R10 | `AgentUsageReport` itself normalizes in its constructor (P1.1 states order/dedup as a property of the record): daily by date asc, monthly by (year, month) asc, sessions by `LastActivity` desc, `UnpricedModels` distinct + ordinal sort. The parser may keep sorting too. Found by Test Author (4 red `AgentUsageReportTests`). | WO2 |
