@@ -199,11 +199,20 @@ public sealed record AgentUsageReport
         DateTimeOffset retrievedAt,
         int skippedRows)
     {
-        Daily = daily ?? throw new ArgumentNullException(nameof(daily));
-        Monthly = monthly ?? throw new ArgumentNullException(nameof(monthly));
-        Sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
-        UnpricedModels = unpricedModels ?? throw new ArgumentNullException(nameof(unpricedModels));
+        if (daily is null) throw new ArgumentNullException(nameof(daily));
+        if (monthly is null) throw new ArgumentNullException(nameof(monthly));
+        if (sessions is null) throw new ArgumentNullException(nameof(sessions));
+        if (unpricedModels is null) throw new ArgumentNullException(nameof(unpricedModels));
         if (skippedRows < 0) throw new ArgumentOutOfRangeException(nameof(skippedRows));
+
+        Daily = daily.OrderBy(d => d.Date).ToList().AsReadOnly();
+        Monthly = monthly.OrderBy(m => m.Year).ThenBy(m => m.Month).ToList().AsReadOnly();
+        Sessions = sessions.OrderByDescending(s => s.LastActivity).ToList().AsReadOnly();
+        UnpricedModels = unpricedModels
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(m => m, StringComparer.Ordinal)
+            .ToList()
+            .AsReadOnly();
 
         Pricing = pricing;
         RetrievedAt = retrievedAt;

@@ -9,7 +9,7 @@ namespace AIMonitor.Infrastructure.AgentUsage;
 /// <summary>
 /// Runs the ccusage CLI with bounded output and a per-run deadline.
 /// </summary>
-public sealed class CcUsageRunner : ICcUsageRunner
+internal sealed class CcUsageRunner : ICcUsageRunner
 {
     internal const int DefaultOutputLimit = 32 * 1024 * 1024;
     internal const int StderrLimit = 1 * 1024 * 1024;
@@ -287,7 +287,7 @@ public sealed class CcUsageRunner : ICcUsageRunner
     }
 }
 
-public sealed record CcUsageRunResult(string Output, AgentUsagePricing Pricing);
+internal sealed record CcUsageRunResult(string Output, AgentUsagePricing Pricing);
 
 internal interface ICcUsageRunner
 {
