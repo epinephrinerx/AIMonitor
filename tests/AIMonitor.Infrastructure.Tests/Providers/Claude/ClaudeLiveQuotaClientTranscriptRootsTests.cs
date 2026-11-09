@@ -10,9 +10,9 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 /// store from <c>ResolveAll(claudeConfigDir, xdgConfigHome, userProfile)</c> instead of the single
 /// <c>Resolve(...)</c> root. Only the part of that rule that is fully determined by the spec is tested
 /// here: a comma-separated <c>CLAUDE_CONFIG_DIR</c> has to reach the store as several roots, and rule 1's
-/// "Defaults are not added" has to hold through the client. The <c>XDG_CONFIG_HOME</c> half of P2b.6 names
-/// an input the client must receive but not the constructor parameter that carries it, so it is not
-/// asserted here (raised as an open question in the handoff report instead).
+/// "Defaults are not added" has to hold through the client. B21 settled the open question this first
+/// raised about the <c>XDG_CONFIG_HOME</c> half: the client ctors take a trailing optional
+/// <c>xdgConfigHome</c> parameter, so rule 2's xdg default is fed through it below.
 /// </summary>
 /// <remarks>
 /// No credentials file is written, which the existing
@@ -31,15 +31,18 @@ public sealed class ClaudeLiveQuotaClientTranscriptRootsTests : IDisposable
     private readonly string _profile;
     private readonly string _configDirOne;
     private readonly string _configDirTwo;
+    private readonly string _xdg;
 
     public ClaudeLiveQuotaClientTranscriptRootsTests()
     {
         _profile = Path.Combine(_base, "profile");
         _configDirOne = Path.Combine(_base, "config-one");
         _configDirTwo = Path.Combine(_base, "config-two");
+        _xdg = Path.Combine(_base, "xdg");
         Directory.CreateDirectory(_profile);
         Directory.CreateDirectory(_configDirOne);
         Directory.CreateDirectory(_configDirTwo);
+        Directory.CreateDirectory(_xdg);
     }
 
     public void Dispose()
@@ -66,8 +69,10 @@ public sealed class ClaudeLiveQuotaClientTranscriptRootsTests : IDisposable
         File.WriteAllText(Path.Combine(project, "session.jsonl"), line + "\n");
     }
 
-    private ClaudeLiveQuotaClient CreateClient(string? claudeConfigDir)
+    private ClaudeLiveQuotaClient CreateClient(string? claudeConfigDir, string? xdgConfigHome = null)
     {
+        // B21: the trailing optional xdgConfigHome ctor parameter lets a test feed rule 2's
+        // XDG_CONFIG_HOME input without touching the real environment.
         var handler = new FakeHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized)));
         return new ClaudeLiveQuotaClient(
@@ -76,7 +81,8 @@ public sealed class ClaudeLiveQuotaClientTranscriptRootsTests : IDisposable
             _profile,
             new FakeClock(FixedNow),
             timeout: TimeSpan.FromSeconds(5),
-            transcriptTimeZone: TimeZoneInfo.Utc);
+            transcriptTimeZone: TimeZoneInfo.Utc,
+            xdgConfigHome: xdgConfigHome);
     }
 
     private static ProviderSnapshotRequest HistoryRequest() =>
@@ -131,5 +137,36 @@ public sealed class ClaudeLiveQuotaClientTranscriptRootsTests : IDisposable
 
         Assert.Null(snapshot.HistoryError);
         Assert.Equal(["default"], snapshot.History!.ByProject.Select(entry => entry.Label));
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_XdgConfigHomeSupplied_ReadsTheXdgDefaultRoot()
+    {
+        // P2b.1 rule 2 through P2b.6 and B21: with CLAUDE_CONFIG_DIR unset, an XDG_CONFIG_HOME handed to
+        // the constructor moves the first default root to <xdg>\claude\projects - a transcript written
+        // there reaches the snapshot. (In production App.xaml.cs passes the real environment variable;
+        // <profile>\.claude\projects stays as the second default, but no transcript is written under it.)
+        WriteTranscript(Path.Combine(_xdg, "claude"), "C--work-xdg", "msg-xdg");
+
+        var snapshot = await CreateClient(null, _xdg)
+            .GetSnapshotAsync(HistoryRequest(), CancellationToken.None);
+
+        Assert.Null(snapshot.HistoryError);
+        Assert.Equal(["xdg"], snapshot.History!.ByProject.Select(entry => entry.Label));
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ConfigDirSet_XdgDefaultIsNotAdded()
+    {
+        // Rule 1's "Defaults are not added" covers the xdg default too: with CLAUDE_CONFIG_DIR set, the
+        // xdgConfigHome parameter changes nothing and only the entry's root is scanned.
+        WriteTranscript(_configDirOne, "C--work-one", "msg-one");
+        WriteTranscript(Path.Combine(_xdg, "claude"), "C--work-xdg", "msg-xdg");
+
+        var snapshot = await CreateClient(_configDirOne, _xdg)
+            .GetSnapshotAsync(HistoryRequest(), CancellationToken.None);
+
+        Assert.Null(snapshot.HistoryError);
+        Assert.Equal(["one"], snapshot.History!.ByProject.Select(entry => entry.Label));
     }
 }

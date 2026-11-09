@@ -11,8 +11,9 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 /// (<c>&lt;synthetic&gt;</c> is counted), B4 (only the day subtraction is skipped for a pruned bucket),
 /// B5 (the <c>version</c> filter), B6 (no <c>-fast</c> label), B7 (seen-set eviction), B8 (exact-key match
 /// beats a replay-key match), B10 (the cost oracles), B12 (matching by key content, no memory test), B13
-/// (a replacement is never malformed and the day subtraction floors at zero) and OP4 (cost is computed and
-/// subtracted per record).
+/// (a replacement is never malformed and the day subtraction floors at zero), B19 (a replacement is not
+/// counted as "added") and OP4 (cost is computed and subtracted per record); B20 fixes the "2.1" case of
+/// the B5 filter.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,13 +23,13 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 /// that one record's prompt - input + cache creation + cache read - exceeds 100,000 (A8, OP4).
 /// </para>
 /// <para>
-/// Where an incoming record <em>replaces</em> a kept one, these tests assert the counters and deliberately
-/// do not assert the bool <see cref="TryIngest"/> returns or <see cref="RefreshAsync"/>'s count: P2b.5
-/// defines what a survivor does to the buckets, but never says whether a record that replaces counts as
-/// "added". Both readings keep every number below identical, so the unasserted value is the only open
-/// question (raised to the Coding Owner). Asserted instead are: a record that matches nothing counts
-/// (unchanged from P2a), a record the §P2b.3 filter skips does not, and an exact duplicate that the
-/// survivor rule discards does not - all three are settled by the spec or by P2a's wording.
+/// Where an incoming record <em>replaces</em> a kept one, B19 settled the question this file first raised
+/// as open: "a record that replaces a kept one is not 'added': <see cref="TryIngest"/> returns
+/// <see langword="false"/> for it and <see cref="RefreshAsync"/>'s count excludes it (its counters still
+/// change)". The replacement tests therefore assert the return value and the refresh count next to the
+/// counters - see the B19 test, the B10 oracles and the RefreshAsync tests. A record that loses a
+/// survivor comparison without replacing is likewise not added, as the exact-duplicate tests have always
+/// asserted.
 /// </para>
 /// </remarks>
 [Trait("Category", "Contract")]
@@ -162,13 +163,15 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
     [InlineData("latest")]
     [InlineData("beta-2026-09")]
     [InlineData("v2.1.5")]
+    [InlineData("2.1")]
     public void TryIngest_VersionNotSemverPrefix_IsSkippedWithoutBeingMalformed(string version)
     {
         var store = CreateIngestStore();
 
         var counted = store.TryIngest(TranscriptRecordBuilder.WithTokens(100, 0, id: "msg-bad-v").Version(version).Build(), "fallback");
 
-        // B5: "skipped, not counted as malformed".
+        // B5: "skipped, not counted as malformed". The "2.1" row is B20: a two-component version is not a
+        // semver prefix - ccusage needs <digits>.<digits>.<digit> - so the record is skipped.
         Assert.False(counted);
         Assert.Equal(0, store.AllTotals.Messages);
         Assert.Equal(0, store.MalformedRecordCount);
@@ -536,6 +539,51 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
         Assert.Equal(100.0, Assert.Single(store.Breakdown("model", UsageMetric.TotalTokens, 7)).Value);
     }
 
+    // -- B19: a replacement is decided, not added ----------------------------------------------------
+
+    [Fact]
+    public void TryIngest_B19_ReplacingRecordReturnsFalse_WhileTheCountersStillChange()
+    {
+        // B19: "A record that replaces a kept one is not 'added': TryIngest returns false for it and
+        // RefreshAsync's count excludes it (its counters still change)". Exercised across the survivor
+        // branches that can reach a replacement - branch 1 (non-sidechain beats sidechain), branch 3
+        // (larger total tokens) and branch 4 (equal tokens, larger cost) - plus branch 5's tie, where the
+        // existing record is kept and nothing is added either.
+        var store = CreateIngestStore();
+
+        Assert.True(store.TryIngest(
+            TranscriptRecordBuilder.Create("gen-b19", Opus).SessionId("s1")
+                .Tokens(1_000, 0).Sidechain(true).Build(), "fallback"));
+
+        // Branch 1: 10 tokens beat the kept 1,000 because the kept record is a sidechain. Replaces -> false.
+        Assert.False(store.TryIngest(
+            TranscriptRecordBuilder.Create("gen-b19", Opus).SessionId("s1")
+                .Tokens(10, 0).Sidechain(false).Build(), "fallback"));
+        Assert.Equal(10, store.AllTotals.InputTokens);
+
+        // Branch 3: the larger non-sidechain record wins. Replaces -> false.
+        Assert.False(store.TryIngest(
+            TranscriptRecordBuilder.Create("gen-b19", Opus).SessionId("s1")
+                .Tokens(20, 0).Sidechain(false).Build(), "fallback"));
+        Assert.Equal(20, store.AllTotals.InputTokens);
+
+        // Branch 4: equal total tokens (20), larger cost (20 output x $25 beats 20 input x $5). Replaces.
+        Assert.False(store.TryIngest(
+            TranscriptRecordBuilder.Create("gen-b19", Opus).SessionId("s1")
+                .Tokens(0, 20).Sidechain(false).Build(), "fallback"));
+        Assert.Equal(0, store.AllTotals.InputTokens);
+        Assert.Equal(20, store.AllTotals.OutputTokens);
+
+        // Branch 5: an exact tie keeps the existing record - no change, so this is not added either.
+        Assert.False(store.TryIngest(
+            TranscriptRecordBuilder.Create("gen-b19", Opus).SessionId("s1")
+                .Tokens(0, 20).Sidechain(false).Build(), "fallback"));
+
+        // "Messages stays 1 per surviving record" (P2b.5): four survivor decisions on one key, one message.
+        Assert.Equal(1, store.AllTotals.Messages);
+        Assert.Equal(0, store.MalformedRecordCount);
+    }
+
     // -- B10 oracles: the cost that survives a replacement -----------------------------------------
 
     [Fact]
@@ -556,9 +604,10 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
                 .Tokens(100, 50, cacheRead: 20).Build(), "fallback"));
         Assert.Equal(0.000704m, store.AllTotals.CostUsd);
 
-        store.TryIngest(
+        // B19: B replaces A, so it is not "added" - the counters below move but the return says false.
+        Assert.False(store.TryIngest(
             TranscriptRecordBuilder.Create("gen-1", Sonnet).SessionId("s1")
-                .Tokens(200, 50, cacheRead: 20).Build(), "fallback");
+                .Tokens(200, 50, cacheRead: 20).Build(), "fallback"));
 
         Assert.Equal(0.000904m, store.AllTotals.CostUsd);
         Assert.Equal(1, store.AllTotals.Messages);
@@ -599,9 +648,10 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
                 .Tokens(60_000, 1_000, cacheRead: 50_000).Sidechain(true).Build(), "fallback"));
         Assert.Equal(0.035m, store.AllTotals.CostUsd);
 
-        store.TryIngest(
+        // B19: A's replacement is not an addition (branch 1), even though every number below changes.
+        Assert.False(store.TryIngest(
             TranscriptRecordBuilder.Create("gen-1", Haiku55).SessionId("s1")
-                .Tokens(1_000, 500, cacheRead: 100).Sidechain(false).Build(), "fallback");
+                .Tokens(1_000, 500, cacheRead: 100).Sidechain(false).Build(), "fallback"));
 
         Assert.Equal(0.000351m, store.AllTotals.CostUsd);
         Assert.Equal(1, store.AllTotals.Messages);
@@ -754,7 +804,9 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
             TranscriptRecordBuilder.Create("msg-y", Opus).At("2026-01-01T11:00:00Z").SessionId("s1").Tokens(20, 0).Line(),
             TranscriptRecordBuilder.Create("msg-x", Opus).At("2026-01-01T10:00:00Z").SessionId("s1").Tokens(200, 0).Line());
 
-        await store.RefreshAsync(CancellationToken.None);
+        // B19: Y' and X' each replace a kept record, so RefreshAsync's count excludes them - the refresh
+        // that produces every number below still reports zero added records.
+        Assert.Equal(0, await store.RefreshAsync(CancellationToken.None));
 
         // 110 - 10 + 20 - 100 + 200 = 220, one message per surviving record, and nothing read as broken.
         Assert.Equal(220, store.AllTotals.InputTokens);
@@ -780,7 +832,7 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
         WriteLines(
             TranscriptRecordBuilder.Create("msg-x", Opus).SessionId("s1").Tokens(100, 0).Line(),
             TranscriptRecordBuilder.Create("msg-y", Opus).SessionId("s1").Tokens(10, 0).Line());
-        await store.RefreshAsync(CancellationToken.None);
+        Assert.Equal(2, await store.RefreshAsync(CancellationToken.None)); // X and Y: two new records.
 
         Assert.Equal(110, store.WindowTotals(7).InputTokens);
         Assert.Equal(2, store.WindowTotals(7).Messages);
@@ -788,7 +840,9 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
         AppendLines(
             TranscriptRecordBuilder.Create("msg-y", Opus).SessionId("s1").Tokens(20, 0).Line(),
             TranscriptRecordBuilder.Create("msg-x", Opus).SessionId("s1").Tokens(200, 0).Line());
-        await store.RefreshAsync(CancellationToken.None);
+        // B19: both appended lines replace, so the count excludes them even though the day table below
+        // is what changes.
+        Assert.Equal(0, await store.RefreshAsync(CancellationToken.None));
 
         var day = store.WindowTotals(7);
         Assert.Equal(220, day.InputTokens);
@@ -806,11 +860,13 @@ public sealed class ClaudeTranscriptStoreDedupTests : IDisposable
         var store = CreateFileStore();
 
         WriteLines(TranscriptRecordBuilder.Create("gen-1", Opus).SessionId("s1").Tokens(10, 0).Line());
-        await store.RefreshAsync(CancellationToken.None);
+        Assert.Equal(1, await store.RefreshAsync(CancellationToken.None));
         Assert.Equal(10, store.AllTotals.InputTokens);
 
         AppendLines(TranscriptRecordBuilder.Create("gen-1", Opus).SessionId("s1").Tokens(500, 0).Line());
-        await store.RefreshAsync(CancellationToken.None);
+        // B19: the appended line replaces the kept one, so the count excludes it...
+        Assert.Equal(0, await store.RefreshAsync(CancellationToken.None));
+        // ...while its counters still change and nothing is read as broken (B13).
 
         Assert.Equal(1, store.AllTotals.Messages);
         Assert.Equal(500, store.AllTotals.InputTokens);

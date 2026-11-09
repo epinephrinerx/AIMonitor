@@ -11,9 +11,11 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 /// </summary>
 /// <remarks>
 /// P2b.1 states the resolver is pure - "no environment or disk access" - so the tests pass invented paths
-/// on drives that need not exist and never touch the machine's real configuration. Expected and actual
-/// paths are compared through <see cref="Path.GetFullPath"/>, because rule 3 deduplicates by full path:
-/// the value of the result is the directory it denotes, not the separator spelling used to write it.
+/// on drives that need not exist and never touch the machine's real configuration. B18: each kept entry
+/// comes back in its original spelling (case as written), with <c>\projects</c> appended unless B9
+/// applies, so expected and actual paths are compared through <see cref="Path.GetFullPath"/> ignoring
+/// case (<see cref="StringComparer.OrdinalIgnoreCase"/>) - rule 3's own identity: the value of the result
+/// is the directory it denotes, not the spelling used to write it.
 /// The existing <c>Resolve(...)</c> (credentials path logic) is unchanged by P2b and stays covered by
 /// <see cref="ClaudeTranscriptPathResolverTests"/>.
 /// </remarks>
@@ -30,9 +32,12 @@ public sealed class ClaudeTranscriptPathResolverResolveAllTests
         ClaudeTranscriptPathResolver.ResolveAll(claudeConfigDir, xdgConfigHome, Profile);
 
     private static void AssertProjects(IReadOnlyList<string> actual, params string[] expectedProjectsDirectories) =>
+        // B18: the result keeps the spelling the entry was written with, so the comparison sees through
+        // to the directory it denotes - GetFullPath plus OrdinalIgnoreCase, exactly rule 3's identity.
         Assert.Equal(
             expectedProjectsDirectories.Select(Path.GetFullPath),
-            actual.Select(Path.GetFullPath));
+            actual.Select(Path.GetFullPath),
+            StringComparer.OrdinalIgnoreCase);
 
     // -- rule 1: CLAUDE_CONFIG_DIR replaces the defaults ------------------------------------------
 
@@ -78,7 +83,9 @@ public sealed class ClaudeTranscriptPathResolverResolveAllTests
     public void ResolveAll_EntryWhoseLastSegmentIsProjects_IsUsedAsTheProjectsDirectory(string entry)
     {
         // B9 (ccusage normalize_claude_config_path, done syntactically): no second \projects is appended.
-        // The trailing-separator case denotes the same directory, so all three rows must give this one.
+        // B18: what comes back is the entry as written - "D:\Claude\PROJECTS" keeps its case - so the
+        // comparison is case-insensitive. The trailing-separator case denotes the same directory, so all
+        // three rows must give this one.
         AssertProjects(ResolveAll(entry), Path.Combine(@"D:\claude", "projects"));
     }
 
@@ -161,11 +168,14 @@ public sealed class ClaudeTranscriptPathResolverResolveAllTests
     [Fact]
     public void ResolveAll_RemovesDuplicatesKeepingTheFirstOccurrenceAndTheOrder()
     {
-        // P2b.1 rule 3: "Duplicates removed (Path.GetFullPath, StringComparer.OrdinalIgnoreCase), first
-        // occurrence kept, order kept". "d:\a\" and "D:\a" denote one directory, as do "E:\b" and "e:\b\".
+        // P2b.1 rule 3 as fixed by B18: "Duplicates removed (Path.GetFullPath, StringComparer
+        // OrdinalIgnoreCase), first occurrence kept, order kept". "d:\a\" and "D:\a" denote one directory,
+        // as do "E:\b" and "e:\b\", and the kept entry keeps its original spelling - lower-case
+        // "d:\a\projects" here - which is why AssertProjects compares after GetFullPath, ignoring case.
         var roots = ResolveAll(@"D:\b,d:\a\,D:\a,E:\b,e:\b\");
 
-        AssertProjects(roots, @"D:\b\projects", @"D:\a\projects", @"E:\b\projects");
+        AssertProjects(roots, @"D:\b\projects", @"d:\a\projects", @"E:\b\projects");
+        Assert.Equal(3, roots.Count);
     }
 
     [Fact]
@@ -180,13 +190,17 @@ public sealed class ClaudeTranscriptPathResolverResolveAllTests
     }
 
     [Fact]
-    public void ResolveAll_XdgAndProfileDefaultsThatResolveToTheSameDirectory_AreListedOnce()
+    public void ResolveAll_EntriesNormalizingToTheSameDirectory_AreListedOnce()
     {
-        // Rule 3 applied to the default pair: with XDG_CONFIG_HOME = <profile>\.config the two candidates
-        // are the same directory, so only the first is kept.
-        var roots = ResolveAll(null, Path.Combine(Profile, ".config"));
+        // B18 dropped this test's old premise: the two default candidates of rule 2 can never denote one
+        // directory ("<xdg>\claude\projects" ends its parent segment "claude", "<profile>\.claude\projects"
+        // ends ".claude" - different names even after GetFullPath, ignoring case). Rule 3 still has to
+        // catch duplicates beyond case, and the real spelling of that is entries a GetFullPath treats as
+        // one directory: "D:\a\b\.." resolves to "D:\a", so the projects directories collide and only the
+        // first occurrence - kept - is listed.
+        var roots = ResolveAll(@"D:\a\b\..,D:\a");
 
-        AssertProjects(roots, DefaultXdgProjects);
+        AssertProjects(roots, @"D:\a\projects");
         Assert.Single(roots);
     }
 
