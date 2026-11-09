@@ -198,3 +198,19 @@ Trial merge of `ce716d5` (WO2 code) + `16aab15` (Test Author tests): 72 compile 
 | E3 | `agents[]` entry with missing/blank/non-string `agent` → row skipped. `agents: []` → valid row with zero agents. Agent object without a `modelBreakdowns` array → row skipped. | WO2 + Test Author |
 | E4 | A successful read (forced or not) clears `LastError`. A failed forced read does not evict the cache: a later non-forced call within MinInterval of the last success returns `LastGood`. | WO2 + Test Author |
 | E5 | Non-string or missing `period` on daily/monthly rows → row skipped. | WO2 + Test Author |
+
+## Coding Owner decisions after P1 code review (Reviewer1 + Reviewer2, 2026-11-09) — override anything above
+
+Reviewed `083120e`. Both reviewers found R1 independently; R1–R4 block the merge.
+
+| # | Decision | Who changes |
+|---|---|---|
+| R1 | `--offline` retry must actually run (A6). A first-run **timeout** or **non-zero exit** → second run with `--offline`; second success → `Pricing = Offline`; both fail → second run's error. No retry for `NotInstalled`, `OutputTooLarge`, `InvalidResponse`, process **start** failure (classified `Failed` but not retried), or caller cancellation. | WO2 + Test Author |
+| R2 | stdout over the limit is always `OutputTooLarge`, never `Timeout`, including with an asynchronous (pipe-like) reader. If the deadline fired, the result is `Timeout` even when the process has exited in the same instant (partial output is never parsed). | WO2 + Test Author (fakes must include an async `TextReader` that yields, not only `StringReader`) |
+| R3 | `metadata.lastActivity` must carry an explicit offset or `Z` **in the time part** (A5). `2026-11-09T10:00:00` → row skipped. | WO2 + Test Author |
+| R4 | Session rows parse `modelBreakdowns` like daily/monthly agent objects: same model-entry rules, an invalid entry skips the row, `Usage.Models` is populated. | WO2 + Test Author |
+| R5 | The 500-entry limit (`InvalidResponse`) applies to **every** `modelBreakdowns` array that is read: row level, each `agents[i]`, and session rows. | WO2 + Test Author |
+| R6 | Cache state (`report`, `since`, `successAt`) is stored as one immutable snapshot in a single reference field; the pre-gate fast path reads that one reference. | WO2 |
+| R7 | Runner seam exactly as M3: `CcUsageRunner(Func<string?> resolve, Func<ProcessStartInfo, ICcUsageProcess> start, TimeSpan timeout, int outputLimit)` (stderr cap is a 1 MiB constant), and `RunAsync` is a **public** (implicit) interface implementation. | WO2 |
+| R8 | PATH entries that are drive-relative (`C:`, `C:x`) are skipped (A2). | WO2 |
+| R9 | Accepted as is: the stdout limit counts UTF-16 chars (ccusage JSON is ASCII). | — |
