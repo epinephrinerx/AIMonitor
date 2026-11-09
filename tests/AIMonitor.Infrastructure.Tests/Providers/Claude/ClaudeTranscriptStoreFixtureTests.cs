@@ -47,14 +47,40 @@ public sealed class ClaudeTranscriptStoreFixtureTests : IDisposable
         InstallFixture("well-formed-session.jsonl");
         var store = CreateStore(new DateTimeOffset(2026, 1, 20, 0, 0, 0, TimeSpan.Zero));
 
-        var added = await store.RefreshAsync(CancellationToken.None);
+        await store.RefreshAsync(CancellationToken.None);
 
-        // 5 lines: 1 user record (skipped), 3 distinct assistant ids, 1 exact duplicate id ignored.
-        Assert.Equal(3, added);
+        // 5 lines: 1 user record (not a usage record, skipped), and 3 distinct assistant keys.
+        // RefreshAsync's return value is not asserted here: one of the three keys arrives twice and the
+        // second copy replaces the first, and SPEC R-014 never says whether a replacing record counts as
+        // an "added" record. The counters below are what the spec defines.
         Assert.Equal(3, store.AllTotals.Messages);
         Assert.Equal(0, store.MalformedRecordCount);
+
+        // The two resp_002 lines share one key - P2b.4 collapses an id starting with "resp_" on
+        // id + sessionId, and with no sessionId on the fixture both lines read the same sid from the file
+        // name (B2). P2b.5's survivor rule then decides between them: neither is a sidechain, so the
+        // larger total token count wins -
+        //   line 3: 2,000 input + 800 output + 0 + 0     = 2,800
+        //   line 4: 9,999 input + 9,999 output + 0 + 0   = 19,998   -> line 4 replaces line 3
+        // and P2b.5 subtracts line 3's stored contribution, so the sums below are resp_001 + line 4 +
+        // resp_003, not all four usage lines:
+        //   input  1,000 + 9,999 + 300 = 11,299   (summing line 3 as well would give 13,299)
+        //   output   500 + 9,999 + 100 = 10,599   (                ...  would give 11,399)
+        Assert.Equal(11_299, store.AllTotals.InputTokens);
+        Assert.Equal(10_599, store.AllTotals.OutputTokens);
+
+        // resp_003 (gpt-5) has no published price: 300 + 100 = 400 unpriced tokens, and no money.
         Assert.Equal(400, store.AllTotals.UnpricedTokens); // resp_003 (gpt-5): 300 + 100
-        Assert.Equal(0.0295m, store.AllTotals.CostUsd); // resp_001 (Opus 5) 0.0175 + resp_002 (Sonnet 5) 0.012
+
+        // Cost, hand-checked against the P2a table, is the survivor's, not the replaced line's:
+        //   resp_001 claude-opus-5  (5 / 25 per MTok): 1,000x5 + 500x25 = 5,000 + 12,500 = 17,500 -> $0.0175
+        //   resp_002 claude-sonnet-5 (2 / 10):        9,999x2 + 9,999x10 = 19,998 + 99,990 = 119,988
+        //                                             -> $0.119988
+        //   total                                                                  -> $0.137488
+        // The obsolete figure this replaces (0.0295) priced line 3's 2,000/800 instead, which is what the
+        // pre-P2b "first duplicate wins" de-duplication did.
+        Assert.Equal(0.137488m, store.AllTotals.CostUsd);
+
         Assert.Equal(["gpt-5"], store.UnpricedInRange(14));
 
         var projects = store.Breakdown("project", UsageMetric.TotalTokens, 14);

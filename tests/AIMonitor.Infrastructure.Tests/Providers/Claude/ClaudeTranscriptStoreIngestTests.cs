@@ -161,13 +161,33 @@ public sealed class ClaudeTranscriptStoreIngestTests
     }
 
     [Fact]
-    public void TryIngest_DeduplicatesByRequestIdWhenMessageIdIsAbsent()
+    public void TryIngest_DeduplicatesByMessageIdAndRequestId()
     {
+        // P2b.4's exact key is message.id + "\n" + requestId when a requestId exists, so this pair of
+        // identical records is one record.
+        var store = CreateStore();
+
+        Assert.True(store.TryIngest(BuildRecord(messageId: "msg-1", requestId: "req-1"), "fallback"));
+        Assert.False(store.TryIngest(BuildRecord(messageId: "msg-1", requestId: "req-1"), "fallback"));
+        Assert.Equal(1, store.AllTotals.Messages);
+    }
+
+    [Fact]
+    public void TryIngest_WithoutAMessageIdTheRequestIdCannotDeduplicate()
+    {
+        // Rewritten from `TryIngest_DeduplicatesByRequestIdWhenMessageIdIsAbsent`, which P2b.4 supersedes:
+        // "No id -> no dedup (always counted; offsets still prevent re-reading)". A requestId still takes
+        // part in the key, but only paired with a message.id - and this record has none, so it is folded
+        // again. What keeps a real transcript safe from that double count is the byte offset, which
+        // ClaudeTranscriptStoreFileTests covers through RefreshAsync.
         var store = CreateStore();
 
         Assert.True(store.TryIngest(BuildRecord(messageId: null, requestId: "req-1"), "fallback"));
-        Assert.False(store.TryIngest(BuildRecord(messageId: null, requestId: "req-1"), "fallback"));
-        Assert.Equal(1, store.AllTotals.Messages);
+        Assert.True(store.TryIngest(BuildRecord(messageId: null, requestId: "req-1"), "fallback"));
+        Assert.Equal(2, store.AllTotals.Messages);
+
+        // 100 input tokens per record (BuildRecord's default usage).
+        Assert.Equal(200, store.AllTotals.InputTokens);
     }
 
     [Fact]
