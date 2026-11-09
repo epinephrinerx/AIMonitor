@@ -397,3 +397,14 @@ slow fake source. No real ccusage.
 | C10 | `SetAgentUsage(null)` removes the rows and restores the existing visibility rule; rows survive `UpdateFromSnapshot`. The new rows are the R-014 item 4 addition, accepted under R-004 (no existing element changes). |
 | C11 | Oracles. `TokensText`: 9,999 → `"9,999"`; 10,000 → `"10K"`; 12,900 → `"12.9K"`. Money via `ChartFormat.Money((double)cost)`: 0.001 → `"<$0.01"`. `CostText` by model costs: [] → `"$0.00"`; [null] → `"Unknown price"`; [0.00] + [null] → `"$0.00 + unpriced"`; [1.23] → `"$1.23"`; [1.00, 0.23, null] → `"$1.23 + unpriced"`. `BuildDay`: claude (cost 1.23, total 1,000), codex (0.50, 2,000), opencode (only unpriced, 500) → order claude, codex, opencode; tokens 3,500 → `"3,500"`; period cost `"$1.73 + unpriced"`. `since`: today 2026-11-09 → 2026-09-01; 2026-12-01 → 2026-10-01; 2026-01-15 → 2025-11-01. `Days` with today 2026-11-09 and range 7 → rows dated 2026-11-03…2026-11-09 that exist, newest first (missing days omitted). Error with last good: `RetrievedAt` 2026-11-09T07:03:22Z, zone UTC+7 → suffix `"Showing data from 14:03."`. Sessions: 25 → first 20 (report order). `SummaryFor`: agent in this month's row but not today's → `Today` null, `ThisMonth` set; agent only in an earlier month → null. |
 | C12 | A forced read waits for an in-flight read (P1 single gate); it does not cancel it. |
+
+## Coding Owner decisions after P3 code review (2026-11-09)
+
+| # | Decision |
+|---|---|
+| C13 | `AgentUsageRefresher`: capture `SynchronizationContext.Current` at `RefreshAsync` entry; continue the read with `ConfigureAwait(true)` (or post to the captured context) so `Updated` runs there (Reviewer1 MAJOR 1, Reviewer2 M-1). Handler exceptions are caught too, and the in-flight flag is reset in `finally`, so the refresher always recovers (MAJOR 3). |
+| C14 | Selecting a provider tab after All agents always saves `ActiveProvider = provider.ProviderId`, even when it is the same `SelectedTab` instance (MAJOR 2). Setting `SelectedTab` programmatically also sets `SelectedTabItem` to it and `IsAllAgentsSelected = false` (MINOR 6). |
+| C15 | Start the ccusage read after the provider try/catch/finally block (still only for full refreshes), so a failed provider refresh still starts it (MINOR 4). |
+| C16 | `AllAgentsTabViewModel` exposes `HasDays`, `HasMonths`, `HasSessions`; section headers bind to them; `ShowInstallHint` true → only the install card is visible (MINOR 5). |
+| C17 | Summary cards: tokens on one line (FontSize 20), cost on the next line (FontSize 14, wraps) so nothing clips at the 300 px minimum width (MINOR 7). |
+| C18 | `AllAgentsTabViewModel.Update(lastGood, lastError, today, rangeDays, TimeZoneInfo zone)` and the presenter's session/time texts take the zone; `MainWindowViewModel` passes `TimeZoneInfo.Local`. No `DateTime.UtcNow` / `ToLocalTime()` inside these types (testability of the C11 oracle). Remove unused usings. |
