@@ -354,7 +354,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว (2026-11-09; รอบเรียก ccusage เริ่มที่ 15 นาที) |
+| สถานะ | 🧪 รอคุณตรวจรับบนแอปจริง (2026-11-09; P1–P4 merge แล้ว ยังไม่ push) |
 | วันที่ | 2026-11-09 |
 | แตะส่วนไหน | adapter ใหม่สำหรับ ccusage CLI · tab "All agents" ใหม่ · ส่วนข้อมูลเพิ่มเติมใน tab เดิม · `ClaudeTranscriptStore` · `ClaudeModelPricing` · THIRD-PARTY-NOTICES |
 | เกี่ยวกับ | [[R-004]] · [[R-010]] · [[R-011]] · [[R-012]] · PAR-006/007/013/015/030 |
@@ -385,11 +385,18 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ตัวอย่าง JSON จริงหนึ่งชุดสำหรับทำ fixture (ลบชื่อโปรเจกต์/path ออกก่อน)
 
 **ตรวจรับเมื่อ:**
-- [ ] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน
-- [ ] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน
-- [ ] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้
-- [ ] Claude tab ของเรา (ไม่ผ่าน ccusage) ได้ยอด token รายวันตรงกับ ccusage ภายในเกณฑ์ที่ตกลง และค่าใช้จ่าย Opus/Sonnet/Haiku 5.5 ไม่เป็น Estimated
-- [ ] synthetic tests ไม่เรียก ccusage จริง, build/format ผ่าน, ผ่าน Inspector และ Reviewer ทั้งสองตามลำดับงานใน `Docs/AI_WORKFLOW.md` §5.8
+- [ ] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน — ตรวจแล้ว: ตัวเลขมาจาก JSON ของ ccusage โดยตรง (parser + presenter มีเทสต์ oracle) ภาพหน้าจอยังไม่ได้ตรวจ (🧪 รอคุณดูบนแอป)
+- [ ] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน — ตรวจแล้ว: Reviewer1 เทียบ 9 กรณีไม่มีข้อมูล ccusage ก่อน/หลัง P4 ตรงกันทุกบรรทัด (🧪 รอคุณดูบนแอป)
+- [ ] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้ — ตรวจแล้ว: synthetic tests ครบทุกชนิด error, ccusage ไม่บล็อก refresh ของ provider (🧪 รอคุณลองถอด ccusage ออกจาก PATH)
+- [x] Claude tab ของเรา (ไม่ผ่าน ccusage) ได้ยอด token รายวันตรงกับ ccusage ภายในเกณฑ์ที่ตกลง และค่าใช้จ่าย Opus/Sonnet/Haiku 5.5 ไม่เป็น Estimated — ตรวจแล้ว (A10): 29/29 วันที่จบแล้วตรงทุกหลักทั้ง 4 ประเภท token; ราคา 5.5 เป็น Exact
+- [x] synthetic tests ไม่เรียก ccusage จริง, build/format ผ่าน, ผ่าน Inspector และ Reviewer ทั้งสองตามลำดับงานใน `Docs/AI_WORKFLOW.md` §5.8 — ตรวจแล้ว: 1,998 tests ผ่าน, build 0 warning, format สะอาด, ทุกเฟสผ่าน Inspector A/B และ Reviewer1/2
+
+**ความคืบหน้า:**
+- 2026-11-09 — P1 (ccusage data source) merge `b5eb61a`; A12 ตรวจกับ ccusage จริงผ่าน `.cmd` shim: exit 0, 509 KB
+- 2026-11-09 — P2a (ราคา Claude ทางการ) merge `760bb1c`
+- 2026-11-09 — P2b (ตัวอ่าน transcript: หลาย root, สแกนทุกชั้น, dedup แบบ ccusage, advisor iterations) merge `441ba7a`; A10 ผ่าน 29/29 วัน; หน่วยความจำ seen-set 94 MB ที่ 400k records
+- 2026-11-09 — P3 (tab "All agents") merge `c168ad8`; P4 (แถว ccusage ใน tab เดิม) merge `0a21583`; ไม่ได้ push
+- งานติดตาม: เทสต์ที่ Inspector B ของ P4 แนะนำ (stat tile "Plan" ใน section ccusage-only, `HasResetInfo` ใน `IsAgentUsageOnly`, regression ไม่มี summary ทั้งสาม tab); ลำดับไฟล์ตัวพิมพ์ผสม (P2b); `CcUsageRunnerTests.DeadlineFiredWhileProcessExited…` flaky เมื่อรันขนาน; path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); UI ไม่ตอบสนองชั่วคราวหนึ่งครั้งราววินาทีที่ 120 ใน smoke test
 
 ## R-013 · แบ่ง gauge ของ AGY เป็นกลุ่ม Gemini และ Claude/GPT และเปลี่ยนชื่อเป็น Gemini / AGY
 
