@@ -350,6 +350,47 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-014 · ใช้ ccusage เป็นแหล่งข้อมูล usage/cost ของทุก agent และปรับตัวอ่าน transcript ของเราให้ตรงกัน
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว (2026-11-09; รอบเรียก ccusage เริ่มที่ 15 นาที) |
+| วันที่ | 2026-11-09 |
+| แตะส่วนไหน | adapter ใหม่สำหรับ ccusage CLI · tab "All agents" ใหม่ · ส่วนข้อมูลเพิ่มเติมใน tab เดิม · `ClaudeTranscriptStore` · `ClaudeModelPricing` · THIRD-PARTY-NOTICES |
+| เกี่ยวกับ | [[R-004]] · [[R-010]] · [[R-011]] · [[R-012]] · PAR-006/007/013/015/030 |
+
+**คุณระบุ:**
+> อ่านข้อมูลจาก repo นี้ แล้วนำมาปรับใช้กับระบบของเราครับ https://github.com/ccusage/ccusage
+
+> นี่คือ output ของ ccusage เราจะเรียก output นี้มาใช้ร่วมกับงานของเราครับ
+
+คำตอบเพิ่มเติม (2026-11-09): ใช้ทั้งสองอย่าง (เรียก ccusage เป็นแหล่งข้อมูล และแก้ตัวอ่านของเราให้ตรงกัน) · แสดงทั้ง tab ใหม่และใน tab เดิม · ผู้ใช้ติดตั้ง ccusage เอง และใช้ราคาออนไลน์
+
+**ผมเข้าใจว่า:**
+1. AIMonitor เรียก ccusage (MIT, v20.x) ที่ผู้ใช้ติดตั้งไว้บน PATH เป็น process ภายนอกแบบเดียวกับ AGY CLI ด้วย `ccusage daily --json --by-agent --sections daily,monthly,session` มี timeout, จำกัดขนาด output, ยกเลิกได้ และไม่เรียก `npx` หรือดาวน์โหลด ccusage เอง
+2. ราคาใช้โหมดออนไลน์ของ ccusage (ดึง LiteLLM/models.dev ที่เป็นข้อมูลราคาสาธารณะ ไม่ส่งข้อมูลผู้ใช้) ถ้าดึงไม่ได้ให้ใช้ราคาที่ฝังใน ccusage (`--offline`) และบอกในหน้าจอว่าใช้ราคาแบบไหน
+3. Tab ใหม่ "All agents" แสดงรายวัน/รายเดือนแยก agent และโมเดล ค่าใช้จ่าย และ session; โมเดลที่ ccusage ไม่รู้ราคา (`unpricedModels`) แสดงว่า "ไม่ทราบราคา" ไม่ใช่ $0
+4. Tab เดิม (Claude, OpenAI / Codex, Gemini / AGY) แสดงตัวเลขของ agent นั้นจาก ccusage ในส่วนข้อมูลเพิ่มเติมใต้ gauge โดยไม่เปลี่ยน gauge กราฟ และหน้าตาเดิม (เป้า R-004)
+5. แก้ตัวอ่าน transcript และตารางราคาของเราให้ตรงกับ ccusage: dedup `message.id`+`requestId` เก็บรายการที่ไม่ใช่ sidechain และมี token มากสุด, สแกน `projects/` ทุกชั้นรวม `subagents/`, `CLAUDE_CONFIG_DIR` หลาย path และ `~/.config/claude`, เพิ่มราคา Opus/Sonnet/Haiku 5.5 และรุ่นเก่า (Opus 4/4.1) และราคาขั้นบันไดเกิน 200k แล้วเทียบผลรายวันกับ ccusage
+6. ถ้าไม่มี ccusage แอปทำงานได้เหมือนเดิมและแสดงคำแนะนำการติดตั้งใน tab ใหม่
+
+**ไม่รวม:**
+- ไม่คัดลอกโค้ด ccusage; ถ้าแปลงตรรกะใดมาให้ใส่ MIT notice ใน THIRD-PARTY-NOTICES
+- ไม่อ่านข้อมูล AGY/OpenCode/Copilot/ZCode เองโดยตรง (ใช้ผ่าน ccusage เท่านั้น)
+- 5-hour blocks/burn rate ยังไม่ทำในข้อนี้ (ขัด PAR-013 ถ้าไม่ติดป้ายว่าเป็นค่าประมาณ)
+- ไม่แพ็ก ccusage ไปกับ installer
+
+**คำถามที่ต้องตอบก่อนเริ่ม:**
+- ความถี่ในการเรียก ccusage (การสแกน log ทุก agent อาจหนักกว่า refresh 3 นาที) — เสนอแยกรอบ เช่น 15 นาที
+- ตัวอย่าง JSON จริงหนึ่งชุดสำหรับทำ fixture (ลบชื่อโปรเจกต์/path ออกก่อน)
+
+**ตรวจรับเมื่อ:**
+- [ ] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน
+- [ ] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน
+- [ ] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้
+- [ ] Claude tab ของเรา (ไม่ผ่าน ccusage) ได้ยอด token รายวันตรงกับ ccusage ภายในเกณฑ์ที่ตกลง และค่าใช้จ่าย Opus/Sonnet/Haiku 5.5 ไม่เป็น Estimated
+- [ ] synthetic tests ไม่เรียก ccusage จริง, build/format ผ่าน, ผ่าน Inspector และ Reviewer ทั้งสองตามลำดับงานใน `Docs/AI_WORKFLOW.md` §5.8
+
 ## R-013 · แบ่ง gauge ของ AGY เป็นกลุ่ม Gemini และ Claude/GPT และเปลี่ยนชื่อเป็น Gemini / AGY
 
 | | |

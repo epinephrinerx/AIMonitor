@@ -12,18 +12,87 @@
 - Repository: `https://github.com/epinephrinerx/AIMonitor`
 - Package/runtime หลัก: `.NET 10 LTS สำหรับ Windows Desktop`
 - Package manager: `NuGet ผ่าน dotnet CLI`
-- Coding Owner: `Claude Code`
-- Coding Model: `Claude Opus 5.5`
-- Coding Effort: `High`
-- Writing Owner: `Antigravity`
-- Writing Model: `Gemini 3.8 Flash`
-- Writing Effort: `High`
-- Reviewer 1: `Claude Code`
-- Reviewer 1 Model: `Claude Fable 5.1`
-- Reviewer 1 Effort: `High`
-- Reviewer 2: `Codex` (OpenAI)
-- Reviewer 2 Model: `gpt-6.1-sol`
-- Reviewer 2 Effort: `High`
+
+### Agent Roster
+
+เก้าบทบาท (ต้นแบบมีแปด โปรเจกต์นี้เพิ่ม Writing Owner 3) บทบาทละสามช่อง: ตัว agent, model และ effort
+ตั้งค่าโดยผู้ใช้ 2026-11-09
+
+- Coding Owner : `Claude Code` (Anthropic)
+- Coding Owner Model : `Claude Opus 5.5`
+- Coding Owner Effort : `High`
+- Writing Owner 1 : `opencode` ใช้ provider Ollama บนเครื่อง `192.168.1.128`
+- Writing Owner 1 Model : `qwen-coder-12k`
+- Writing Owner 1 Effort : `High`
+- Writing Owner 2 : `opencode`
+- Writing Owner 2 Model : `opencode-go/kimi-k2.7-code`
+- Writing Owner 2 Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
+- Writing Owner 3 : `agy` (Antigravity, Google)
+- Writing Owner 3 Model : `Gemini 3.8 Flash`
+- Writing Owner 3 Effort : `Medium`
+- Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
+- Test Author Model : `opencode-go/qwen3.8-flash`
+- Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
+- Inspector : `opencode` ผู้ตรวจ spec และตรวจเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.7
+- Inspector Model : `opencode-go/qwen3.7-plus`
+- Inspector Effort : `High`
+- Reviewer1 : `Claude Code`
+- Reviewer1 Model : `Claude Fable 5.1`
+- Reviewer1 Effort : `High`
+- Reviewer2 : `opencode`
+- Reviewer2 Model : `opencode-go/glm-5.3-flash`
+- Reviewer2 Effort : `High`
+- Integrator : `Claude Code`
+- Integrator Model : `Claude Sonnet 5.5`
+- Integrator Effort : `High`
+
+**กฎของ model**
+
+- **หกโมเดลนี้ต้องไม่ซ้ำกันเลย:** Coding Owner, Writing Owner 1, Writing Owner 2, Writing Owner 3,
+  Reviewer1, Reviewer2 — ผู้เขียนกับผู้ตรวจที่เป็นโมเดลเดียวกันจะมองข้ามข้อผิดพลาด
+  แบบเดียวกัน และผู้เขียนหลายตัวที่เป็นโมเดลเดียวกันก็ไม่ได้ให้มุมมองที่ต่างกันจริง
+- **Writing Owner ทุกตัวต้องเป็นคนละผู้ให้บริการกับ Coding Owner**
+- **Test Author Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3 หรือ Reviewer1/2** —
+  สองเหตุผลคนละชั้น: (ก) ซ้ำกับ **Writing Owner** แล้วผู้เขียนเทสต์กับผู้เขียนโค้ด
+  เชื่อสมมติฐานชุดเดียวกัน เทสต์จึงผ่านทั้งที่โค้ดผิด · (ข) ซ้ำกับ **Coding Owner**
+  แล้วหนักกว่านั้น เพราะ Coding Owner เป็น**ผู้เขียน spec** และ Test Author ดึงค่าที่คาด
+  (oracle) จาก spec นั้น โมเดลเดียวกันจะเติมช่องว่างที่ spec ไม่ได้เขียนไว้แบบเดียวกัน
+  ช่องว่างนั้นจึงไม่ถูกจับทั้งสองฝั่ง — เป็นเหตุผลเดียวกับที่ Inspector ห้ามซ้ำ Coding Owner
+- **Test Author Model ซ้ำกับ Integrator ได้** เพราะ Integrator ไม่ได้เขียนทั้ง spec
+  และโค้ดที่เทสต์ต้องพิสูจน์
+- **Inspector Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3 หรือ Test Author** —
+  Inspector มีหน้าที่หาสิ่งที่บทบาทเหล่านั้นมองไม่เห็น ถ้าเป็นโมเดลเดียวกันก็จะมองไม่เห็นเหมือนกัน
+- **Inspector Model ซ้ำกับ Reviewer ได้ แต่ต้องเป็น session แยกกัน** และ**ควรต่างจาก Reviewer1**
+  เพื่อให้มุมมองไม่กระจุกอยู่ที่โมเดลเดียว — ถ้าตั้งให้ซ้ำกับ Reviewer1 ให้บันทึกเหตุผลไว้หนึ่งบรรทัด
+
+**ข้อสังเกตของ roster นี้**
+
+- Writing Owner 1, Test Author และ Inspector เป็นตระกูล Qwen ทั้งสามตัว (คนละโมเดล จึงไม่ผิดกฎ)
+  แต่อาจมองข้ามจุดเดียวกัน — เฟสที่ Writing Owner 1 เขียน ให้ Reviewer ทั้งสองตัวตรวจครบเสมอ
+  และไม่ใช้ Writing Owner 1 เป็นผู้ตรวจงานที่ Test Author/Inspector ส่งกลับ
+- Writing Owner 1 ชื่อโมเดลบ่งว่ามี context ราว 12k token — ส่งงานที่ scope แคบ (ไม่กี่ไฟล์) ให้ตัวนี้
+  และให้ยืนยันกับผู้ใช้ก่อนใช้ค่า Effort `High` ถ้า opencode/Ollama ไม่รองรับ
+
+### ขอบเขตการทำงานของ agent
+
+- Max Sessions ต่อ agent: `1`
+- Progress Report Interval: `15 นาที`
+- No-Response Timeout: `30 นาที`
+
+กติกาสามข้อนี้:
+
+- **Writing Owner แต่ละตัวเปิดได้ 1 session** การเพิ่มเกินนี้ต้องขอผู้ใช้ก่อน และงานที่เดินขนานกัน
+  ต้องแยก scope ไฟล์/subsystem ของแต่ละ Writing Owner ให้ไม่ทับกัน
+- **ต้องแจ้งความคืบหน้าทุก 15 นาที**: ทำอะไรไปแล้ว ติดอะไร
+  เหลืออะไร — งานที่เงียบนานกว่านี้ถือว่าไม่รู้สถานะ ไม่ใช่ว่ากำลังคืบหน้า
+- **ถ้า agent อื่นไม่ตอบกลับเกิน 30 นาที ให้สลับไปใช้ agent ตัวถัดไปได้ทันที**
+  ไม่ต้องรอคำอนุมัติ: Writing Owner 1 → 2 → 3 (วนกลับ 1) และ Reviewer1 ↔ Reviewer2
+  แล้วบันทึกไว้หนึ่งบรรทัดว่าสลับเมื่อไรเพราะอะไร ถ้าตัวที่ค้างกลับมาตอบทีหลัง
+  ให้ยึดงานของตัวที่รับช่วงไปแล้วเป็นหลัก และอย่าให้สองตัวแก้ไฟล์เดียวกัน
+- **Coding Owner, Test Author และ Inspector ไม่สลับเอง** ถ้าตัวใดไม่ตอบกลับเกิน 30 นาที
+  ให้หยุดเฉพาะขั้นที่ต้องรอบทบาทนั้น แจ้งผู้ใช้ว่าค้างที่ใครตั้งแต่เมื่อไร แล้วรอคำสั่ง
+  ขั้นอื่นที่ไม่ต้องรอเดินต่อได้ (หลักเดียวกับ Agent quota gate ใน §7) — สามบทบาทนี้ไม่มีคู่สลับ
+  และตัวแทนที่หยิบมาเองมักขัดกฎของ model ข้างบน
 
 ## 2. ลำดับความสำคัญของข้อมูล
 
@@ -98,13 +167,13 @@
 - ความเสี่ยง ข้อจำกัด หรือสิ่งที่ยังไม่ได้ตรวจ
 ```
 
-## 5. การทำงานร่วมกันระหว่าง Coding Agents (Claude Code และ Antigravity)
+## 5. การทำงานร่วมกันระหว่าง Coding Agents (ตาม Agent Roster ใน §1)
 
 ### 5.1 หลักการเจ้าของงาน
 - ให้ Coding Owner เป็นผู้วิเคราะห์ เก็บ Requirements และวางแผนการทำงาน
-- ให้อีกตัว เป็น writer owner
-- หนึ่ง task/branch มี writing owner หลักหนึ่งตัว
-- ตัวที่ไม่ได้เป็นผู้เขียนทำหน้าที่ reviewer โครงการนี้ใช้ Reviewer สองตัว (Claude Code และ Codex) ตรวจแยกกันโดยอิสระ
+- ให้ Writing Owner 1, 2 หรือ 3 เป็นผู้เขียน และให้ Test Author เขียนเทสต์ขนานกันได้ (§5.6)
+- หนึ่ง task/branch มี writing owner หลักหนึ่งตัว ระบุให้ชัดว่าเป็น Writing Owner 1, 2 หรือ 3
+- ผู้รีวิวโค้ดหลักคือ Reviewer1 และ Reviewer2 ตาม §1 ตรวจแยกกันโดยอิสระ
   ห้ามให้ตัวหนึ่งเห็นรายงานของอีกตัวก่อนรายงานของตัวเองเสร็จ แล้ว Coding Owner รวม findings และตรวจหลักฐานทีละข้อก่อนแก้
 - reviewer ไม่แก้โค้ดในรอบรีวิว เว้นแต่ได้รับมอบหมายให้แก้โดยชัดเจน
 - หากทำพร้อมกัน ให้แบ่งตาม subsystem หรือใช้คนละ Git worktree
@@ -144,6 +213,106 @@
   ถ้าใช้ agent ตัวเดียว ให้เขียนเฉพาะตัวนั้น และห้ามใส่ลิงก์ session ของ agent
 - ห้าม force-push, rewrite history, delete branch หรือ discard uncommitted changes โดยไม่ได้รับอนุญาต
 - ก่อน merge ให้ rebase/merge ตามนโยบายของทีมและรัน verification ใหม่
+
+### 5.6 Test Author
+
+Test Author ทำเฉพาะงานที่เกี่ยวกับ **"การพิสูจน์ว่าโค้ดถูก"** ไม่ใช่งานเขียนโค้ด
+และไม่ใช่ผู้ตัดสินแทนเจ้าของงาน
+
+**หน้าที่**
+
+1. **แปลง requirement เป็นเกณฑ์ตรวจรับที่ทดสอบได้** อ่าน `Requirements.md` และ spec ของเฟส
+   แล้วสรุปว่าแต่ละข้อ "ผ่าน" หมายถึงอะไรในรูปค่าที่ตรวจได้ (เช่น 69% ไม่เหลือง · 70% เหลือง)
+   แล้วให้ Coding Owner ยืนยันก่อนลงมือเขียนเทสต์
+2. **เขียนค่าที่คาด (oracle) พร้อมที่มา** ทุกค่าที่คาดต้องอ้างบรรทัดใน spec หรือคำนวณมือให้ดูได้
+   เช่น `Busy = 100+200+300+600+700+800 = 2700` — กันค่าที่คาดผิดหน่วยหรือลืมพจน์ใดพจน์หนึ่ง
+   ซึ่งเป็นความผิดพลาดที่หาไม่เจอจากการอ่านเทสต์เฉย ๆ
+3. **ออกแบบ fixture และข้อมูลทดสอบ** ให้เหมือนของจริง รวมรูปแบบเก่า-ใหม่ของแหล่งข้อมูลเดียวกัน
+   (เช่นไฟล์ระบบที่บางรุ่นมีช่องว่างหลัง `:` บางรุ่นไม่มี) และกรณีขอบเขต
+4. **ทำรายการ coverage ตาม spec** เทียบว่า spec มีกฎกี่ข้อ เทสต์ครอบคลุมกี่ข้อ ข้อไหนยังไม่มี —
+   นับจาก spec ไม่ใช่จากจำนวนเทสต์ เพราะฟิลด์ที่ไม่เคยถูก assert จะไม่โผล่ในรายงาน coverage ปกติ
+5. **ตรวจว่าเทสต์มีประสิทธิภาพจริง (mutation check)** แก้โค้ดโดยตั้งใจให้ผิด
+   (เปลี่ยน `<` เป็น `<=`, ลบการหารด้วย seconds) แล้วดูว่ามีเทสต์ล้มไหม ถ้าไม่ล้มแปลว่าเทสต์อ่อน
+   ทำในสำเนาหรือ Git worktree แยกเท่านั้น ไม่แตะ working tree ของ Writing Owner
+   ลบสำเนาทิ้งเมื่อตรวจเสร็จ และห้าม commit — จึงไม่ขัดกับข้อห้ามแก้โค้ด production
+6. **จัดการเทสต์ที่ล้มให้ถูกฝั่ง (triage)** เมื่อเทสต์ล้ม ชี้ว่าเป็นโค้ดผิดหรือเทสต์ผิดโดยเทียบ spec
+   แล้วส่งต่อ: **โค้ดผิด → กลับไป Writing Owner** · **เทสต์ผิด → แก้เอง** ·
+   **spec กำกวม → ส่งขึ้น Coding Owner**
+7. **เขียนรายงานตรวจรับให้ผู้ใช้** สรุปว่าเกณฑ์ตรวจรับข้อไหนผ่านเพราะเทสต์อะไร และข้อไหน
+   ทดสอบอัตโนมัติไม่ได้ (เช่น ลักษณะหน้าจอ) ต้องให้ผู้ใช้ดูเอง — ตรงกับกฎของ skill `requirements`
+   ที่ห้ามติ๊กเกณฑ์ที่ไม่ได้ทดสอบจริง
+8. **ดูแลชุดทดสอบระยะยาว** เมื่อ requirement เปลี่ยนหรือถูกแทนที่ (`⛔`) ให้ปรับหรือลบเทสต์
+   ที่เกี่ยวข้อง กันเทสต์ล้าสมัยที่ยังเขียว
+
+**ห้ามทำ**
+
+- **ห้ามแก้โค้ดของ Writing Owner** ใช้หลักเดียวกับ reviewer — แก้ได้เฉพาะ test scene / test script
+  ของตัวเอง ไม่มีข้อยกเว้น
+- **ห้ามอ่านโค้ดที่ implement แล้วก่อนเขียนเทสต์** เพื่อรักษาความเป็นอิสระ: เทสต์ต้องมาจาก spec
+  ไม่ใช่จากสิ่งที่โค้ดทำอยู่ ไม่งั้นเทสต์จะยืนยันพฤติกรรมที่ผิดว่าถูก
+- **ห้ามตัดสิน requirement เองเมื่อ spec กำกวม** ต้องถาม Coding Owner หรือผู้ใช้
+
+**ทำงานร่วมกับ agent อื่น**
+
+- **รันขนานกับ Writing Owner ได้** ไม่ต้องรอให้ Writing Owner ทำงานเสร็จก่อน เพราะเทสต์มาจาก spec
+- **แก้ test scene / test script ตามที่ Reviewer ชี้ได้** แต่ยังห้ามแตะโค้ด production
+- Model: ห้ามซ้ำกับ Coding Owner, Writing Owner หรือ Reviewer · ซ้ำกับ Integrator ได้ (ดู §1)
+
+### 5.7 Inspector
+
+**ที่มา:** บทบาทนี้เกิดจากช่องว่างที่เจอจริงสามแบบ ซึ่งทั้ง Test Author และ Reviewer
+ไม่ได้ถูกตั้งให้จับ — spec ที่ใช้คำโดยไม่นิยาม (เช่น "malformed" ที่ไม่บอกว่าอะไรนับ),
+กฎที่ spec เขียนไว้แต่ไม่มีเทสต์ (เช่นอินพุตที่คั่นด้วย TAB), และเทสต์ที่เขียนไว้แต่
+**ล้มไม่ได้จริง** (ยืนยันพฤติกรรมไม่ได้ ผ่านทุกกรณี) สามอย่างนี้ดูเหมือนงานเสร็จทั้งที่ยังไม่เสร็จ
+
+Inspector ทำ **สองขั้น** และ **รายงานอย่างเดียว**
+
+**ขั้น A — ตรวจ spec ก่อนเริ่มเขียน** (เห็น spec อย่างเดียว ยังไม่มีทั้งโค้ดและเทสต์)
+
+- หาคำที่ spec ใช้แต่ไม่นิยาม และคำที่นิยามกำกวมจนตีความได้หลายทาง
+- หากฎที่ spec พูดถึงแต่ไม่ได้บอกผลลัพธ์ที่คาด และกรณีขอบเขตที่ spec ไม่ครอบ
+- ทำรายการ "สิ่งที่ต้องนิยามก่อนเขียนโค้ด" ส่งให้ Coding Owner — **Coding Owner เป็นผู้ตัดสิน**
+  แล้วบันทึกคำตัดสินกลับเข้า spec ก่อนปล่อยให้ Writing Owner และ Test Author เริ่ม
+
+**ขั้น B — ตรวจเทสต์หลัง Test Author ส่งงาน**
+
+- เทียบเทสต์กับ spec: กฎข้อไหนไม่มีเทสต์ เทสต์ข้อไหนไม่ตรงกับ spec
+- ตรวจว่าเทสต์ **ล้มได้จริง**: สร้างชุด mutant **ของตัวเอง** (ไม่ใช้ชุดเดียวกับที่ Test Author
+  ใช้ใน §5.6 ข้อ 5 เพราะคนเขียนเทสต์ย่อมเลือก mutant ที่เทสต์ตัวเองจับได้) แล้วรายงานว่า
+  mutant ตัวไหนไม่มีเทสต์ล้ม
+- รายงานผลให้ Coding Owner — เทสต์ที่ต้องแก้ส่งต่อให้ **Test Author** แก้ ไม่ใช่ Inspector แก้
+
+**ห้ามทำ**
+
+- **ห้ามแก้ไฟล์ใด ๆ ในโปรเจกต์** ทั้งโค้ด เทสต์ และ spec — Inspector รายงาน Coding Owner ตัดสิน
+  คนอื่นลงมือ การให้ผู้ตรวจแก้เองทำให้ไม่มีใครตรวจงานของผู้ตรวจ
+- **ห้ามตัดสิน spec เอง** ข้อที่กำกวมส่งขึ้น Coding Owner
+- **mutant สร้างในสำเนาหรือ Git worktree แยกเท่านั้น** ไม่แตะ working tree ที่คนอื่นใช้อยู่
+  ลบสำเนาทิ้งเมื่อตรวจเสร็จ และห้าม commit — จึงไม่ขัดกับข้อห้ามแก้ไฟล์
+
+**ทำงานร่วมกับ agent อื่น**
+
+- ขั้น A อยู่**ก่อน** Writing Owner และ Test Author เริ่ม · ขั้น B อยู่**หลัง** Test Author ส่งงาน
+  และขนานกับ Reviewer ที่รีวิวโค้ดได้
+- Model: ห้ามซ้ำกับ Coding Owner, Writing Owner หรือ Test Author · ซ้ำกับ Reviewer ได้
+  แต่ต้องคนละ session และควรต่างจาก Reviewer1 (ดู §1)
+
+### 5.8 ลำดับงานหนึ่งเฟส
+
+1. **Coding Owner** วางแผนเฟสและเขียน spec ของเฟส
+2. **Inspector ขั้น A** ตรวจ spec → Coding Owner ตัดสินและปิดช่องว่าง → spec นิ่ง
+3. **Writing Owner** เขียนโค้ด และ **Test Author** เขียนเทสต์จาก spec — ขนานกัน
+4. **Inspector ขั้น B** ตรวจเทสต์ + mutant ของตัวเอง → รายงาน Coding Owner → Test Author แก้เทสต์
+5. **Reviewer1 / Reviewer2** รีวิวโค้ด — **ขนานกับข้อ 4 ได้** เพราะตรวจของคนละชิ้น
+   (Inspector ตรวจเทสต์ Reviewer ตรวจโค้ด) · ข้อ 6 เริ่มได้เมื่อทั้งข้อ 4 และ 5 ปิดแล้ว
+6. **Integrator** รวมงาน แล้วส่งเกณฑ์ตรวจรับให้ผู้ใช้ตามรายงานของ Test Author (§5.6 ข้อ 7)
+
+ข้อ 2 ห้ามข้าม — ถ้า spec ยังไม่นิ่งแล้วปล่อยให้ข้อ 3 เริ่ม ทั้งโค้ดและเทสต์จะอ้างคนละความหมาย
+และปัญหาจะโผล่ตอน Inspector ขั้น B ซึ่งแก้แพงกว่ามาก
+
+**handoff ที่เพิ่มจาก §5.3:** ส่งให้ Inspector ขั้น A ต้องแนบ spec ของเฟสและรายการ requirement
+ที่เฟสนั้นครอบ (ไม่ต้องแนบโค้ด) · ส่งให้ Inspector ขั้น B ต้องแนบ spec, เทสต์ที่ Test Author ส่ง
+และวิธีรันเทสต์ · รายงานของ Inspector ส่งกลับ Coding Owner เสมอ ไม่ส่งตรงไปหาคนเขียน
 
 ## 6. Decision boundaries
 
