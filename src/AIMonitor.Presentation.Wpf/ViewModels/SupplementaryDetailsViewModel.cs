@@ -34,6 +34,13 @@ public sealed class SupplementaryDetailsViewModel : ViewModelBase
     public bool HasRows => Rows.Count > 0;
     public bool HasActivity => ActivityPills.Count > 0 || !string.IsNullOrEmpty(ActivityNote);
 
+    /// <summary>True when any part of the reset row has content; a ccusage-only section has none (C19).</summary>
+    public bool HasResetInfo =>
+        !string.IsNullOrEmpty(ResetTitle)
+        || !string.IsNullOrEmpty(ResetBadge)
+        || !string.IsNullOrEmpty(ResetSummary)
+        || !string.IsNullOrEmpty(ResetDetails);
+
     public bool IsResetDetailsExpanded
     {
         get => _isResetDetailsExpanded;

@@ -378,9 +378,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.Local).DateTime);
         AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
-        // P4: ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
-        // P4: OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
-        // P4: AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
+        ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
+        OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
+        AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>

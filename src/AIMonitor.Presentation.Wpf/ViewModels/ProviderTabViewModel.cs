@@ -87,6 +87,8 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private bool _isConfigured;
     private bool _hasSnapshot;
     private DateTimeOffset? _lastUpdated;
+    private AgentUsageSummary? _agentUsage;
+    private bool _baseShowSupplementary;
 
     public ProviderTabViewModel(string providerId, string displayName)
     {
@@ -128,6 +130,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ResetSummary));
                 OnPropertyChanged(nameof(ResetDetails));
                 OnPropertyChanged(nameof(ResetTitle));
+                OnPropertyChanged(nameof(HasResetInfo));
                 OnPropertyChanged(nameof(HasSupplementaryRows));
                 OnPropertyChanged(nameof(HasSupplementaryActivity));
                 OnPropertyChanged(nameof(ActivityTitle));
@@ -147,6 +150,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
     public string ResetSummary => _supplementary?.ResetSummary ?? "";
     public string ResetDetails => _supplementary?.ResetDetails ?? "";
     public string ResetTitle => _supplementary?.ResetTitle ?? "Rate Limit Resets";
+    public bool HasResetInfo => _supplementary?.HasResetInfo ?? false;
     public bool HasSupplementaryRows => _supplementary?.HasRows ?? false;
     public bool HasSupplementaryActivity => _supplementary?.HasActivity ?? false;
     public string ActivityTitle => _supplementary?.ActivityTitle ?? "Activity";
@@ -360,6 +364,188 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Sets the ccusage summary shown in the supplementary rows (R-014 P4). The rows are rebuilt
+    /// immediately; a later <see cref="UpdateFromSnapshot"/> keeps using this summary.
+    /// </summary>
+    public void SetAgentUsage(AgentUsageSummary? summary)
+    {
+        _agentUsage = SupportsAgentUsage ? summary : null;
+        ApplyAgentUsage();
+    }
+
+    /// <summary>Provider ids whose tab shows ccusage rows (C9); all others ignore a summary.</summary>
+    private bool SupportsAgentUsage =>
+        AppendsAgentUsage || string.Equals(ProviderId, "agy", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Claude and OpenAI append the ccusage rows to their existing supplementary rows (C8).</summary>
+    private bool AppendsAgentUsage =>
+        string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rebuilds the supplementary rows from the base rows plus the stored ccusage summary. AGY shows
+    /// only the ccusage rows (C8); Claude/OpenAI keep their existing rows and append (C8) when the
+    /// section is visible, otherwise they show a ccusage-only section (C20). When no summary line is
+    /// present the pre-existing visibility rule is restored (C10), and an unchanged set of ccusage
+    /// rows does not rebuild the section (C21).
+    /// </summary>
+    private void ApplyAgentUsage()
+    {
+        var agentRows = BuildAgentUsageRows();
+        var currentAgentRows = _supplementary?.Rows.Where(r => r.Group == "ccusage").ToList() ?? [];
+
+        if (AppendsAgentUsage)
+        {
+            if (_baseShowSupplementary)
+            {
+                if (_supplementary is null)
+                {
+                    if (agentRows.Count > 0)
+                    {
+                        Supplementary = BuildAgentUsageOnly(agentRows);
+                    }
+
+                    ShowSupplementary = true;
+                    return;
+                }
+
+                if (!RowsMatch(currentAgentRows, agentRows))
+                {
+                    var rows = _supplementary.Rows.Where(r => r.Group != "ccusage").ToList();
+                    rows.AddRange(agentRows);
+                    Supplementary = CopyWithRows(_supplementary, rows);
+                }
+
+                ShowSupplementary = true;
+                return;
+            }
+
+            if (agentRows.Count == 0)
+            {
+                // C10: drop the ccusage rows and restore the existing visibility rule.
+                if (_supplementary is not null && currentAgentRows.Count > 0)
+                {
+                    Supplementary = IsAgentUsageOnly(_supplementary)
+                        ? null
+                        : CopyWithRows(_supplementary, _supplementary.Rows.Where(r => r.Group != "ccusage").ToList());
+                }
+
+                ShowSupplementary = false;
+                return;
+            }
+
+            // C20: the base section is hidden (or there is no snapshot yet), so show only the ccusage rows.
+            if (_supplementary is null || !IsAgentUsageOnly(_supplementary) || !RowsMatch(currentAgentRows, agentRows))
+            {
+                Supplementary = BuildAgentUsageOnly(agentRows);
+            }
+
+            ShowSupplementary = true;
+            return;
+        }
+
+        // AGY: the section exists only while a ccusage line is present (C8).
+        if (agentRows.Count > 0)
+        {
+            if (_supplementary is null || !IsAgentUsageOnly(_supplementary) || !RowsMatch(currentAgentRows, agentRows))
+            {
+                Supplementary = BuildAgentUsageOnly(agentRows);
+            }
+
+            ShowSupplementary = true;
+        }
+        else
+        {
+            if (_supplementary is not null)
+            {
+                Supplementary = null;
+            }
+
+            ShowSupplementary = false;
+        }
+    }
+
+    private SupplementaryDetailsViewModel BuildAgentUsageOnly(IReadOnlyList<SupplementaryRowViewModel> agentRows) => new()
+    {
+        ProviderId = ProviderId,
+        ResetTitle = "",
+        Rows = agentRows,
+    };
+
+    /// <summary>True for a section that holds nothing but the ccusage rows (C19/C20): no reset part, no activity.</summary>
+    private static bool IsAgentUsageOnly(SupplementaryDetailsViewModel details) =>
+        !details.HasResetInfo
+        && details.ActivityPills.Count == 0
+        && string.IsNullOrEmpty(details.ActivityNote)
+        && details.Rows.All(r => r.Group == "ccusage");
+
+    private static bool RowsMatch(
+        IReadOnlyList<SupplementaryRowViewModel> left,
+        IReadOnlyList<SupplementaryRowViewModel> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            var a = left[i];
+            var b = right[i];
+            if (!string.Equals(a.Label, b.Label, StringComparison.Ordinal)
+                || !string.Equals(a.Value, b.Value, StringComparison.Ordinal)
+                || !string.Equals(a.Detail, b.Detail, StringComparison.Ordinal)
+                || !string.Equals(a.Badge, b.Badge, StringComparison.Ordinal)
+                || !string.Equals(a.Group, b.Group, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private List<SupplementaryRowViewModel> BuildAgentUsageRows()
+    {
+        var rows = new List<SupplementaryRowViewModel>(2);
+        if (_agentUsage?.Today is { } today)
+        {
+            rows.Add(AgentUsageRow("Today (ccusage)", today));
+        }
+
+        if (_agentUsage?.ThisMonth is { } month)
+        {
+            rows.Add(AgentUsageRow("This month (ccusage)", month));
+        }
+
+        return rows;
+    }
+
+    private static SupplementaryRowViewModel AgentUsageRow(string label, AgentUsageLine line) => new()
+    {
+        Label = label,
+        Value = $"{line.TokensText} · {line.CostText}",
+        Group = "ccusage",
+    };
+
+    private static SupplementaryDetailsViewModel CopyWithRows(
+        SupplementaryDetailsViewModel source,
+        IReadOnlyList<SupplementaryRowViewModel> rows) => new()
+        {
+            ProviderId = source.ProviderId,
+            SectionTitle = source.SectionTitle,
+            ResetTitle = source.ResetTitle,
+            ResetBadge = source.ResetBadge,
+            ResetSummary = source.ResetSummary,
+            ResetDetails = source.ResetDetails,
+            Rows = rows,
+            ActivityPills = source.ActivityPills,
+            ActivityTitle = source.ActivityTitle,
+            ActivityNote = source.ActivityNote,
+            IsResetDetailsExpanded = source.IsResetDetailsExpanded,
+        };
+
     public void UpdateFromSnapshot(ProviderSnapshot snapshot, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -468,20 +654,23 @@ public sealed class ProviderTabViewModel : ViewModelBase
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
+        _baseShowSupplementary = (isClaude || isOpenAi)
+            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
+
         if (isClaude || isOpenAi)
         {
-            ShowSupplementary = configuredNow || snapshot.Stats.Any(IsSupplementaryStat);
             var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
             Supplementary = BuildSupplementary(snapshot, isClaude, isOpenAi);
             Supplementary.IsResetDetailsExpanded = wasExpanded;
         }
         else
         {
-            ShowSupplementary = false;
             Supplementary = null;
         }
 
-        StatTiles = snapshot.Stats.Where(s => !ShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
+        ApplyAgentUsage();
+
+        StatTiles = snapshot.Stats.Where(s => !_baseShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
 
         // Stats summary
         if (snapshot.Stats.Count > 0)
