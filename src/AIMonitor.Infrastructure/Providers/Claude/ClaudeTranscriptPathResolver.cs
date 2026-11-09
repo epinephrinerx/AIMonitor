@@ -33,7 +33,9 @@ public static class ClaudeTranscriptPathResolver
     /// Returns every <c>projects</c> directory to scan, in priority order and without duplicates.
     /// A non-blank <paramref name="claudeConfigDir"/> is a comma-separated list of Claude config
     /// directories; each entry becomes its <c>projects</c> directory, or is used as-is when its last
-    /// segment already is <c>projects</c>. When that list is absent (or yields no entries), the
+    /// segment already is <c>projects</c>. Blank entries, and entries that are not fully qualified
+    /// (including drive-relative paths such as <c>C:x</c>), are skipped; a list that yields no entries
+    /// is treated as unset. When that list is absent (or yields no entries), the
     /// defaults are <c>&lt;xdg&gt;/claude/projects</c> - where <c>&lt;xdg&gt;</c> is
     /// <paramref name="xdgConfigHome"/> when non-blank, else
     /// <c>&lt;userProfileDirectory&gt;/.config</c> - followed by
@@ -50,7 +52,11 @@ public static class ClaudeTranscriptPathResolver
             foreach (var rawEntry in claudeConfigDir.Split(','))
             {
                 var entry = rawEntry.Trim();
-                if (entry.Length == 0)
+
+                // B15: a relative or drive-relative entry is not a location this pure resolver can
+                // turn into an absolute path without the current working directory, so it is dropped.
+                // B14: a list that yields no usable entry falls through to the defaults below.
+                if (entry.Length == 0 || !Path.IsPathFullyQualified(entry))
                 {
                     continue;
                 }
