@@ -87,6 +87,8 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private bool _isConfigured;
     private bool _hasSnapshot;
     private DateTimeOffset? _lastUpdated;
+    private AgentUsageSummary? _agentUsage;
+    private bool _baseShowSupplementary;
 
     public ProviderTabViewModel(string providerId, string displayName)
     {
@@ -360,6 +362,115 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Sets the ccusage summary shown in the supplementary rows (R-014 P4). The rows are rebuilt
+    /// immediately; a later <see cref="UpdateFromSnapshot"/> keeps using this summary.
+    /// </summary>
+    public void SetAgentUsage(AgentUsageSummary? summary)
+    {
+        _agentUsage = SupportsAgentUsage ? summary : null;
+        ApplyAgentUsage();
+    }
+
+    /// <summary>Provider ids whose tab shows ccusage rows (C9); all others ignore a summary.</summary>
+    private bool SupportsAgentUsage =>
+        AppendsAgentUsage || string.Equals(ProviderId, "agy", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Claude and OpenAI append the ccusage rows to their existing supplementary rows (C8).</summary>
+    private bool AppendsAgentUsage =>
+        string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rebuilds the supplementary rows from the base rows plus the stored ccusage summary. AGY shows
+    /// only the ccusage rows (C8); Claude/OpenAI keep their existing rows and append (C8), and the
+    /// section's pre-existing visibility rule is restored when no summary line is present (C10).
+    /// </summary>
+    private void ApplyAgentUsage()
+    {
+        var agentRows = BuildAgentUsageRows();
+
+        if (AppendsAgentUsage)
+        {
+            if (_supplementary is null)
+            {
+                if (agentRows.Count > 0)
+                {
+                    Supplementary = new SupplementaryDetailsViewModel
+                    {
+                        ProviderId = ProviderId,
+                        Rows = agentRows,
+                    };
+                }
+            }
+            else
+            {
+                var rows = _supplementary.Rows.Where(r => r.Group != "ccusage").ToList();
+                rows.AddRange(agentRows);
+                Supplementary = CopyWithRows(_supplementary, rows);
+            }
+
+            ShowSupplementary = _baseShowSupplementary || agentRows.Count > 0;
+            return;
+        }
+
+        if (agentRows.Count > 0)
+        {
+            Supplementary = new SupplementaryDetailsViewModel
+            {
+                ProviderId = ProviderId,
+                ResetTitle = "",
+                Rows = agentRows,
+            };
+            ShowSupplementary = true;
+        }
+        else
+        {
+            Supplementary = null;
+            ShowSupplementary = false;
+        }
+    }
+
+    private List<SupplementaryRowViewModel> BuildAgentUsageRows()
+    {
+        var rows = new List<SupplementaryRowViewModel>(2);
+        if (_agentUsage?.Today is { } today)
+        {
+            rows.Add(AgentUsageRow("Today (ccusage)", today));
+        }
+
+        if (_agentUsage?.ThisMonth is { } month)
+        {
+            rows.Add(AgentUsageRow("This month (ccusage)", month));
+        }
+
+        return rows;
+    }
+
+    private static SupplementaryRowViewModel AgentUsageRow(string label, AgentUsageLine line) => new()
+    {
+        Label = label,
+        Value = $"{line.TokensText} · {line.CostText}",
+        Group = "ccusage",
+    };
+
+    private static SupplementaryDetailsViewModel CopyWithRows(
+        SupplementaryDetailsViewModel source,
+        IReadOnlyList<SupplementaryRowViewModel> rows) => new()
+        {
+            ProviderId = source.ProviderId,
+            SectionTitle = source.SectionTitle,
+            ResetTitle = source.ResetTitle,
+            ResetBadge = source.ResetBadge,
+            ResetSummary = source.ResetSummary,
+            ResetDetails = source.ResetDetails,
+            Rows = rows,
+            ActivityPills = source.ActivityPills,
+            ActivityTitle = source.ActivityTitle,
+            ActivityNote = source.ActivityNote,
+            IsResetDetailsExpanded = source.IsResetDetailsExpanded,
+        };
+
     public void UpdateFromSnapshot(ProviderSnapshot snapshot, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -468,20 +579,23 @@ public sealed class ProviderTabViewModel : ViewModelBase
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
+        _baseShowSupplementary = (isClaude || isOpenAi)
+            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
+
         if (isClaude || isOpenAi)
         {
-            ShowSupplementary = configuredNow || snapshot.Stats.Any(IsSupplementaryStat);
             var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
             Supplementary = BuildSupplementary(snapshot, isClaude, isOpenAi);
             Supplementary.IsResetDetailsExpanded = wasExpanded;
         }
         else
         {
-            ShowSupplementary = false;
             Supplementary = null;
         }
 
-        StatTiles = snapshot.Stats.Where(s => !ShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
+        ApplyAgentUsage();
+
+        StatTiles = snapshot.Stats.Where(s => !_baseShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
 
         // Stats summary
         if (snapshot.Stats.Count > 0)
