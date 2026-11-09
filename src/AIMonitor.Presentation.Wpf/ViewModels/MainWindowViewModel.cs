@@ -145,7 +145,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-
     public bool IsAllAgentsSelected
     {
         get => _isAllAgentsSelected;
