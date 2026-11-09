@@ -302,4 +302,9 @@ versus `ccusage claude daily --json`.
 |---|---|---|
 | R11 | R2 holds even when the child **never exits**: as soon as stdout passes the limit the runner kills the process tree and reports `OutputTooLarge` (no waiting for the deadline, no `--offline` retry). Tests must keep a hanging-child case for this, next to the exited/drained case. A test is never reshaped to fit the code (§5.6). | WO2 + Test Author |
 
+
+## Coding Owner decision after P2b code (2026-11-09)
+
+| # | Decision |
+|---|---|
 | B11 | Fallback project label: the first segment below the root is still decoded with the existing `ProjectFromDirectoryName` (`C--work-project` → `project`); only the chosen segment changes. |
