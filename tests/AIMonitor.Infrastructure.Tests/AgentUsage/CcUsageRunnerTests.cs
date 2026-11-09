@@ -9,7 +9,8 @@ namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 /// <summary>
 /// Tests for <see cref="CcUsageRunner"/> per SPEC R-014 §P1.3 "Runner", decisions A6, A12, OP3,
 /// R1 (the offline retry rules, which retry cases run and which failures must not),
-/// R2 (OutputTooLarge vs Timeout classification with asynchronous readers) and R7 (the seam),
+/// R2 (OutputTooLarge vs Timeout classification with asynchronous readers),
+/// R11 (R2 holds even when the child never exits) and R7 (the seam),
 /// mirroring the hand-written fake-process shape of the AGY runner tests
 /// (<c>tests/AIMonitor.Infrastructure.Tests/Providers/Agy/AgyProcessBoundaryTests.cs</c>).
 /// No real process is ever started.
@@ -550,6 +551,62 @@ public sealed class CcUsageRunnerTests
         Assert.Equal(1, factory.Starts); // R1: OutputTooLarge does not retry
         Assert.True(first.Killed); // SPEC P1.3: "exceeding → kill"
         Assert.True(first.Disposed);
+    }
+
+    [Fact]
+    public async Task ExcessiveStdout_NeverExitingChild_ThrowsOutputTooLarge_WellBeforeDeadline_AndNeverRetries()
+    {
+        // Decision R11: R2 holds even when the child NEVER exits — "as soon as stdout passes the
+        // limit the runner kills the process tree and reports OutputTooLarge (no waiting for the
+        // deadline, no --offline retry)". The child hangs (Hang = true: WaitForExitAsync completes
+        // only when Kill() is called) while its stdout streams forever through the async
+        // pipe-like reader (decision R2: fakes must yield), so the limit is passed while the
+        // process is still running. Red at 6bbccb7: RunOnceAsync awaits
+        // Task.WhenAll(stdout, stderr, exited) — with the child never exiting, the WhenAll stays
+        // pending even though the stdout reader has already blown the limit, the deadline fires
+        // first, and the verdict becomes Timeout with a retrying second start.
+        // Fake clock: the seam (decisions M3/R7) fixes the deadline as a constructor TimeSpan and
+        // there is no clock parameter, so the 60 s deadline IS the fake clock — a Timeout verdict
+        // could only arrive at 60 s. The 5 s WaitAsync guard makes that distinguishable without
+        // the suite waiting a minute: the correct runner returns OutputTooLarge a few thread-pool
+        // yields after start (the reader exceeds the 16-char limit on its first chunk), while any
+        // "wait for the deadline" behaviour fails at the guard, well before the deadline.
+        var first = new Child
+        {
+            Hang = true, // never exits on its own
+            Output = new NeverEndingYieldingReader(), // streams past the limit forever, never EOF
+        };
+        var factory = new Factory();
+        factory.Enqueue(first);
+        factory.Enqueue(new Child()); // must never start — a retry would be caught by Starts
+        var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(60), 16);
+        using var cancellation = new CancellationTokenSource();
+        var run = runner.RunAsync(null, cancellation.Token);
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() =>
+                run.WaitAsync(TimeSpan.FromSeconds(5), cancellation.Token));
+
+            Assert.Equal(AgentUsageErrorKind.OutputTooLarge, error.Kind); // R11: OutputTooLarge, not Timeout
+            Assert.Equal(1, factory.Starts); // R1/A6/R11: over-limit stdout never retries with --offline
+            Assert.True(first.Killed); // R11: "the runner kills the process tree" — killed, not reaped by the deadline
+            Assert.True(first.Disposed);
+        }
+        finally
+        {
+            // If the guard fired (the red path) the runner is still waiting on its 60 s deadline;
+            // cancel the caller token so the abandoned read kills and disposes promptly, and
+            // observe its cancellation so it cannot surface as an unobserved task exception.
+            cancellation.Cancel();
+            try
+            {
+                await run;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or AgentUsageUnavailableException)
+            {
+            }
+        }
     }
 
     [Fact]
