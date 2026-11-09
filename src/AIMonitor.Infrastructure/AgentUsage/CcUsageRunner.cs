@@ -103,7 +103,14 @@ internal sealed class CcUsageRunner : ICcUsageRunner
             stderr = ReadPipeAsync(process.Error, StderrLimit, retain: false, deadline);
             var exited = process.WaitForExitAsync(deadline.Token);
 
-            await Task.WhenAll(stdout, stderr, exited).WaitAsync(deadline.Token).ConfigureAwait(false);
+            var all = Task.WhenAll(stdout, stderr, exited);
+            await Task.WhenAny(all, stdout).WaitAsync(deadline.Token).ConfigureAwait(false);
+            if (stdout.IsFaulted)
+            {
+                await stdout.ConfigureAwait(false);
+            }
+
+            await all.WaitAsync(deadline.Token).ConfigureAwait(false);
 
             if (process.ExitCode != 0)
             {
