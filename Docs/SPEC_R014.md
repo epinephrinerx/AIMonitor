@@ -429,3 +429,11 @@ Trial merge (integration HEAD + `7c4589a` + `c1f8c76`): build clean, 1,890 pass,
 | C20 | Claude/OpenAI: when the existing rule would hide the section (`_baseShowSupplementary == false`, including "no snapshot yet"), a summary with a line creates a **ccusage-only** section exactly like AGY (no placeholder Plan/Credits rows, no reset part, no default "Rate Limit Resets" title). When the existing rule shows the section, the rows are appended as now. |
 | C21 | Skip rebuilding `Supplementary` when the computed ccusage rows equal the current ones (no churn on every refresh). |
 | C22 | P4 tests are the Test Author's and gate the merge (Reviewer2 MAJOR-2): ordered after the P3 tests. |
+
+## Coding Owner decision after the P3 trial merge (2026-11-09)
+
+Trial merge (integration + P3 `0f69a3e` + P3 tests `937b115`): build clean, 1,976 pass, 3 fail — `AgentUsageRefresherTests.RefreshAsync_WhenUpdatedHandlerThrows_RecoversWithoutLeakingAndWithoutWedging`, `…_WhenReadFails_CompletesAndRaisesUpdatedWithError`, `MainWindowViewModelAllAgentsTests.RefreshAsync_WhenProviderRefreshFails_CcusageReadStillStarts`: the handler was posted to the captured context but had not run when the awaited task completed.
+
+| # | Decision | Who |
+|---|---|---|
+| C23 | The task returned by `AgentUsageRefresher.RefreshAsync` completes only **after** the `Updated` handler has run (when posted to a captured context, the refresher awaits that posted invocation, e.g. via a `TaskCompletionSource` set in the posted callback, also on handler exception). So `await RefreshAsync(...)` / `await vm.AgentUsageTask` means the view model is updated. No blocking waits (`.Wait()`/`.Result`) — the dispatcher must never be blocked. | WO2 |
