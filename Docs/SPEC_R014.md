@@ -280,3 +280,18 @@ subtraction with a Haiku 5.5 > 100k record replaced by a smaller one, eviction, 
 first-segment project label, root list rules 1–3, missing/unreadable roots. Acceptance A10 (Integrator, manual):
 every completed local day present in both sources has equal Claude input/output/cache-creation/cache-read sums
 versus `ccusage claude daily --json`.
+
+## Coding Owner decisions after P2b Inspector A (2026-11-09) — override the P2b detailed section
+
+| # | Decision |
+|---|---|
+| B1 | Session aliases (ccusage `push_deduped_session_alias`): when a match joins two records with **different** `sid`, the survivor is registered under the replay key of **both** sids, so a later replay from either session finds it. |
+| B2 | `sid` fallback when `sessionId` is missing: file at `<root>\<project>\<file>.jsonl` → file name without extension; deeper file → the directory segment directly below `<project>` (ccusage `extract_session_parts`). |
+| B3 | `<synthetic>` records are **counted** (ccusage counts their tokens): model label `(synthetic)`, cost 0, not added to unpriced or estimated tokens. Replaces the P2b.3 skip. |
+| B4 | A pruned day bucket makes only the day×model / day×project subtraction a no-op; the `AllTotals` subtraction always happens. A replacement may recreate a pruned bucket; the next prune removes it. |
+| B5 | Add the `version` filter: a record whose `version` is present and is not a semver prefix (`<digits>.<digits>.<digit>…`, ccusage `is_semver_prefix`) is skipped, not counted as malformed. |
+| B6 | Accepted divergence: no `-fast` model suffix for `usage.speed == "fast"` (A10 compares daily token sums only). |
+| B7 | Eviction limitation is accepted and tested: the seen-set capacity becomes an internal ctor seam (default 400,000); with capacity 1, record A, then B (other key), then a duplicate of A → A is counted twice. |
+| B8 | Exact-key match wins over replay-key match even when they point to different kept records (ccusage order). Two non-sidechain records with the same replay key and different exact keys both survive. |
+| B9 | A `CLAUDE_CONFIG_DIR` entry whose last path segment is `projects` (OrdinalIgnoreCase) is used as the projects directory itself (ccusage `normalize_claude_config_path`, done syntactically). |
+| B10 | Oracles (rates from P2a; cost = Σ tokens × rate / 1,000,000). (a) `claude-sonnet-5` A: input 100, output 50, cache read 20 → 100×2 + 50×10 + 20×0.20 = 704 → **$0.000704**; B same key, input 200 → 1,104 → **$0.001104**; after B replaces A, day×model = B's counters, `Messages` = 1. (b) `claude-haiku-5-5` A: input 60,000, cache read 50,000, output 1,000 → prompt 110,000 > 100,000 → high tier 60,000×0.50 + 1,000×2.50 + 50,000×0.05 = 35,000 → **$0.035**; B same key but sidechain-free over a sidechain A, input 1,000, output 500, cache read 100 → low tier 100 + 250 + 1 = 351 → **$0.000351**; after replacement `AllTotals.CostUsd` = **$0.000351**. (c) Survivor order: kept sidechain A (total 1,000) vs new non-sidechain B (total 10) → B wins. |
