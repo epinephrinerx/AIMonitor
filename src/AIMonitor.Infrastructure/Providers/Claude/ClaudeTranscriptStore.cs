@@ -6,11 +6,15 @@ using AIMonitor.Domain;
 namespace AIMonitor.Infrastructure.Providers.Claude;
 
 /// <summary>
-/// Incrementally parsed, pre-aggregated view of the local Claude Code transcripts under one
-/// <c>projects</c> directory (PAR-006). Read-only: never creates, modifies, or deletes a transcript
+/// Incrementally parsed, pre-aggregated view of the local Claude Code transcripts under one or more
+/// <c>projects</c> directories (PAR-006). Read-only: never creates, modifies, or deletes a transcript
 /// file. Aggregates on ingest - a record is folded into per-day/model/project counters and then
-/// discarded, never retained - so memory is bounded by (days retained x models/projects), not by
-/// history length. Every public member after construction is safe to call repeatedly across the
+/// discarded, never retained - so the aggregate state is bounded by (days retained x
+/// models/projects), not by history length. The only history-sized state is the de-duplication
+/// seen-set, which is bounded to <see cref="MaxSeenRecords"/> entries and stores each key as a
+/// 64-bit hash (never the key text) plus one shared instance per distinct model/project label; at
+/// 400,000 retained records the measured managed heap is about 94 MB after a full GC. Every public
+/// member after construction is safe to call repeatedly across the
 /// lifetime of one Claude provider client; the byte offset and de-duplication state recorded by
 /// <see cref="RefreshAsync"/> are this store's explicit checkpoint; there is no separate synchronous
 /// re-scan path.
@@ -20,10 +24,11 @@ public sealed class ClaudeTranscriptStore
     /// <summary>Longest range the UI offers is 90 days; beyond this, day buckets are dropped.</summary>
     private const int RetainedDays = 400;
 
-    /// <summary>Bounds the de-duplication set on a machine with very long history. Oldest ids are
-    /// evicted first; an evicted id can only be re-counted if its transcript is re-read from offset zero
-    /// (e.g. after rotation), matching <see cref="RefreshAsync"/>'s own rotation handling.</summary>
-    private const int MaxSeenIds = 400_000;
+    /// <summary>Bounds the de-duplication set on a machine with very long history. Oldest records are
+    /// evicted first (together with their keys); an evicted record can only be re-counted if its
+    /// transcript is re-read from offset zero (e.g. after rotation), matching
+    /// <see cref="RefreshAsync"/>'s own rotation handling.</summary>
+    private const int MaxSeenRecords = 400_000;
 
     /// <summary>Models past this many fold into "Other" in a built <see cref="UsageHistory"/>, so a
     /// chart's categorical palette is never asked to render more series than it has colours for.</summary>
@@ -31,19 +36,27 @@ public sealed class ClaudeTranscriptStore
 
     private const string OtherModelLabel = "Other";
     private const string UnknownProjectLabel = "(unknown)";
+    private const string SyntheticModelId = "<synthetic>";
+    private const string SyntheticModelLabel = "(synthetic)";
     private const int ChunkSize = 8192;
 
     private static readonly byte[] AssistantMarkerTight = "\"type\":\"assistant\""u8.ToArray();
     private static readonly byte[] AssistantMarkerSpaced = "\"type\": \"assistant\""u8.ToArray();
 
-    private readonly string _root;
+    private readonly string[] _roots;
     private readonly IClock _clock;
     private readonly TimeZoneInfo _localTimeZone;
     private readonly Func<string, Stream> _openFile;
     private readonly Dictionary<string, long> _offsets = new(StringComparer.Ordinal);
-    private readonly BoundedSeenIdSet _seenIds = new(MaxSeenIds);
+    private readonly SeenRecordSet _seen;
     private readonly Dictionary<DateOnly, Dictionary<string, UsageCounters>> _byDayModel = [];
     private readonly Dictionary<DateOnly, Dictionary<string, UsageCounters>> _byDayProject = [];
+
+    /// <summary>B12: one shared instance per distinct label. Model and project names repeat on
+    /// every record, so keeping the strings from the JSON parse would retain a copy per record
+    /// through the seen-set and the day buckets.</summary>
+    private readonly Dictionary<string, string> _modelLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _projectLabels = new(StringComparer.Ordinal);
 
     /// <param name="root">The <c>projects</c> directory to scan; see <see cref="ClaudeTranscriptPathResolver"/>.
     /// Does not need to exist yet - a missing directory is an expected, reported condition, not a
@@ -53,23 +66,84 @@ public sealed class ClaudeTranscriptStore
     /// Defaults to <see cref="TimeZoneInfo.Local"/>; tests inject a fixed zone so day-boundary
     /// behavior does not depend on the machine running the test.</param>
     public ClaudeTranscriptStore(string root, IClock clock, TimeZoneInfo? localTimeZone = null)
-        : this(root, clock, localTimeZone, OpenRead)
+        : this([RequireNonBlankRoot(root)], clock, localTimeZone)
+    {
+    }
+
+    /// <param name="roots">Every <c>projects</c> directory to scan (at least one). Roots that do not
+    /// exist are skipped per refresh; data from all existing roots is combined and de-duplicated.</param>
+    /// <param name="clock">Source of "now" for window queries and retention pruning.</param>
+    /// <param name="localTimeZone">The zone used to compute each record's local calendar day.</param>
+    public ClaudeTranscriptStore(IReadOnlyList<string> roots, IClock clock, TimeZoneInfo? localTimeZone = null)
+        : this(roots, clock, localTimeZone, OpenRead, MaxSeenRecords)
     {
     }
 
     /// <summary>Test-only seam: lets a test substitute a controlled stream (e.g. one that cancels a
     /// token mid-read) in place of the real file open, to exercise cancellation deterministically.
     /// Production always uses <see cref="OpenRead"/>, preserving the single, real-file-only behavior.</summary>
-    internal ClaudeTranscriptStore(string root, IClock clock, TimeZoneInfo? localTimeZone, Func<string, Stream> openFile)
+    internal ClaudeTranscriptStore(
+        string root, IClock clock, TimeZoneInfo? localTimeZone, Func<string, Stream> openFile)
+        : this([RequireNonBlankRoot(root)], clock, localTimeZone, openFile, MaxSeenRecords)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+    }
+
+    /// <summary>Keeps the single-root constructors' blank-input failure attributed to their own
+    /// parameter (<c>root</c>) rather than the list constructor's (<c>roots</c>).</summary>
+    private static string RequireNonBlankRoot(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            throw new ArgumentException("Root must not be blank.", nameof(root));
+        }
+
+        return root;
+    }
+
+    /// <summary>Test-only seam for the de-duplication set capacity (B7): production always uses
+    /// <see cref="MaxSeenRecords"/>.</summary>
+    internal ClaudeTranscriptStore(
+        IReadOnlyList<string> roots, IClock clock, TimeZoneInfo? localTimeZone, int seenCapacity)
+        : this(roots, clock, localTimeZone, OpenRead, seenCapacity)
+    {
+    }
+
+    internal ClaudeTranscriptStore(
+        IReadOnlyList<string> roots,
+        IClock clock,
+        TimeZoneInfo? localTimeZone,
+        Func<string, Stream> openFile,
+        int seenCapacity = MaxSeenRecords)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+
+        if (roots.Count == 0)
+        {
+            throw new ArgumentException("At least one root is required.", nameof(roots));
+        }
+
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                throw new ArgumentException("Root must not be blank.", nameof(roots));
+            }
+        }
+
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(openFile);
 
-        _root = root;
+        if (seenCapacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(seenCapacity), seenCapacity, "Seen-set capacity must be positive.");
+        }
+
+        _roots = [.. roots];
         _clock = clock;
         _localTimeZone = localTimeZone ?? TimeZoneInfo.Local;
         _openFile = openFile;
+        _seen = new SeenRecordSet(seenCapacity);
     }
 
     /// <summary>Lifetime totals across every record ever folded by this instance, never windowed or pruned.</summary>
@@ -82,8 +156,9 @@ public sealed class ClaudeTranscriptStore
     /// counted rather than logged: a transcript line is the user's own conversation.</summary>
     public int MalformedRecordCount { get; private set; }
 
-    /// <summary>Sanitized, actionable reason the transcripts directory itself could not be scanned on the
-    /// most recent <see cref="RefreshAsync"/>; <see langword="null"/> when the scan reached the per-file stage.</summary>
+    /// <summary>Sanitized, actionable reason no transcripts directory could be scanned on the most recent
+    /// <see cref="RefreshAsync"/> - none of the configured roots exists, or one could not be enumerated;
+    /// <see langword="null"/> when the scan reached the per-file stage without a root-level failure.</summary>
     public string? LastDirectoryError { get; private set; }
 
     /// <summary>How many <c>*.jsonl</c> files the most recent <see cref="RefreshAsync"/> found but could
@@ -94,9 +169,9 @@ public sealed class ClaudeTranscriptStore
     public int FileReadFailureCount { get; private set; }
 
     /// <summary>
-    /// Reads whatever has been appended to every <c>*/*.jsonl</c> file under the root since the last
-    /// call, resuming each file from its own stored byte offset (the checkpoint). Never throws for an
-    /// expected failure (missing directory, unreadable file, malformed line/record) - those are
+    /// Reads whatever has been appended to every <c>*.jsonl</c> file under every existing root since the
+    /// last call, resuming each file from its own stored byte offset (the checkpoint). Never throws for
+    /// an expected failure (missing directory, unreadable file, malformed line/record) - those are
     /// recorded on <see cref="LastDirectoryError"/>/<see cref="FileReadFailureCount"/>/
     /// <see cref="MalformedRecordCount"/> instead. The only exception a caller should expect is
     /// <see cref="OperationCanceledException"/>.
@@ -109,34 +184,51 @@ public sealed class ClaudeTranscriptStore
         LastDirectoryError = null;
         FileReadFailureCount = 0;
 
-        if (!Directory.Exists(_root))
+        var existingRoots = Array.FindAll(_roots, Directory.Exists);
+        if (existingRoots.Length == 0)
         {
-            LastDirectoryError = $"No Claude transcripts directory found at {_root}.";
+            LastDirectoryError = "No Claude transcripts directory found.";
             FilesScanned = 0;
             return 0;
         }
 
-        string[] files;
-        try
+        var files = new List<(string Path, string Root)>();
+        var enumerationFailed = false;
+        var options = new EnumerationOptions
         {
-            files = [.. Directory.EnumerateDirectories(_root)
-                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.jsonl"))
-                .OrderBy(path => path, StringComparer.Ordinal)];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+        };
+
+        foreach (var root in existingRoots)
         {
-            LastDirectoryError = $"Could not read the Claude transcripts directory at {_root}.";
-            FilesScanned = 0;
-            return 0;
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(root, "*.jsonl", options))
+                {
+                    files.Add((path, root));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                enumerationFailed = true;
+            }
         }
 
-        FilesScanned = files.Length;
+        if (enumerationFailed)
+        {
+            LastDirectoryError = "Could not read a Claude transcripts directory.";
+        }
+
+        files.Sort(static (left, right) => string.Compare(left.Path, right.Path, StringComparison.Ordinal));
+        FilesScanned = files.Count;
 
         var added = 0;
-        foreach (var path in files)
+        foreach (var (path, root) in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            added += await ReadFileAsync(path, cancellationToken).ConfigureAwait(false);
+            added += await ReadFileAsync(path, root, cancellationToken).ConfigureAwait(false);
         }
 
         if (added > 0)
@@ -147,7 +239,7 @@ public sealed class ClaudeTranscriptStore
         return added;
     }
 
-    private async Task<int> ReadFileAsync(string path, CancellationToken cancellationToken)
+    private async Task<int> ReadFileAsync(string path, string root, CancellationToken cancellationToken)
     {
         var offset = _offsets.GetValueOrDefault(path, 0L);
 
@@ -174,7 +266,7 @@ public sealed class ClaudeTranscriptStore
             return 0;
         }
 
-        var fallbackProject = ProjectFromDirectoryName(Path.GetFileName(Path.GetDirectoryName(path)) ?? "");
+        var (fallbackProject, fallbackSessionId) = ResolveFileFallback(path, root);
         var added = 0;
         var committedOffset = offset;
 
@@ -202,7 +294,8 @@ public sealed class ClaudeTranscriptStore
                     var lengthIncludingNewline = newlineIndex - start + 1;
                     pending.Write(buffer, start, lengthIncludingNewline);
 
-                    if (ProcessLine(pending.GetBuffer().AsSpan(0, (int)pending.Length), fallbackProject))
+                    if (ProcessLine(
+                            pending.GetBuffer().AsSpan(0, (int)pending.Length), fallbackProject, fallbackSessionId))
                     {
                         added++;
                     }
@@ -229,7 +322,7 @@ public sealed class ClaudeTranscriptStore
             // line that was already folded into the counters. committedOffset only advances once a
             // complete line has been handed to ProcessLine in full (see the loop above), so a
             // partial trailing line is never committed early, and de-duplication for an id-less
-            // record (which BoundedSeenIdSet cannot catch) no longer depends on this offset staying
+            // record (which the seen-set cannot catch) no longer depends on this offset staying
             // put after a failed or cancelled read.
             _offsets[path] = committedOffset;
         }
@@ -242,7 +335,7 @@ public sealed class ClaudeTranscriptStore
 
     /// <summary>Processes one complete line (already known to end in the newline that terminated it).
     /// Returns <see langword="true"/> only when it produced a newly-counted record.</summary>
-    private bool ProcessLine(ReadOnlySpan<byte> rawLine, string fallbackProject)
+    private bool ProcessLine(ReadOnlySpan<byte> rawLine, string fallbackProject, string fallbackSessionId)
     {
         var line = TrimAsciiWhitespace(rawLine);
         if (line.IsEmpty || line[0] != (byte)'{')
@@ -280,7 +373,7 @@ public sealed class ClaudeTranscriptStore
 
             try
             {
-                return TryIngest(document.RootElement, fallbackProject);
+                return TryIngest(document.RootElement, fallbackProject, fallbackSessionId);
             }
             catch (Exception)
             {
@@ -296,12 +389,14 @@ public sealed class ClaudeTranscriptStore
     }
 
     /// <summary>
-    /// Folds one already-parsed record into the counters. Returns <see langword="true"/> if it counted.
-    /// Nothing is remembered about a record (its de-duplication id is not claimed) until every field it
-    /// needs has been validated, so a record with one bad field never strands the id a corrected copy
-    /// would need to count later.
+    /// Folds one already-parsed record into the counters, replacing an existing de-duplicated record
+    /// when this one wins the survivor rules. Returns <see langword="true"/> only when a new message
+    /// was counted - a replacement changes the counters but not the message count, so it returns
+    /// <see langword="false"/>. Nothing is remembered about a record (no key is claimed) until every
+    /// field it needs has been validated, so a record with one bad field never strands the id a
+    /// corrected copy would need to count later.
     /// </summary>
-    internal bool TryIngest(JsonElement record, string fallbackProject)
+    internal bool TryIngest(JsonElement record, string fallbackProject, string fallbackSessionId = "")
     {
         if (record.ValueKind != JsonValueKind.Object)
         {
@@ -323,8 +418,12 @@ public sealed class ClaudeTranscriptStore
             return false;
         }
 
-        var key = ResolveDedupKey(record, message);
-        if (key is not null && _seenIds.Contains(key))
+        // P2b.3/B5: filtered before any key is claimed, and deliberately not counted as malformed.
+        if (HasEmptyString(record, "sessionId") ||
+            HasEmptyString(record, "requestId") ||
+            HasEmptyString(message, "id") ||
+            HasEmptyString(message, "model") ||
+            HasUnsupportedVersion(record))
         {
             return false;
         }
@@ -345,6 +444,195 @@ public sealed class ClaudeTranscriptStore
             return false;
         }
 
+        if (!TryReadUsage(usage, out var tokens))
+        {
+            MalformedRecordCount++;
+            return false;
+        }
+
+        var model = TryGetString(message, "model", out var modelValue) ? modelValue : "";
+        var (cost, unpriced, estimated, modelLabel) = Price(model, tokens.Total, tokens.Input, tokens.Output,
+            tokens.Write5m, tokens.Write1h, tokens.Read);
+        modelLabel = InternLabel(_modelLabels, modelLabel);
+
+        var project = ResolveProject(record, fallbackProject);
+        var projectLabel = InternLabel(
+            _projectLabels, string.IsNullOrEmpty(project) ? UnknownProjectLabel : project);
+        var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(whenUtc, _localTimeZone).DateTime);
+
+        // Safe unchecked: a subset sum of the same non-negative fields already proven (above) to fit
+        // in a long cannot itself overflow.
+        var counters = UsageCounters.ForMessage(
+            tokens.Input, tokens.Output, tokens.Write5m + tokens.Write1h, tokens.Read, cost, unpriced, estimated);
+
+        var requestId = TryGetNonEmptyString(record, "requestId", out var requestIdValue) ? requestIdValue : null;
+        var sessionId = TryGetNonEmptyString(record, "sessionId", out var sessionIdValue)
+            ? sessionIdValue
+            : fallbackSessionId;
+        var isSidechain = IsSidechain(record);
+
+        string? messageId = TryGetNonEmptyString(message, "id", out var messageIdValue) ? messageIdValue : null;
+        var counted = false;
+        if (messageId is null)
+        {
+            // No id: nothing can ever de-duplicate this record, so it is always counted. Offsets still
+            // prevent re-reading it.
+            Fold(day, modelLabel, projectLabel, counters);
+            counted = true;
+        }
+        else
+        {
+            counted = CountRecord(
+                day, modelLabel, projectLabel, counters, messageId, requestId, sessionId, isSidechain,
+                timestampText, tokens.Total, cost);
+        }
+
+        // B16: advisor iterations are extra usage entries with their own model and token counts;
+        // each is counted and de-duplicated exactly like a transcript record.
+        counted |= CountAdvisorIterations(
+            usage, messageId, requestId, sessionId, isSidechain, timestampText, day, projectLabel);
+
+        return counted;
+    }
+
+    /// <summary>Counts one record (or advisor iteration) through the de-duplication rules. Returns
+    /// <see langword="true"/> only when it added a new message rather than replacing or losing to an
+    /// existing one.</summary>
+    private bool CountRecord(
+        DateOnly day,
+        string modelLabel,
+        string projectLabel,
+        UsageCounters counters,
+        string messageId,
+        string? requestId,
+        string sessionId,
+        bool isSidechain,
+        string timestampText,
+        long totalTokens,
+        decimal costUsd)
+    {
+        var exactKey = requestId is not null
+            ? messageId + "\n" + requestId
+            : IsAnthropicMessageId(messageId)
+                ? messageId + "\n\n" + sessionId
+                : messageId + "\n\n" + sessionId + "\n" + timestampText;
+        var replayKey = messageId + "\n" + sessionId;
+
+        // B12: only the 64-bit hashes are retained, never the key text.
+        var exactHash = HashKey(exactKey);
+        var replayHash = HashKey(replayKey);
+
+        var existing = _seen.FindExact(exactHash) ?? _seen.FindReplay(replayHash, isSidechain);
+        if (existing is null)
+        {
+            var kept = new SeenRecord(
+                exactHash, replayHash, day, modelLabel, projectLabel, counters, isSidechain, costUsd);
+            _seen.Add(kept);
+            Fold(day, modelLabel, projectLabel, counters);
+            return true;
+        }
+
+        // B1: a match that joins two sessions leaves the survivor reachable from both sessions' replay
+        // keys - whether the incoming record wins or is discarded - so a later replay from either
+        // session still finds it. A same-session match is a no-op here.
+        _seen.AddReplayAlias(existing, replayHash);
+
+        if (!ShouldReplace(existing, isSidechain, totalTokens, costUsd))
+        {
+            return false;
+        }
+
+        // The old record's contribution is withdrawn before the replacement is folded. A pruned day
+        // bucket only makes the per-day subtraction a no-op; lifetime totals are always adjusted (B4).
+        Unfold(existing);
+
+        var replacement = new SeenRecord(
+            exactHash, replayHash, day, modelLabel, projectLabel, counters, isSidechain, costUsd);
+
+        // B1: a match that joins two sessions leaves the survivor reachable from either session's
+        // replay key, so a later replay of the same response from either session still finds it.
+        for (var index = 0; index < existing.ReplayKeyCount; index++)
+        {
+            replacement.AddReplayKey(existing.ReplayKeyAt(index));
+        }
+
+        _seen.Replace(existing, replacement);
+        Fold(day, modelLabel, projectLabel, counters);
+        return false;
+    }
+
+    /// <summary>B16: one extra record per <c>advisor_message</c> iteration with a non-empty model.
+    /// The iteration inherits the parent's timestamp, session, request, sidechain flag, project and
+    /// day; only its model and token counts differ. An iteration that fails validation is skipped
+    /// alone, without invalidating the parent.</summary>
+    private bool CountAdvisorIterations(
+        JsonElement usage,
+        string? parentMessageId,
+        string? requestId,
+        string sessionId,
+        bool isSidechain,
+        string timestampText,
+        DateOnly day,
+        string projectLabel)
+    {
+        if (!usage.TryGetProperty("iterations", out var iterations) || iterations.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var counted = false;
+        var advisorIndex = 0;
+        foreach (var iteration in iterations.EnumerateArray())
+        {
+            if (iteration.ValueKind != JsonValueKind.Object ||
+                !TryGetString(iteration, "type", out var kind) ||
+                kind != "advisor_message" ||
+                !TryGetNonEmptyString(iteration, "model", out var advisorModel))
+            {
+                continue;
+            }
+
+            var index = advisorIndex++;
+            if (!TryReadUsage(iteration, out var advisorTokens))
+            {
+                continue;
+            }
+
+            var (cost, unpriced, estimated, modelLabel) = Price(
+                advisorModel, advisorTokens.Total, advisorTokens.Input, advisorTokens.Output,
+                advisorTokens.Write5m, advisorTokens.Write1h, advisorTokens.Read);
+            modelLabel = InternLabel(_modelLabels, modelLabel);
+
+            var counters = UsageCounters.ForMessage(
+                advisorTokens.Input,
+                advisorTokens.Output,
+                advisorTokens.Write5m + advisorTokens.Write1h,
+                advisorTokens.Read,
+                cost,
+                unpriced,
+                estimated);
+
+            if (parentMessageId is null)
+            {
+                Fold(day, modelLabel, projectLabel, counters);
+                counted = true;
+                continue;
+            }
+
+            var advisorId = parentMessageId + ":advisor:" + index.ToString(CultureInfo.InvariantCulture);
+            counted |= CountRecord(
+                day, modelLabel, projectLabel, counters, advisorId, requestId, sessionId, isSidechain,
+                timestampText, advisorTokens.Total, cost);
+        }
+
+        return counted;
+    }
+
+    /// <summary>Reads and validates the token fields shared by a transcript record's
+    /// <c>usage</c> object and an advisor iteration. A field that is not a non-negative integer
+    /// fails the whole read; a missing field is zero.</summary>
+    private static bool TryReadUsage(JsonElement usage, out TokenUsage tokens)
+    {
         long writeFiveMinute;
         long writeOneHour;
         if (usage.TryGetProperty("cache_creation", out var cacheCreation) && cacheCreation.ValueKind == JsonValueKind.Object)
@@ -353,7 +641,7 @@ public sealed class ClaudeTranscriptStore
             var write1 = ReadTokenCount(cacheCreation, "ephemeral_1h_input_tokens");
             if (write5 is null || write1 is null)
             {
-                MalformedRecordCount++;
+                tokens = default;
                 return false;
             }
 
@@ -366,7 +654,7 @@ public sealed class ClaudeTranscriptStore
             var write5 = ReadTokenCount(usage, "cache_creation_input_tokens");
             if (write5 is null)
             {
-                MalformedRecordCount++;
+                tokens = default;
                 return false;
             }
 
@@ -379,11 +667,11 @@ public sealed class ClaudeTranscriptStore
         var cacheRead = ReadTokenCount(usage, "cache_read_input_tokens");
         if (inputTokens is null || outputTokens is null || cacheRead is null)
         {
-            MalformedRecordCount++;
+            tokens = default;
             return false;
         }
 
-        // Validated - including overflow - before the id is claimed below: every field here is
+        // Validated - including overflow - before any key is claimed: every field here is
         // individually non-negative, but their sum can still exceed long.MaxValue, and an unchecked
         // sum would silently wrap into a bogus (typically negative) total instead of failing loudly.
         long total;
@@ -393,38 +681,104 @@ public sealed class ClaudeTranscriptStore
         }
         catch (OverflowException)
         {
-            MalformedRecordCount++;
+            tokens = default;
             return false;
         }
 
-        // Past this point the record is known good, so claiming its id cannot strand a record that
-        // would otherwise have counted.
-        if (key is not null)
+        tokens = new TokenUsage(
+            inputTokens.Value, outputTokens.Value, writeFiveMinute, writeOneHour, cacheRead.Value, total);
+        return true;
+    }
+
+    private readonly record struct TokenUsage(
+        long Input, long Output, long Write5m, long Write1h, long Read, long Total);
+
+    /// <summary>B12: FNV-1a 64 over the key's UTF-16 code units. Only the hash is retained.</summary>
+    internal static ulong HashKey(string key)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+
+        var hash = offsetBasis;
+        foreach (var character in key)
         {
-            _seenIds.Add(key);
+            hash ^= character;
+            hash *= prime;
         }
 
-        var model = TryGetString(message, "model", out var modelValue) ? modelValue : "";
+        return hash;
+    }
+
+    private static string InternLabel(Dictionary<string, string> pool, string label)
+    {
+        if (pool.TryGetValue(label, out var shared))
+        {
+            return shared;
+        }
+
+        pool[label] = label;
+        return label;
+    }
+
+    private static (decimal Cost, long Unpriced, long Estimated, string ModelLabel) Price(
+        string model,
+        long totalTokens,
+        long inputTokens,
+        long outputTokens,
+        long cacheWrite5mTokens,
+        long cacheWrite1hTokens,
+        long cacheReadTokens)
+    {
+        if (model == SyntheticModelId)
+        {
+            // B3: ccusage counts synthetic usage, but it has no price and is neither "unpriced" nor
+            // "estimated" (there is nothing to disclose as unknown or guessed).
+            return (0m, 0, 0, SyntheticModelLabel);
+        }
+
         var cost = ClaudeModelPricing.Cost(
-            model, inputTokens.Value, outputTokens.Value, writeFiveMinute, writeOneHour, cacheRead.Value);
+            model, inputTokens, outputTokens, cacheWrite5mTokens, cacheWrite1hTokens, cacheReadTokens);
         var kind = ClaudeModelPricing.PriceKind(model);
-        var unpriced = kind == PricingKind.Unknown ? total : 0;
-        var estimated = kind == PricingKind.Estimated ? total : 0;
+        var unpriced = kind == PricingKind.Unknown ? totalTokens : 0;
+        var estimated = kind == PricingKind.Estimated ? totalTokens : 0;
+        return (cost, unpriced, estimated, ClaudeModelPricing.DisplayName(model));
+    }
 
-        var project = ResolveProject(record, fallbackProject);
-        var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(whenUtc, _localTimeZone).DateTime);
-        var modelLabel = ClaudeModelPricing.DisplayName(model);
+    private static bool ShouldReplace(SeenRecord existing, bool candidateIsSidechain, long candidateTotal, decimal candidateCost)
+    {
+        if (existing.IsSidechain != candidateIsSidechain)
+        {
+            return existing.IsSidechain;
+        }
 
-        // Safe unchecked: a subset sum of the same non-negative fields already proven (above) to fit
-        // in a long cannot itself overflow.
-        var counters = UsageCounters.ForMessage(
-            inputTokens.Value, outputTokens.Value, writeFiveMinute + writeOneHour, cacheRead.Value, cost, unpriced, estimated);
+        if (existing.TotalTokens != candidateTotal)
+        {
+            return candidateTotal > existing.TotalTokens;
+        }
 
+        if (existing.CostUsd != candidateCost)
+        {
+            return candidateCost > existing.CostUsd;
+        }
+
+        return false;
+    }
+
+    private void Fold(DateOnly day, string modelLabel, string projectLabel, UsageCounters counters)
+    {
         Fold(_byDayModel, day, modelLabel, counters);
-        Fold(_byDayProject, day, string.IsNullOrEmpty(project) ? UnknownProjectLabel : project, counters);
+        Fold(_byDayProject, day, projectLabel, counters);
         AllTotals = AllTotals.Combine(counters);
+    }
 
-        return true;
+    private void Unfold(SeenRecord record)
+    {
+        // B13: per-day tables are adjusted first, each field floored at zero (a bucket can have
+        // been recreated after pruning with less than this record's contribution), then the exact
+        // lifetime totals are adjusted last.
+        UnfoldLabel(_byDayModel, record.Day, record.ModelLabel, record.Counters);
+        UnfoldLabel(_byDayProject, record.Day, record.ProjectLabel, record.Counters);
+        AllTotals = AllTotals.Subtract(record.Counters);
     }
 
     private static void Fold(
@@ -438,6 +792,54 @@ public sealed class ClaudeTranscriptStore
 
         perLabel[label] = perLabel.TryGetValue(label, out var existing) ? existing.Combine(counters) : counters;
     }
+
+    private static void UnfoldLabel(
+        Dictionary<DateOnly, Dictionary<string, UsageCounters>> table,
+        DateOnly day,
+        string label,
+        UsageCounters counters)
+    {
+        if (!table.TryGetValue(day, out var perLabel) || !perLabel.TryGetValue(label, out var existing))
+        {
+            return; // a pruned day bucket is not an error (B4)
+        }
+
+        var updated = SubtractFloored(existing, counters);
+        if (updated.Messages == 0 && IsAllZero(updated))
+        {
+            perLabel.Remove(label);
+            if (perLabel.Count == 0)
+            {
+                table.Remove(day);
+            }
+
+            return;
+        }
+
+        perLabel[label] = updated;
+    }
+
+    /// <summary>B13: per-field subtraction that floors at zero instead of throwing. Only the
+    /// per-day tables use this; <see cref="AllTotals"/> is always subtracted exactly.</summary>
+    private static UsageCounters SubtractFloored(UsageCounters current, UsageCounters other) =>
+        new(
+            Math.Max(0, current.Messages - other.Messages),
+            Math.Max(0L, current.InputTokens - other.InputTokens),
+            Math.Max(0L, current.OutputTokens - other.OutputTokens),
+            Math.Max(0L, current.CacheWriteTokens - other.CacheWriteTokens),
+            Math.Max(0L, current.CacheReadTokens - other.CacheReadTokens),
+            current.CostUsd < other.CostUsd ? 0m : current.CostUsd - other.CostUsd,
+            Math.Max(0L, current.UnpricedTokens - other.UnpricedTokens),
+            Math.Max(0L, current.EstimatedTokens - other.EstimatedTokens));
+
+    private static bool IsAllZero(UsageCounters counters) =>
+        counters.InputTokens == 0 &&
+        counters.OutputTokens == 0 &&
+        counters.CacheWriteTokens == 0 &&
+        counters.CacheReadTokens == 0 &&
+        counters.CostUsd == 0m &&
+        counters.UnpricedTokens == 0 &&
+        counters.EstimatedTokens == 0;
 
     private void Prune()
     {
@@ -634,14 +1036,75 @@ public sealed class ClaudeTranscriptStore
 
     // -- record-shape helpers ---------------------------------------------------------------------
 
-    private static string? ResolveDedupKey(JsonElement record, JsonElement message)
+    private static (string Project, string SessionId) ResolveFileFallback(string path, string root)
     {
-        if (TryGetNonEmptyString(message, "id", out var messageId))
+        var relative = Path.GetRelativePath(root, path);
+        var segments = relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+
+        var project = segments.Length > 1 ? ProjectFromDirectoryName(segments[0]) : "";
+        var sessionId = segments.Length switch
         {
-            return messageId;
+            0 => "",
+            1 => Path.GetFileNameWithoutExtension(segments[0]),
+            2 => Path.GetFileNameWithoutExtension(segments[1]),
+            _ => segments[1], // the directory segment directly below the encoded project folder (B2)
+        };
+
+        return (project, sessionId);
+    }
+
+    private static bool IsAnthropicMessageId(string messageId) =>
+        messageId.StartsWith("msg_", StringComparison.Ordinal) ||
+        messageId.StartsWith("resp_", StringComparison.Ordinal);
+
+    private static bool IsSidechain(JsonElement record) =>
+        record.TryGetProperty("isSidechain", out var element) && element.ValueKind == JsonValueKind.True;
+
+    private static bool HasEmptyString(JsonElement obj, string propertyName) =>
+        obj.TryGetProperty(propertyName, out var element) &&
+        element.ValueKind == JsonValueKind.String &&
+        element.GetString() is { Length: 0 };
+
+    /// <summary>B5: ccusage refuses a record whose <c>version</c> is present but is not a semver
+    /// prefix (<c>digits.digits.digit…</c>). A null/absent version is accepted.</summary>
+    private static bool HasUnsupportedVersion(JsonElement record)
+    {
+        if (!record.TryGetProperty("version", out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return false;
         }
 
-        return TryGetNonEmptyString(record, "requestId", out var requestId) ? requestId : null;
+        return element.ValueKind != JsonValueKind.String || !IsSemverPrefix(element.GetString() ?? "");
+    }
+
+    private static bool IsSemverPrefix(string value)
+    {
+        var index = 0;
+        if (!ConsumeAsciiDigits(value, ref index) || index >= value.Length || value[index] != '.')
+        {
+            return false;
+        }
+
+        index++;
+        if (!ConsumeAsciiDigits(value, ref index) || index >= value.Length || value[index] != '.')
+        {
+            return false;
+        }
+
+        index++;
+        return index < value.Length && char.IsAsciiDigit(value[index]);
+    }
+
+    private static bool ConsumeAsciiDigits(string value, ref int index)
+    {
+        var start = index;
+        while (index < value.Length && char.IsAsciiDigit(value[index]))
+        {
+            index++;
+        }
+
+        return index > start;
     }
 
     private static string ResolveProject(JsonElement record, string fallbackProject)
@@ -766,28 +1229,271 @@ public sealed class ClaudeTranscriptStore
 
     private static bool IsAsciiWhitespace(byte b) => b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n';
 
-    /// <summary>Insertion-ordered id set bounded to <see cref="MaxSeenIds"/>, evicting the oldest id
-    /// first once full - mirrors an LRU-by-insertion policy without needing full LRU-by-access
-    /// machinery, since a de-duplication set only ever needs "was this seen before", never "was this
-    /// seen recently".</summary>
-    private sealed class BoundedSeenIdSet(int capacity)
+    /// <summary>One kept transcript record: its indexing hashes and exactly the contribution that
+    /// was folded into the counters, so a replacement can withdraw it again. B12 keeps the keys as
+    /// 64-bit hashes and the aliases in a small array (never a per-record set); the counters are
+    /// stored as fields so one record does not also allocate a <see cref="UsageCounters"/>.</summary>
+    private sealed class SeenRecord(
+        ulong exactKeyHash,
+        ulong replayKeyHash,
+        DateOnly day,
+        string modelLabel,
+        string projectLabel,
+        UsageCounters counters,
+        bool isSidechain,
+        decimal costUsd)
     {
-        private readonly HashSet<string> _members = new(StringComparer.Ordinal);
-        private readonly Queue<string> _insertionOrder = new();
+        private ulong[] _aliases = [];
+        private int _aliasCount;
 
-        public bool Contains(string id) => _members.Contains(id);
+        public ulong ExactKeyHash { get; } = exactKeyHash;
 
-        public void Add(string id)
+        public ulong ReplayKeyHash { get; } = replayKeyHash;
+
+        public DateOnly Day { get; } = day;
+
+        public string ModelLabel { get; } = modelLabel;
+
+        public string ProjectLabel { get; } = projectLabel;
+
+        public bool IsSidechain { get; } = isSidechain;
+
+        /// <summary>Derived, not stored: every component was validated non-negative and their sum
+        /// was already proven to fit in a <see cref="long"/> before the record existed.</summary>
+        public long TotalTokens => InputTokens + OutputTokens + CacheWriteTokens + CacheReadTokens;
+
+        public decimal CostUsd { get; } = costUsd;
+
+        public long InputTokens { get; } = counters.InputTokens;
+
+        public long OutputTokens { get; } = counters.OutputTokens;
+
+        public long CacheWriteTokens { get; } = counters.CacheWriteTokens;
+
+        public long CacheReadTokens { get; } = counters.CacheReadTokens;
+
+        public long UnpricedTokens { get; } = counters.UnpricedTokens;
+
+        public long EstimatedTokens { get; } = counters.EstimatedTokens;
+
+        public SeenRecord? Previous { get; set; }
+
+        public SeenRecord? Next { get; set; }
+
+        /// <summary>The primary replay hash plus every cross-session alias (B1).</summary>
+        public int ReplayKeyCount => 1 + _aliasCount;
+
+        public UsageCounters Counters => new(
+            messages: 1,
+            inputTokens: InputTokens,
+            outputTokens: OutputTokens,
+            cacheWriteTokens: CacheWriteTokens,
+            cacheReadTokens: CacheReadTokens,
+            costUsd: CostUsd,
+            unpricedTokens: UnpricedTokens,
+            estimatedTokens: EstimatedTokens);
+
+        public ulong ReplayKeyAt(int index) => index == 0 ? ReplayKeyHash : _aliases[index - 1];
+
+        /// <summary>Adds a replay route, returning false when it is already primary or an alias.</summary>
+        public bool AddReplayKey(ulong key)
         {
-            if (!_members.Add(id))
+            if (key == ReplayKeyHash)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < _aliasCount; index++)
+            {
+                if (_aliases[index] == key)
+                {
+                    return false;
+                }
+            }
+
+            if (_aliasCount == _aliases.Length)
+            {
+                Array.Resize(ref _aliases, _aliases.Length == 0 ? 2 : _aliases.Length * 2);
+            }
+
+            _aliases[_aliasCount++] = key;
+            return true;
+        }
+    }
+
+    /// <summary>Insertion-ordered record set bounded to a fixed number of kept records. Evicting the
+    /// oldest record removes its exact/replay hashes with it, so a later duplicate of an evicted
+    /// record simply counts again - an accepted memory bound, not a correctness claim (B7). A record
+    /// can be reachable from several replay hashes after a cross-session match (B1). B12: keys are
+    /// 64-bit hashes (a hash hit is a match), insertion order is a pair of fields on the record
+    /// instead of a linked-list node, and replay routes normally hold one record without a list.</summary>
+    private sealed class SeenRecordSet(int capacity)
+    {
+        private readonly Dictionary<ulong, SeenRecord> _byExactKey = [];
+        private readonly Dictionary<ulong, object> _byReplayKey = [];
+        private SeenRecord? _head;
+        private SeenRecord? _tail;
+        private int _count;
+
+        public SeenRecord? FindExact(ulong exactKeyHash) => _byExactKey.GetValueOrDefault(exactKeyHash);
+
+        /// <summary>A replay match only joins two records when at least one of them is a sidechain
+        /// record (the ccusage <c>/btw</c> replay rule).</summary>
+        public SeenRecord? FindReplay(ulong replayKeyHash, bool candidateIsSidechain)
+        {
+            if (!_byReplayKey.TryGetValue(replayKeyHash, out var entry))
+            {
+                return null;
+            }
+
+            if (entry is SeenRecord single)
+            {
+                return candidateIsSidechain || single.IsSidechain ? single : null;
+            }
+
+            foreach (var record in (List<SeenRecord>)entry)
+            {
+                if (candidateIsSidechain || record.IsSidechain)
+                {
+                    return record;
+                }
+            }
+
+            return null;
+        }
+
+        public void Add(SeenRecord record) => Register(record);
+
+        /// <summary>Registers an additional replay route on an already-kept record (B1). Re-registering
+        /// the same route is a no-op, so a same-session match changes nothing.</summary>
+        public void AddReplayAlias(SeenRecord record, ulong replayKeyHash)
+        {
+            if (record.AddReplayKey(replayKeyHash))
+            {
+                RegisterReplayKey(record, replayKeyHash);
+            }
+        }
+
+        public void Replace(SeenRecord existing, SeenRecord replacement)
+        {
+            Remove(existing);
+            Register(replacement);
+        }
+
+        private void Register(SeenRecord record)
+        {
+            record.Previous = _tail;
+            if (_tail is null)
+            {
+                _head = record;
+            }
+            else
+            {
+                _tail.Next = record;
+            }
+
+            _tail = record;
+            _count++;
+
+            _byExactKey[record.ExactKeyHash] = record;
+            for (var index = 0; index < record.ReplayKeyCount; index++)
+            {
+                RegisterReplayKey(record, record.ReplayKeyAt(index));
+            }
+
+            while (_count > capacity)
+            {
+                Remove(_head!);
+            }
+        }
+
+        private void RegisterReplayKey(SeenRecord record, ulong replayKeyHash)
+        {
+            if (!_byReplayKey.TryGetValue(replayKeyHash, out var entry))
+            {
+                _byReplayKey[replayKeyHash] = record;
+                return;
+            }
+
+            if (entry is SeenRecord single)
+            {
+                if (ReferenceEquals(single, record))
+                {
+                    return;
+                }
+
+                _byReplayKey[replayKeyHash] = new List<SeenRecord>(2) { single, record };
+                return;
+            }
+
+            var records = (List<SeenRecord>)entry;
+            if (!records.Contains(record))
+            {
+                records.Add(record);
+            }
+        }
+
+        private void Remove(SeenRecord record)
+        {
+            if (record.Previous is not null)
+            {
+                record.Previous.Next = record.Next;
+            }
+            else if (ReferenceEquals(_head, record))
+            {
+                _head = record.Next;
+            }
+
+            if (record.Next is not null)
+            {
+                record.Next.Previous = record.Previous;
+            }
+            else if (ReferenceEquals(_tail, record))
+            {
+                _tail = record.Previous;
+            }
+
+            record.Previous = null;
+            record.Next = null;
+            _count--;
+
+            if (_byExactKey.TryGetValue(record.ExactKeyHash, out var exact) && ReferenceEquals(exact, record))
+            {
+                _byExactKey.Remove(record.ExactKeyHash);
+            }
+
+            for (var index = 0; index < record.ReplayKeyCount; index++)
+            {
+                RemoveReplayKey(record, record.ReplayKeyAt(index));
+            }
+        }
+
+        private void RemoveReplayKey(SeenRecord record, ulong replayKeyHash)
+        {
+            if (!_byReplayKey.TryGetValue(replayKeyHash, out var entry))
             {
                 return;
             }
 
-            _insertionOrder.Enqueue(id);
-            while (_members.Count > capacity)
+            if (ReferenceEquals(entry, record))
             {
-                _members.Remove(_insertionOrder.Dequeue());
+                _byReplayKey.Remove(replayKeyHash);
+                return;
+            }
+
+            if (entry is not List<SeenRecord> records)
+            {
+                return;
+            }
+
+            records.Remove(record);
+            if (records.Count == 0)
+            {
+                _byReplayKey.Remove(replayKeyHash);
+            }
+            else if (records.Count == 1)
+            {
+                _byReplayKey[replayKeyHash] = records[0];
             }
         }
     }

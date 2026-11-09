@@ -128,7 +128,12 @@ public partial class App : System.Windows.Application
 
         _connectionStore = new ProviderConnectionStore(_secretStore!, _settingsSession);
 
-        var claudeClient = new ClaudeLiveQuotaClient(_httpClient, Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"), userProfile, clock);
+        var claudeClient = new ClaudeLiveQuotaClient(
+            _httpClient,
+            Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"),
+            userProfile,
+            clock,
+            xdgConfigHome: Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
 
         _openAiClient = new ReconfigurableQuotaClient(
             _connectionStore,

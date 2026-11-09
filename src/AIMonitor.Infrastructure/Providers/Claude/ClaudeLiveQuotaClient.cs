@@ -100,6 +100,9 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
     /// <param name="transcriptTimeZone">The zone used to compute each transcript record's local
     /// calendar day (PAR-006). Defaults to <see cref="TimeZoneInfo.Local"/>; tests inject a fixed zone
     /// so day-boundary behavior does not depend on the machine running the test.</param>
+    /// <param name="xdgConfigHome">The value of <c>XDG_CONFIG_HOME</c>, if any - passed in explicitly
+    /// rather than read from the environment here. Used only to locate the default transcript roots
+    /// when <paramref name="claudeConfigDirOverride"/> is unset.</param>
     public ClaudeLiveQuotaClient(
         HttpClient httpClient,
         string? claudeConfigDirOverride,
@@ -108,7 +111,8 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         IClaudeCredentialReader? credentialReader = null,
         TimeSpan? timeout = null,
         int? maxResponseBodyBytes = null,
-        TimeZoneInfo? transcriptTimeZone = null)
+        TimeZoneInfo? transcriptTimeZone = null,
+        string? xdgConfigHome = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(userProfileDirectory);
@@ -128,8 +132,9 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         _timeout = ValidateTimeout(timeout ?? DefaultTimeout);
         _maxResponseBodyBytes = maxResponseBodyBytes ?? DefaultMaxResponseBodyBytes;
 
-        var transcriptsRoot = ClaudeTranscriptPathResolver.Resolve(claudeConfigDirOverride, userProfileDirectory);
-        _transcriptStore = new ClaudeTranscriptStore(transcriptsRoot, clock, transcriptTimeZone);
+        var transcriptsRoots =
+            ClaudeTranscriptPathResolver.ResolveAll(claudeConfigDirOverride, xdgConfigHome, userProfileDirectory);
+        _transcriptStore = new ClaudeTranscriptStore(transcriptsRoots, clock, transcriptTimeZone);
     }
 
     /// <summary>Test-only seam: lets a test substitute a controlled stream in place of the real file
@@ -145,15 +150,17 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         IClaudeCredentialReader? credentialReader = null,
         TimeSpan? timeout = null,
         int? maxResponseBodyBytes = null,
-        TimeZoneInfo? transcriptTimeZone = null)
+        TimeZoneInfo? transcriptTimeZone = null,
+        string? xdgConfigHome = null)
         : this(
             httpClient, claudeConfigDirOverride, userProfileDirectory, clock,
-            credentialReader, timeout, maxResponseBodyBytes, transcriptTimeZone)
+            credentialReader, timeout, maxResponseBodyBytes, transcriptTimeZone, xdgConfigHome)
     {
         ArgumentNullException.ThrowIfNull(transcriptOpenFile);
 
-        var transcriptsRoot = ClaudeTranscriptPathResolver.Resolve(claudeConfigDirOverride, userProfileDirectory);
-        _transcriptStore = new ClaudeTranscriptStore(transcriptsRoot, clock, transcriptTimeZone, transcriptOpenFile);
+        var transcriptsRoots =
+            ClaudeTranscriptPathResolver.ResolveAll(claudeConfigDirOverride, xdgConfigHome, userProfileDirectory);
+        _transcriptStore = new ClaudeTranscriptStore(transcriptsRoots, clock, transcriptTimeZone, transcriptOpenFile);
     }
 
     /// <summary>Rejects zero, <see cref="Timeout.InfiniteTimeSpan"/>, any other negative value, and

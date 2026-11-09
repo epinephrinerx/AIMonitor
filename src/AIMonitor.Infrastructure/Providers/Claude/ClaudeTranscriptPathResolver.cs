@@ -11,6 +11,7 @@ public static class ClaudeTranscriptPathResolver
 {
     private const string ProjectsFolderName = "projects";
     private const string DefaultConfigFolderName = ".claude";
+    private const string DefaultXdgFolderName = ".config";
 
     /// <summary>
     /// Returns <c>&lt;claudeConfigDirOverride&gt;/projects</c> when
@@ -26,5 +27,77 @@ public static class ClaudeTranscriptPathResolver
             : claudeConfigDirOverride;
 
         return Path.Combine(configDirectory, ProjectsFolderName);
+    }
+
+    /// <summary>
+    /// Returns every <c>projects</c> directory to scan, in priority order and without duplicates.
+    /// A non-blank <paramref name="claudeConfigDir"/> is a comma-separated list of Claude config
+    /// directories; each entry becomes its <c>projects</c> directory, or is used as-is when its last
+    /// segment already is <c>projects</c>. Blank entries, and entries that are not fully qualified
+    /// (including drive-relative paths such as <c>C:x</c>), are skipped; a list that yields no entries
+    /// is treated as unset. When that list is absent (or yields no entries), the
+    /// defaults are <c>&lt;xdg&gt;/claude/projects</c> - where <c>&lt;xdg&gt;</c> is
+    /// <paramref name="xdgConfigHome"/> when non-blank, else
+    /// <c>&lt;userProfileDirectory&gt;/.config</c> - followed by
+    /// <c>&lt;userProfileDirectory&gt;/.claude/projects</c>. Pure: no environment or disk access.
+    /// </summary>
+    public static IReadOnlyList<string> ResolveAll(
+        string? claudeConfigDir, string? xdgConfigHome, string userProfileDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userProfileDirectory);
+
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(claudeConfigDir))
+        {
+            foreach (var rawEntry in claudeConfigDir.Split(','))
+            {
+                var entry = rawEntry.Trim();
+
+                // B15: a relative or drive-relative entry is not a location this pure resolver can
+                // turn into an absolute path without the current working directory, so it is dropped.
+                // B14: a list that yields no usable entry falls through to the defaults below.
+                if (entry.Length == 0 || !Path.IsPathFullyQualified(entry))
+                {
+                    continue;
+                }
+
+                candidates.Add(IsProjectsDirectory(entry) ? entry : Path.Combine(entry, ProjectsFolderName));
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            var xdgDirectory = string.IsNullOrWhiteSpace(xdgConfigHome)
+                ? Path.Combine(userProfileDirectory, DefaultXdgFolderName)
+                : xdgConfigHome;
+
+            candidates.Add(Path.Combine(xdgDirectory, "claude", ProjectsFolderName));
+            candidates.Add(Path.Combine(userProfileDirectory, DefaultConfigFolderName, ProjectsFolderName));
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new List<string>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            var fullPath = TrimTrailingSeparators(Path.GetFullPath(candidate));
+            if (seen.Add(fullPath))
+            {
+                roots.Add(fullPath);
+            }
+        }
+
+        return roots;
+    }
+
+    private static string TrimTrailingSeparators(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return trimmed.Length == 0 || trimmed.EndsWith(':') ? path : trimmed;
+    }
+
+    private static bool IsProjectsDirectory(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(Path.GetFileName(trimmed), ProjectsFolderName, StringComparison.OrdinalIgnoreCase);
     }
 }
