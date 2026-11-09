@@ -123,14 +123,7 @@ public sealed class AgentUsageRefresher
 
         report ??= _source.LastGood;
 
-        try
-        {
-            RaiseUpdated(report, error, context);
-        }
-        catch
-        {
-            // Handler exceptions must not prevent the refresher from recovering.
-        }
+        await RaiseUpdatedAsync(report, error, context).ConfigureAwait(false);
     }
 
     private DateOnly ComputeSince()
@@ -140,7 +133,7 @@ public sealed class AgentUsageRefresher
         return new DateOnly(today.Year, today.Month, 1).AddMonths(-2);
     }
 
-    private void RaiseUpdated(
+    private Task RaiseUpdatedAsync(
         AgentUsageReport? report,
         AgentUsageUnavailableException? error,
         SynchronizationContext? context)
@@ -148,11 +141,12 @@ public sealed class AgentUsageRefresher
         var handlers = Updated;
         if (handlers is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (context is not null)
         {
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             context.Post(
                 _ =>
                 {
@@ -164,19 +158,24 @@ public sealed class AgentUsageRefresher
                     {
                         // Handlers are independent; one throwing must not break the refresher.
                     }
+                    finally
+                    {
+                        tcs.SetResult();
+                    }
                 },
                 null);
+            return tcs.Task;
         }
-        else
+
+        try
         {
-            try
-            {
-                handlers(report, error);
-            }
-            catch
-            {
-                // Handlers are independent; one throwing must not break the refresher.
-            }
+            handlers(report, error);
         }
+        catch
+        {
+            // Handlers are independent; one throwing must not break the refresher.
+        }
+
+        return Task.CompletedTask;
     }
 }
