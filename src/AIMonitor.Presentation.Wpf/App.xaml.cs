@@ -4,10 +4,12 @@ using System.Net.Http;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
+using AIMonitor.Application.AgentUsage;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Version;
+using AIMonitor.Infrastructure.AgentUsage;
 using AIMonitor.Infrastructure.Providers.Claude;
 using AIMonitor.Infrastructure.Providers.Agy;
 using AIMonitor.Infrastructure.Providers.OpenAi;
@@ -42,6 +44,7 @@ public partial class App : System.Windows.Application
     private LiveSettingsApplier? _liveSettingsApplier;
     private DispatcherTimer? _refreshTimer;
     private UpdateCoordinator? _updateCoordinator;
+    private CachedAgentUsageSource? _agentUsageSource;
 
     public ProviderConnectionStore? ConnectionStore => _connectionStore;
 
@@ -139,6 +142,11 @@ public partial class App : System.Windows.Application
             });
 
         var agyClient = new AgyQuotaClient(new AgyUsageRunner(), clock);
+
+        _agentUsageSource = new CachedAgentUsageSource(
+            new CcUsageAgentUsageSource(clock),
+            clock,
+            TimeSpan.FromMinutes(15));
 
         var registrations = new[]
         {
