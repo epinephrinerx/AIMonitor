@@ -27,6 +27,7 @@
     <None Include="..\Fixtures\Claude\**\*.*" Link="Fixtures\Claude\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Fixtures\OpenAi\**\*.*" Link="Fixtures\OpenAi\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Fixtures\Gemini\**\*.*" Link="Fixtures\Gemini\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Fixtures\CcUsage\**\*.*" Link="Fixtures\CcUsage\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
