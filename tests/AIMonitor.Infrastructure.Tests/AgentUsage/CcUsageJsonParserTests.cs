@@ -5,9 +5,10 @@ using AIMonitor.Infrastructure.AgentUsage;
 namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 
 /// <summary>
-/// Tests for <see cref="CcUsageJsonParser"/> per SPEC R-014 §P1.3 "Parser", decisions A3–A6 and the
-/// P1.4 must-cover list. Every numeric expectation cites the spec line or shows the hand calculation
-/// (§5.6 item 2). All JSON is synthetic; nothing here runs the real ccusage.
+/// Tests for <see cref="CcUsageJsonParser"/> per SPEC R-014 §P1.3 "Parser", decisions A3–A6, the
+/// post-trial-merge decisions E1, E2, E3 and E5, and the P1.4 must-cover list. Every numeric
+/// expectation cites the spec line, a decision id, or shows the hand calculation (§5.6 item 2). All
+/// JSON is synthetic; nothing here runs the real ccusage.
 /// </summary>
 public sealed class CcUsageJsonParserTests
 {
@@ -37,7 +38,10 @@ public sealed class CcUsageJsonParserTests
         Assert.Equal(AgentUsageErrorKind.InvalidResponse, error.Kind);
     }
 
-    private static string Root(string daily = "[]", string monthly = "[]", string session = "[]", string? totals = null)
+    // Section defaults are "" (nothing inside the brackets), producing truly empty arrays:
+    // {"daily":[],"monthly":[],"session":[]}. A default of "[]" here would instead create
+    // "[[]]" — one phantom array-row per omitted section, which the parser skips as a non-object row.
+    private static string Root(string daily = "", string monthly = "", string session = "", string? totals = null)
         => totals is null
             ? $"{{\"daily\":[{daily}],\"monthly\":[{monthly}],\"session\":[{session}]}}"
             : $"{{\"daily\":[{daily}],\"monthly\":[{monthly}],\"session\":[{session}],\"totals\":{totals}}}";
@@ -54,6 +58,14 @@ public sealed class CcUsageJsonParserTests
         $"{{\"agent\":\"codex\",{tokensJson},\"modelBreakdowns\":[{ValidModel}]}}";
 
     private static string ModelWith(string modelInner) => "{" + modelInner + "}";
+
+    /// E5: a daily/monthly row built from verbatim fields, so <c>period</c> can be a non-string value
+    /// or left out entirely.
+    private static string AgentRowWith(params string[] fields) => "{" + string.Join(",", fields) + "}";
+
+    /// An <c>agents[]</c> entry built from verbatim fields (E3: the id or the modelBreakdowns array
+    /// can be missing, blank or the wrong JSON type). The token fields are the valid shared set.
+    private static string AgentWith(params string[] fields) => "{" + string.Join(",", fields) + "}";
 
     private static string SessionRow(
         string id = "\"period\":\"s-1\"",
@@ -76,8 +88,13 @@ public sealed class CcUsageJsonParserTests
 
     private static string Many(string row, int count) => string.Join(",", Enumerable.Repeat(row, count));
 
+    /// Builds <c>count</c> genuinely nested JSON objects as one value: count-1 wrapper objects each
+    /// with a single property "n", plus the innermost empty object. (The earlier "{{{{...}}}}" shape
+    /// was not valid JSON at all — it failed the parser for a syntax error, not for depth.)
+    /// As the "x" value of the root object: the first object sits at depth 2, the k-th at depth k+1
+    /// (root = level 1), so 63 nested objects reach exactly depth 64 and 64 reach depth 65.
     private static string NestedEmptyObjects(int count) =>
-        string.Concat(Enumerable.Repeat("{", count)) + string.Concat(Enumerable.Repeat("}", count));
+        string.Concat(Enumerable.Repeat("{\"n\":", count - 1)) + "{}" + string.Concat(Enumerable.Repeat("}", count - 1));
 
     // ---------------------------------------------------------------- structural rules (P1.3)
 
@@ -253,6 +270,34 @@ public sealed class CcUsageJsonParserTests
         Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
     }
 
+    [Theory]
+    [InlineData("\"period\":20261105")]                    // E5: a number, not a string
+    [InlineData("\"period\":null")]                        // E5: JSON null is not a string
+    [InlineData("\"period\":true")]                        // E5: a boolean
+    [InlineData("\"period\":[\"2026-11-05\"]")]            // E5: an array
+    [InlineData("\"period\":{\"value\":\"2026-11-05\"}")]  // E5: an object
+    [InlineData("")]                                       // E5: period absent (also the daily case above)
+    public void Parse_DailyOrMonthlyPeriodNotAString_SkipsRow(string periodField)
+    {
+        // Decision E5: "Non-string or missing period on daily/monthly rows → row skipped." The same
+        // malformed field is put in a daily and in a monthly row; each section keeps a valid sibling so
+        // only the skip is under test, not the all-rows-skipped rejection.
+        var fields = new List<string>();
+        if (periodField.Length > 0)
+            fields.Add(periodField);
+        fields.Add($"\"agents\":[{ClaudeAgent}]");
+        var badRow = AgentRowWith(fields.ToArray());
+
+        var dailyReport = Parse(Root(daily: string.Join(",", badRow, GoodDailyRow())));
+        Assert.Equal(1, dailyReport.SkippedRows);
+        Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(dailyReport.Daily).Date);
+
+        var monthlyReport = Parse(Root(monthly: string.Join(",", badRow, MonthlyRow("2026-10", ClaudeAgent))));
+        Assert.Equal(1, monthlyReport.SkippedRows);
+        var month = Assert.Single(monthlyReport.Monthly);
+        Assert.Equal((2026, 10), (month.Year, month.Month));
+    }
+
     [Fact]
     public void Parse_DailyRowWithoutAgentsArray_SkipsRow()
     {
@@ -280,6 +325,105 @@ public sealed class CcUsageJsonParserTests
 
         Assert.Equal(1, report.SkippedRows);
         Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
+    }
+
+    [Theory]
+    [InlineData("")]                     // E3: agent id missing
+    [InlineData("\"agent\":\"\"")]       // E3: blank
+    [InlineData("\"agent\":\"   \"")]    // E3: whitespace only → trims to blank
+    [InlineData("\"agent\":42")]         // E3: a number, not a string
+    [InlineData("\"agent\":null")]       // E3: JSON null is not a string
+    public void Parse_AgentsEntryWithBadAgentId_SkipsRow(string agentField)
+    {
+        // Decision E3: "agents[] entry with missing/blank/non-string agent → row skipped."
+        // SPEC P1.1 has no blank-id case to normalise, so the entry cannot become an AgentUsage.
+        var fields = new List<string>();
+        if (agentField.Length > 0)
+            fields.Add(agentField);
+        fields.Add(AgentTokens);
+        fields.Add($"\"modelBreakdowns\":[{ValidModel}]");
+        var badAgent = AgentWith(fields.ToArray());
+
+        var report = Parse(Root(daily: string.Join(",", DailyRow("2026-11-05", badAgent), GoodDailyRow())));
+
+        Assert.Equal(1, report.SkippedRows);
+        Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
+    }
+
+    [Fact]
+    public void Parse_AgentsEntryEmptyArray_IsAValidRowWithZeroAgents()
+    {
+        // Decision E3: "agents: [] → valid row with zero agents." Valid means no SkippedRows += 1, and
+        // the row counts as a kept row, so the monthly section is checked the same way through SPEC
+        // P1.3's "same agents[] rule".
+        var dailyReport = Parse(Root(daily: AgentRowWith("\"period\":\"2026-11-05\"", "\"agents\":[]")));
+
+        Assert.Equal(0, dailyReport.SkippedRows);
+        var day = Assert.Single(dailyReport.Daily);
+        Assert.Equal(new DateOnly(2026, 11, 5), day.Date);
+        Assert.Empty(day.Agents);
+
+        var monthlyReport = Parse(Root(monthly: AgentRowWith("\"period\":\"2026-11\"", "\"agents\":[]")));
+
+        Assert.Equal(0, monthlyReport.SkippedRows);
+        var month = Assert.Single(monthlyReport.Monthly);
+        Assert.Equal((2026, 11), (month.Year, month.Month));
+        Assert.Empty(month.Agents);
+    }
+
+    [Theory]
+    [InlineData("")]                              // E3: modelBreakdowns missing
+    [InlineData("\"modelBreakdowns\":{}")]        // E3: present but not an array
+    [InlineData("\"modelBreakdowns\":null")]      // E3: null is not an array
+    [InlineData("\"modelBreakdowns\":\"[]\"")]    // E3: a string is not an array
+    public void Parse_AgentObjectWithoutModelBreakdownsArray_SkipsRow(string modelsField)
+    {
+        // Decision E3: "Agent object without a modelBreakdowns array → row skipped." SPEC P1.3 parses
+        // a row from its modelBreakdowns, so an agent that carries no array cannot be built.
+        var fields = new List<string> { "\"agent\":\"claude\"", AgentTokens };
+        if (modelsField.Length > 0)
+            fields.Add(modelsField);
+        var agent = AgentWith(fields.ToArray());
+
+        var report = Parse(Root(daily: string.Join(",", DailyRow("2026-11-05", agent), GoodDailyRow())));
+
+        Assert.Equal(1, report.SkippedRows);
+        Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
+    }
+
+    [Fact]
+    public void Parse_AgentObjectWithEmptyModelBreakdownsArray_IsValidWithZeroModels()
+    {
+        // Contrast with E3: an *empty* array is an array, so the agent is kept. SPEC P1.1 then gives
+        // PricedCostUsd = 0 over no models and HasUnpricedModels = false (the same oracle as the domain
+        // test "AgentUsage_PricedCostUsd_NoModels_IsZero"). Hand calc: buckets 1+2+3+4 = 10 = total →
+        // Other = 0.
+        var agent = AgentWith("\"agent\":\"claude\"", AgentTokens, "\"modelBreakdowns\":[]");
+
+        var report = Parse(Root(daily: DailyRow("2026-11-05", agent)));
+
+        Assert.Equal(0, report.SkippedRows);
+        var claude = Assert.Single(Assert.Single(report.Daily).Agents);
+        Assert.Empty(claude.Models);
+        Assert.Equal(0.0m, claude.PricedCostUsd);
+        Assert.False(claude.HasUnpricedModels);
+        Assert.Equal(0, claude.Tokens.Other);
+    }
+
+    [Fact]
+    public void Parse_MonthlyAgentsEntryWithBadAgentId_SkipsRow()
+    {
+        // Decision E3 reaches monthly rows through SPEC P1.3's "same agents[] rule": a non-string
+        // agent id skips the whole monthly row.
+        var badAgent = AgentWith("\"agent\":42", AgentTokens, $"\"modelBreakdowns\":[{ValidModel}]");
+
+        var report = Parse(Root(monthly: string.Join(",",
+            MonthlyRow("2026-11", badAgent),
+            MonthlyRow("2026-10", ClaudeAgent))));
+
+        Assert.Equal(1, report.SkippedRows);
+        var month = Assert.Single(report.Monthly);
+        Assert.Equal((2026, 10), (month.Year, month.Month));
     }
 
     [Fact]
@@ -432,13 +576,19 @@ public sealed class CcUsageJsonParserTests
         Assert.Equal("s-good", Assert.Single(report.Sessions).SessionId);
     }
 
-    [Fact]
-    public void Parse_SessionRowWithoutAgent_SkipsRow()
+    [Theory]
+    [InlineData("")]                     // SPEC P1.3: the row must carry an "agent string"
+    [InlineData("\"agent\":\"\"")]       // blank id: E3's reading for agents[] entries applied here
+    [InlineData("\"agent\":\"   \"")]    // whitespace-only id
+    [InlineData("\"agent\":42")]         // non-string
+    [InlineData("\"agent\":null")]       // JSON null is not a string
+    public void Parse_SessionRowWithoutUsableAgent_SkipsRow(string agentField)
     {
         // SPEC P1.3: session row fields include "agent string"; a row with no agent string cannot
         // build the AgentUsage → skipped (assumption: missing field counts as violation, same as
-        // the token-field "missing → invalid row" rule).
-        var json = Root(session: string.Join(",", SessionRow(agent: ""), SessionRow(id: "\"period\":\"s-good\"")));
+        // the token-field "missing → invalid row" rule; decision E3 gives the same verdict for the
+        // missing/blank/non-string id of an agents[] entry).
+        var json = Root(session: string.Join(",", SessionRow(agent: agentField), SessionRow(id: "\"period\":\"s-good\"")));
 
         var report = Parse(json);
 
@@ -535,8 +685,8 @@ public sealed class CcUsageJsonParserTests
         // SPEC P1.3: "modelBreakdowns[j]: modelName non-blank; same four token fields (no
         // totalTokens here …); cost finite number ≥ 0 parsed as decimal … An invalid model entry
         // invalidates its row."
-        // (A present-but-redundant model "totalTokens" is not tested: the spec does not say whether
-        // it is an ignored extra property or a violation — reported to the Coding Owner.)
+        // A redundant model "totalTokens" is no longer an open question — decision E2 settled it as an
+        // ignored extra property, asserted in Parse_ModelEntryWithExtraTotalTokens_IsIgnored.
         var agent = $"{{\"agent\":\"claude\",{AgentTokens},\"modelBreakdowns\":[{ModelWith(modelInner)}]}}";
         var json = Root(daily: string.Join(",", DailyRow("2026-11-05", agent), GoodDailyRow()));
 
@@ -544,6 +694,66 @@ public sealed class CcUsageJsonParserTests
 
         Assert.Equal(1, report.SkippedRows);
         Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
+    }
+
+    [Theory]
+    [InlineData("")]                                       // E1: cost absent, no missingPricing flag
+    [InlineData("\"cost\":null")]                          // E1: cost present but not a number
+    [InlineData("\"cost\":null,\"missingPricing\":false")] // E1: missingPricing: false is not "true"
+    public void Parse_ModelEntryWithoutUsableCost_SkipsRow(string costField)
+    {
+        // Decision E1: "Model entry with cost absent (and no missingPricing: true) → invalid model →
+        // row skipped." This overrides the earlier reading in which an absent cost looked like an
+        // unknown price: only missingPricing: true may produce CostUsd = null (SPEC P1.1/P1.3).
+        var modelInner = "\"modelName\":\"m\",\"inputTokens\":1,\"outputTokens\":2,\"cacheCreationTokens\":0,\"cacheReadTokens\":0";
+        if (costField.Length > 0)
+            modelInner += "," + costField;
+        var agent = $"{{\"agent\":\"claude\",{AgentTokens},\"modelBreakdowns\":[{ModelWith(modelInner)}]}}";
+
+        var report = Parse(Root(daily: string.Join(",", DailyRow("2026-11-05", agent), GoodDailyRow())));
+
+        Assert.Equal(1, report.SkippedRows);
+        Assert.Equal(new DateOnly(2026, 11, 6), Assert.Single(report.Daily).Date);
+    }
+
+    [Fact]
+    public void Parse_ModelEntryWithMissingPricingAndNoCost_IsValidWithNullCost()
+    {
+        // Decision E1's parenthetical "(and no missingPricing: true)" read together with SPEC P1.3
+        // "missingPricing: true → CostUsd = null regardless of cost": with the flag present, an absent
+        // cost is an unknown price, not an invalid model.
+        // SPEC P1.4 oracle: "models 1.25 + unknown → 1.25, HasUnpricedModels".
+        var unknown = """{"modelName":"gemini-3","inputTokens":5,"outputTokens":5,"cacheCreationTokens":0,"cacheReadTokens":0,"missingPricing":true}""";
+        var priced = """{"modelName":"claude-opus-4-8","inputTokens":5,"outputTokens":5,"cacheCreationTokens":0,"cacheReadTokens":0,"cost":1.25}""";
+        var agent = $"{{\"agent\":\"antigravity\",\"inputTokens\":10,\"outputTokens\":10,\"cacheCreationTokens\":0,\"cacheReadTokens\":0,\"totalTokens\":20,\"modelBreakdowns\":[{priced},{unknown}]}}";
+
+        var report = Parse(Root(daily: DailyRow("2026-11-05", agent)));
+
+        Assert.Equal(0, report.SkippedRows); // E1 does not apply: missingPricing: true is present
+        var antigravity = report.Daily[0].Agents[0];
+        Assert.Equal(1.25m, antigravity.PricedCostUsd); // hand calc: 1.25m + null → 1.25m
+        Assert.True(antigravity.HasUnpricedModels);
+        Assert.Null(antigravity.Models.Single(m => m.Model == "gemini-3").CostUsd);
+    }
+
+    [Theory]
+    [InlineData("30")]     // equal to the model's bucket sum: 10 + 20 + 0 + 0 = 30
+    [InlineData("999999")] // deliberately contradicts the bucket sum
+    public void Parse_ModelEntryWithExtraTotalTokens_IsIgnored(string totalTokens)
+    {
+        // Decision E2: "A totalTokens on a model entry is an ignored extra property" — which follows
+        // SPEC P1.3's "Unknown extra properties are ignored everywhere" and "no totalTokens here:
+        // model Total = bucket sum". Being ignored means it is neither read nor validated, so the row
+        // survives even when the field contradicts the buckets.
+        var model = $"{{\"modelName\":\"claude-opus-4-8\",\"inputTokens\":10,\"outputTokens\":20,\"cacheCreationTokens\":0,\"cacheReadTokens\":0,\"totalTokens\":{totalTokens},\"cost\":0.0075}}";
+        var agent = $"{{\"agent\":\"claude\",{AgentTokens},\"modelBreakdowns\":[{model}]}}";
+
+        var report = Parse(Root(daily: DailyRow("2026-11-05", agent)));
+
+        Assert.Equal(0, report.SkippedRows);
+        var kept = Assert.Single(Assert.Single(Assert.Single(report.Daily).Agents).Models);
+        Assert.Equal(30, kept.Tokens.Total); // model Total = bucket sum 10 + 20 + 0 + 0 = 30, not the field
+        Assert.Equal(0, kept.Tokens.Other);  // hand calc: 30 − 30 = 0
     }
 
     // ---------------------------------------------------------------- totals rules (A3)

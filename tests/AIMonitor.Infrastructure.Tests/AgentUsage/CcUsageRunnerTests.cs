@@ -6,11 +6,15 @@ using AIMonitor.Infrastructure.AgentUsage;
 namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 
 /// <summary>
-/// Tests for <see cref="CcUsageRunner"/> per SPEC R-014 §P1.3 "Runner", decision A6 and OP3,
+/// Tests for <see cref="CcUsageRunner"/> per SPEC R-014 §P1.3 "Runner", decisions A6, A12 and OP3,
 /// mirroring the hand-written fake-process shape of the AGY runner tests
 /// (<c>tests/AIMonitor.Infrastructure.Tests/Providers/Agy/AgyProcessBoundaryTests.cs</c>).
-/// No real process is ever started. Seam assumptions are listed in the Test Author handoff report:
-/// <c>Task&lt;(string Json, AgentUsagePricing Pricing)&gt; ReadUsageAsync(DateOnly? since, CancellationToken)</c>.
+/// No real process is ever started.
+/// Seam per decision M3: <c>CcUsageRunner(Func&lt;string?&gt; resolve,
+/// Func&lt;ProcessStartInfo, ICcUsageProcess&gt; start, TimeSpan timeout, int outputLimit)</c> with
+/// <c>internal interface ICcUsageRunner { Task&lt;CcUsageRunResult&gt; RunAsync(DateOnly? since,
+/// CancellationToken ct); }</c> and <c>internal sealed record CcUsageRunResult(string Output,
+/// AgentUsagePricing Pricing)</c>; the runner is also reachable as <c>ICcUsageRunner</c>.
 /// </summary>
 public sealed class CcUsageRunnerTests
 {
@@ -66,8 +70,10 @@ public sealed class CcUsageRunnerTests
         }
     }
 
-    private static CcUsageRunner Runner(Func<string?> resolve, Factory factory, TimeSpan timeout, int outputLimit = DefaultLimit) =>
-        new(resolve, factory.Start, timeout, outputLimit);
+    /// <c>CcUsageRunner</c> implements <c>ICcUsageRunner.RunAsync</c> explicitly (decision M3 wires
+    /// the source to the interface, not the class), so the seam is reached as <c>ICcUsageRunner</c>.
+    private static ICcUsageRunner Runner(Func<string?> resolve, Factory factory, TimeSpan timeout, int outputLimit = DefaultLimit) =>
+        new CcUsageRunner(resolve, factory.Start, timeout, outputLimit);
 
     private static void AssertCommonStartInfo(ProcessStartInfo info, string expectedFileName)
     {
@@ -87,13 +93,13 @@ public sealed class CcUsageRunnerTests
     {
         // SPEC P1.3: "Not found → NotInstalled" with the exact quoted message; "Never invoke npx".
         // The start factory throws if called, proving no process is launched when resolution fails.
-        var runner = new CcUsageRunner(
+        ICcUsageRunner runner = new CcUsageRunner( // M3: RunAsync is reachable through ICcUsageRunner only
             () => null,
             _ => throw new InvalidOperationException("must not start"),
             TimeSpan.FromSeconds(1),
             DefaultLimit);
 
-        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.ReadUsageAsync(null, default));
+        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.RunAsync(null, default));
 
         Assert.Equal(AgentUsageErrorKind.NotInstalled, error.Kind);
         Assert.Equal("ccusage was not found. Install it with `npm i -g ccusage`, then restart AIMonitor.", error.Message);
@@ -108,12 +114,14 @@ public sealed class CcUsageRunnerTests
         var child = new Child { Output = new StringReader(EmptyReportJson) };
         var factory = new Factory();
         factory.Enqueue(child);
-        var runner = Runner(() => @"C:\synthetic\bin\ccusage.exe", factory, TimeSpan.FromSeconds(5));
+        // M3: the seam returns the CcUsageRunResult record; reaching it through ICcUsageRunner pins
+        // that CcUsageRunner implements the internal interface the source depends on.
+        ICcUsageRunner runner = Runner(() => @"C:\synthetic\bin\ccusage.exe", factory, TimeSpan.FromSeconds(5));
 
-        var (json, pricing) = await runner.ReadUsageAsync(null, default);
+        CcUsageRunResult result = await runner.RunAsync(null, default); // M3: (string Output, AgentUsagePricing Pricing)
 
-        Assert.Equal(EmptyReportJson, json);
-        Assert.Equal(AgentUsagePricing.OnlineRequested, pricing);
+        Assert.Equal(EmptyReportJson, result.Output);
+        Assert.Equal(AgentUsagePricing.OnlineRequested, result.Pricing);
         Assert.Equal(1, factory.Starts);
         Assert.True(child.Disposed);
 
@@ -132,7 +140,7 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(new Child());
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5));
 
-        await runner.ReadUsageAsync(new DateOnly(2025, 9, 7), default);
+        await runner.RunAsync(new DateOnly(2025, 9, 7), default);
 
         Assert.Equal(
             BaseArguments.Append("--since").Append("20250907").ToArray(),
@@ -150,7 +158,7 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(new Child());
         var runner = Runner(() => @"C:\synthetic\npm\ccusage.cmd", factory, TimeSpan.FromSeconds(5));
 
-        await runner.ReadUsageAsync(null, default);
+        await runner.RunAsync(null, default);
 
         Assert.Equal(@"C:\synthetic\npm\ccusage.cmd", factory.Infos[0].FileName);
         Assert.Equal(BaseArguments, factory.Infos[0].ArgumentList);
@@ -168,10 +176,10 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(second);
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromMilliseconds(30));
 
-        var (json, pricing) = await runner.ReadUsageAsync(null, default);
+        var result = await runner.RunAsync(null, default);
 
-        Assert.Equal(EmptyReportJson, json);
-        Assert.Equal(AgentUsagePricing.Offline, pricing);
+        Assert.Equal(EmptyReportJson, result.Output); // M3: stdout arrives as CcUsageRunResult.Output
+        Assert.Equal(AgentUsagePricing.Offline, result.Pricing);
         Assert.Equal(2, factory.Starts);
         Assert.Equal(BaseArguments, factory.Infos[0].ArgumentList); // first run: no --offline
         Assert.Equal(BaseArguments.Append("--offline").ToArray(), factory.Infos[1].ArgumentList);
@@ -191,9 +199,9 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(second);
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5));
 
-        var (_, pricing) = await runner.ReadUsageAsync(null, default);
+        var result = await runner.RunAsync(null, default);
 
-        Assert.Equal(AgentUsagePricing.Offline, pricing);
+        Assert.Equal(AgentUsagePricing.Offline, result.Pricing); // M3: CcUsageRunResult.Pricing
         Assert.Equal(2, factory.Starts);
         Assert.Equal(BaseArguments.Append("--offline").ToArray(), factory.Infos[1].ArgumentList);
     }
@@ -208,7 +216,7 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(new Child { ExitCode = 2 });
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5));
 
-        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.ReadUsageAsync(null, default));
+        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.RunAsync(null, default));
 
         Assert.Equal(AgentUsageErrorKind.Failed, error.Kind);
         Assert.Equal("ccusage could not read usage. Run `ccusage daily` in a terminal to see why.", error.Message);
@@ -225,7 +233,7 @@ public sealed class CcUsageRunnerTests
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromMilliseconds(30));
 
         var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() =>
-            runner.ReadUsageAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
+            runner.RunAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(AgentUsageErrorKind.Failed, error.Kind);
         Assert.Equal(2, factory.Starts);
@@ -241,7 +249,7 @@ public sealed class CcUsageRunnerTests
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromMilliseconds(30));
 
         var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() =>
-            runner.ReadUsageAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
+            runner.RunAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(AgentUsageErrorKind.Timeout, error.Kind);
         Assert.Equal(2, factory.Starts);
@@ -256,7 +264,7 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(new Child { ExitCode = 1, Error = new StringReader("synthetic-private-detail") });
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5));
 
-        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.ReadUsageAsync(null, default));
+        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.RunAsync(null, default));
 
         Assert.DoesNotContain("synthetic-private-detail", error.Message);
         Assert.Equal(2, factory.Starts); // stderr content alone never triggers an extra retry
@@ -272,7 +280,7 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(child);
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5), outputLimit: 16);
 
-        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.ReadUsageAsync(null, default));
+        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() => runner.RunAsync(null, default));
 
         Assert.Equal(AgentUsageErrorKind.OutputTooLarge, error.Kind);
         Assert.True(child.Killed);
@@ -292,10 +300,10 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(child);
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(10));
 
-        var (json, pricing) = await runner.ReadUsageAsync(null, default);
+        var result = await runner.RunAsync(null, default);
 
-        Assert.Equal(EmptyReportJson, json);
-        Assert.Equal(AgentUsagePricing.OnlineRequested, pricing);
+        Assert.Equal(EmptyReportJson, result.Output);
+        Assert.Equal(AgentUsagePricing.OnlineRequested, result.Pricing);
         Assert.Equal(1, factory.Starts);
         Assert.True(child.Disposed);
     }
@@ -310,9 +318,9 @@ public sealed class CcUsageRunnerTests
         factory.Enqueue(child);
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(5));
 
-        var (_, pricing) = await runner.ReadUsageAsync(null, default);
+        var result = await runner.RunAsync(null, default);
 
-        Assert.Equal(AgentUsagePricing.OnlineRequested, pricing);
+        Assert.Equal(AgentUsagePricing.OnlineRequested, result.Pricing);
         Assert.Equal(1, factory.Starts);
     }
 
@@ -327,7 +335,7 @@ public sealed class CcUsageRunnerTests
         using var cancellation = new CancellationTokenSource();
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromSeconds(10));
 
-        var task = runner.ReadUsageAsync(null, cancellation.Token);
+        var task = runner.RunAsync(null, cancellation.Token);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
@@ -349,7 +357,7 @@ public sealed class CcUsageRunnerTests
         var runner = Runner(() => "synthetic.exe", factory, TimeSpan.FromMilliseconds(30));
 
         var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() =>
-            runner.ReadUsageAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
+            runner.RunAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(AgentUsageErrorKind.Timeout, error.Kind);
         Assert.True(first.Killed);

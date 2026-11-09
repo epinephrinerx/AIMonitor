@@ -7,7 +7,11 @@ namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 /// Contract tests over the golden, synthetic fixtures under <c>tests/Fixtures/CcUsage/</c>
 /// (shape of the real ccusage 20.0.48 run described in SPEC R-014, with invented ids, model names
 /// and numbers; no secrets, no real account data). They exercise the parser end to end on a
-/// realistic payload instead of only the narrow inline cases.
+/// realistic payload instead of only the narrow inline cases: <c>report-typical.json</c> is an
+/// all-valid report and <c>report-mixed-invalid.json</c> carries the row-rule violations, including
+/// the post-trial-merge decisions E1 (a model with no cost), E3 (an agents[] entry with no id, an
+/// agent with no modelBreakdowns array, and a valid row whose agents array is empty) and E5 (a
+/// non-string and a missing period).
 /// </summary>
 [Trait("Category", "Contract")]
 public sealed class CcUsageFixtureTests
@@ -92,28 +96,40 @@ public sealed class CcUsageFixtureTests
     }
 
     [Fact]
-    public void Parse_MixedInvalidFixture_CountsSixSkippedRowsAndKeepsEveryValidRow()
+    public void Parse_MixedInvalidFixture_CountsElevenSkippedRowsAndKeepsEveryValidRow()
     {
-        // The fixture contains 9 rows: 6 invalid by spec rules and 3 valid.
-        // Invalid (each → SkippedRows += 1, SPEC P1.3 row rules):
-        //   daily "2026-02-30"  — fake calendar date (A4)
-        //   daily "2026-11-06"  — no agents array
-        //   daily "2026-11-07"  — outputTokens is the string "20"
-        //   monthly "2026-13"   — month out of 1–12 (A4)
-        //   session "s-no-metadata" — metadata missing (A5)
-        //   session ""          — blank session id
-        // Valid: daily "2026-11-05", monthly "2026-11", session "s-ok".
+        // The fixture contains 15 rows: 11 invalid by spec rules and 4 valid.
+        // Daily (9 rows, 7 invalid):
+        //   "2026-02-30"            — fake calendar date (A4)
+        //   "2026-11-05"            — VALID
+        //   "2026-11-06"            — no agents array
+        //   "2026-11-07"            — outputTokens is the string "20"
+        //   20261108                — period is a number, not a string (E5)
+        //   "2026-11-09"            — agents[] entry with no agent id (E3)
+        //   "2026-11-10"            — agent object without a modelBreakdowns array (E3)
+        //   "2026-11-11"            — model entry with cost absent and no missingPricing (E1)
+        //   "2026-11-12"            — VALID: "agents": [] is a valid row with zero agents (E3)
+        // Monthly (3 rows, 2 invalid): "2026-13" (A4), "2026-11" VALID, and a row with no period (E5).
+        // Session (3 rows, 2 invalid): "s-ok" VALID, "s-no-metadata" (A5), "" blank session id.
         // Because at least one valid row exists, the all-rows-skipped rejection does not fire.
         var report = CcUsageJsonParser.Parse(
             Fixture("report-mixed-invalid.json"), AgentUsagePricing.OnlineRequested, RetrievedAt);
 
-        Assert.Equal(6, report.SkippedRows);
-        var day = Assert.Single(report.Daily);
-        Assert.Equal(new DateOnly(2026, 11, 5), day.Date);
+        Assert.Equal(11, report.SkippedRows);
+
+        // SPEC P1.1: "Daily sorted by date ascending" — the two kept rows.
+        Assert.Equal(
+            new[] { new DateOnly(2026, 11, 5), new DateOnly(2026, 11, 12) },
+            report.Daily.Select(d => d.Date));
+
+        var day = report.Daily.Single(d => d.Date == new DateOnly(2026, 11, 5));
         var claude = Assert.Single(day.Agents);
         // Other = 40 − (10 + 20 + 0 + 0 = 30) = 10 (fixture data).
         Assert.Equal(10, claude.Tokens.Other);
         Assert.Equal(0.001m, claude.PricedCostUsd);
+
+        // Decision E3: "agents: [] → valid row with zero agents" — kept, and not counted as skipped.
+        Assert.Empty(report.Daily.Single(d => d.Date == new DateOnly(2026, 11, 12)).Agents);
 
         var month = Assert.Single(report.Monthly);
         Assert.Equal((2026, 11), (month.Year, month.Month));
