@@ -314,3 +314,69 @@ versus `ccusage claude daily --json`.
 | B15 | A `CLAUDE_CONFIG_DIR` entry that is not a fully qualified path, or is drive-relative (`C:x`), is skipped (same rule as R8); if no entry remains → treated as unset. `ResolveAll` stays free of environment and disk access (no `GetFullPath` on relative input). |
 | B16 | Advisor iterations (ccusage `advisor_usages_from_line`; found in 2 real local transcripts): for each `message.usage.iterations[k]` with `type == "advisor_message"` and a non-empty `model`, add one extra record with the same timestamp, `sessionId`, `requestId`, `isSidechain`, project and day; `message.id` = `<id>:advisor:<n>` where `n` counts advisor entries only (0, 1, …; omitted dedup if the parent has no id); model and token fields from the iteration (`input_tokens`, `output_tokens`, `cache_creation_input_tokens` or `cache_creation.{ephemeral_5m,1h}`, `cache_read_input_tokens`); priced like any record; deduplicated by the same rules. An invalid iteration is skipped alone. |
 | B17 | Follow-up, not in R-014: the credentials path still uses the raw `CLAUDE_CONFIG_DIR` (Reviewer1 MINOR-3). |
+
+## P3 — "All agents" tab (Coding Owner, 2026-11-09; Writing Owner 2)
+
+Base: current integration branch (P1 + P2a merged, `760bb1c`). Uses the P1 port only; no new ccusage calls besides
+`CachedAgentUsageSource`. Layering: mapping logic is pure and unit-testable (no WPF types).
+
+### P3.1 Presenter (`src/AIMonitor.Presentation.Wpf/ViewModels/AgentUsagePresenter.cs`, static, pure)
+- `string AgentDisplayName(string agent)`: `claude` → "Claude Code", `codex` → "Codex", `antigravity` → "Antigravity",
+  `opencode` → "OpenCode", `copilot` → "Copilot", `zcode` → "ZCode", anything else → the id unchanged.
+- `string CostText(AgentUsage usage)` (and the same rule for a period total): no models → "$0.00";
+  every model unpriced → "Unknown price"; some unpriced → `"$1.23 + unpriced"`; else `"$1.23"`.
+  Money = `ChartFormat.Money`. A model with `CostUsd == null` never contributes `$0` (R-014 item 3).
+- `string TokensText(long tokens)` = `ChartFormat.Compact`.
+- `AgentUsagePeriod BuildDay(DailyAgentUsage day)` / `BuildMonth(MonthlyAgentUsage month)`: record
+  `AgentUsagePeriod(string Title, long Tokens, string TokensText, string CostText, IReadOnlyList<AgentUsageLine> Agents)`;
+  `AgentUsageLine(string Agent, string DisplayName, long Tokens, string TokensText, string CostText)`.
+  Day title `yyyy-MM-dd` (invariant), month title `MMMM yyyy` (invariant, e.g. "November 2026").
+  Agents sorted by `PricedCostUsd` desc, then tokens desc, then id ordinal. Period tokens = Σ agent `Tokens.Total`.
+- `string PricingText(AgentUsagePricing p)`: `OnlineRequested` → "Prices: online (ccusage uses its built-in prices if the
+  fetch fails)" (OP3); `Offline` → "Prices: ccusage built-in (offline)".
+- `string ErrorText(AgentUsageErrorKind kind, string message)`: `NotInstalled` → the exception message (it already says
+  how to install); others → message.
+- `AgentUsageSummary? SummaryFor(AgentUsageReport? report, string agent, DateOnly today)`: record
+  `AgentUsageSummary(AgentUsageLine? Today, AgentUsageLine? ThisMonth)`; `null` when report is null or the agent appears in
+  neither today's daily row nor this month's monthly row. (Used by P4.)
+
+### P3.2 View model (`AllAgentsTabViewModel`)
+`TabTitle` "All agents", `TabId` "all-agents". `Update(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError, DateOnly today, int rangeDays)`:
+- `Today` / `ThisMonth`: `AgentUsagePeriod?` for today's daily row and the current month row (null if absent).
+- `Days`: daily rows for the last `rangeDays` local days including today, newest first; `Months`: all monthly rows newest first.
+- `Sessions`: 20 most recent by `LastActivity`: `AgentUsageSessionLine(DisplayName, ShortId (first 8 chars), LastActivityText (local "yyyy-MM-dd HH:mm"), TokensText, CostText)`.
+- `StatusText`: `"Updated HH:mm · " + PricingText` from `RetrievedAt` (local); plus `" · N rows skipped"` when `SkippedRows > 0`.
+- `ErrorText`/`HasError` from `lastError`; when `lastGood` is also present add `"Showing data from HH:mm."`.
+- `ShowInstallHint` = `lastError.Kind == NotInstalled && lastGood == null`; nothing else shown then.
+- No report and no error yet → `StatusText` "Loading ccusage…".
+
+### P3.3 Main window
+- `MainWindowViewModel` gets an optional `CachedAgentUsageSource? agentUsage` ctor parameter (App passes `_agentUsageSource`).
+- `Tabs`: `IReadOnlyList<object>` = the three provider tabs then `AllAgentsTab`; the tab ListBox binds to `Tabs` and
+  `SelectedTabItem`. Selecting a provider tab sets `SelectedTab` exactly as today (tray/widget untouched); selecting
+  All agents sets `IsAllAgentsSelected = true`, keeps `SelectedTab` unchanged, and saves `ActiveProvider = "all-agents"`.
+  `AppSettings` normalisation must accept `"all-agents"`; startup with it selects the All agents tab.
+- After every provider refresh (timer, F5, view change) call `agentUsage.ReadAsync(since, force, ct)` **after** the
+  provider tabs are updated, without delaying them: `since` = first day of the month two months before today (local);
+  `force` = true only when the user pressed Refresh/F5 while All agents is selected. Exceptions other than cancellation
+  are already captured in `LastError`; never surface them as "Refresh failed". Then `AllAgentsTab.Update(LastGood, LastError, today, ChartRangeDays)`.
+- XAML: provider content `ScrollViewer` collapsed when `IsAllAgentsSelected`; new `AllAgentsView.xaml` (UserControl)
+  visible instead: status line, error/install card, two summary cards (Today, This month: tokens, cost, per-agent lines),
+  "Daily" list, "Monthly" list, "Recent sessions" list. Theme brushes only (`CardBackgroundBrush`, `TextPrimaryBrush`, …).
+
+### P3.4 Tests (Test Author) — presenter rules with synthetic `AgentUsageReport`s (oracles by hand), view-model
+`Update` cases (no data, NotInstalled, error with last good, skipped rows, range filtering, session cut at 20, ordering),
+`MainWindowViewModel` tab selection/`ActiveProvider` save, force only on manual refresh, provider refresh not blocked by a
+slow fake source. No real ccusage.
+
+## P4 — ccusage rows in the existing tabs (Coding Owner, 2026-11-09; Writing Owner 3)
+
+- `ProviderTabViewModel.SetAgentUsage(AgentUsageSummary? summary)` stores the summary and rebuilds the supplementary rows;
+  `UpdateFromSnapshot` keeps using the stored summary.
+- Rows (group `"ccusage"`, appended after the existing rows): `"Today (ccusage)"` → `"<tokens> · <cost>"`,
+  `"This month (ccusage)"` → same; a missing line is omitted. Gauges, charts, stat tiles unchanged (R-004).
+- Section visibility: `ShowSupplementary = <existing rule> || summary has at least one line`.
+- Mapping: Claude tab ← `claude`, OpenAI / Codex tab ← `codex`, Gemini / AGY tab ← `antigravity`.
+- P4 adds one call site in `MainWindowViewModel` right after `AllAgentsTab.Update(...)`:
+  `ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(report, "claude", today))` and the same for the two others.
+- Tests: rows present/absent, visibility rule, summary survives `UpdateFromSnapshot`, no change to meters/stat tiles.
