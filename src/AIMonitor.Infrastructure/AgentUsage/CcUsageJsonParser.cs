@@ -85,7 +85,7 @@ public static class CcUsageJsonParser
     }
 
     private static AgentUsageUnavailableException Invalid()
-        => new("ccusage returned data in an unexpected format. Check ccusage output, then refresh.", AgentUsageErrorKind.InvalidResponse);
+        => new(AgentUsageErrorKind.InvalidResponse, "ccusage returned data in an unexpected format. Check ccusage output, then refresh.");
 
     private static JsonElement RequireArray(JsonElement root, string name)
     {
@@ -188,8 +188,11 @@ public static class CcUsageJsonParser
 
         if (string.IsNullOrWhiteSpace(agentId)) return false;
 
+        if (!element.TryGetProperty("modelBreakdowns", out var modelsProperty) || modelsProperty.ValueKind != JsonValueKind.Array)
+            return false;
+
         var models = new List<ModelUsage>();
-        if (allowModels && element.TryGetProperty("modelBreakdowns", out var modelsProperty) && modelsProperty.ValueKind == JsonValueKind.Array)
+        if (allowModels)
         {
             foreach (var modelElement in modelsProperty.EnumerateArray())
             {
@@ -228,19 +231,20 @@ public static class CcUsageJsonParser
 
         if (!TryParseModelTokenCounts(element, out var tokens)) return false;
 
-        decimal? cost = null;
         var missingPricing = element.TryGetProperty("missingPricing", out var mp) && mp.ValueKind == JsonValueKind.True;
 
-        if (!missingPricing)
+        if (missingPricing)
         {
-            if (element.TryGetProperty("cost", out var costProperty) && costProperty.ValueKind == JsonValueKind.Number)
-            {
-                if (!costProperty.TryGetDecimal(out var costValue) || costValue < 0) return false;
-                cost = costValue;
-            }
+            usage = new ModelUsage(modelName, tokens, null);
+            return true;
         }
 
-        usage = new ModelUsage(modelName, tokens, cost);
+        if (!element.TryGetProperty("cost", out var costProperty) || costProperty.ValueKind != JsonValueKind.Number)
+            return false;
+
+        if (!costProperty.TryGetDecimal(out var costValue) || costValue < 0) return false;
+
+        usage = new ModelUsage(modelName, tokens, costValue);
         return true;
     }
 

@@ -81,8 +81,8 @@ public sealed class CcUsageRunner : ICcUsageRunner
             if (string.IsNullOrWhiteSpace(path))
             {
                 throw new AgentUsageUnavailableException(
-                    "ccusage was not found. Install it with `npm i -g ccusage`, then restart AIMonitor.",
-                    AgentUsageErrorKind.NotInstalled);
+                    AgentUsageErrorKind.NotInstalled,
+                    "ccusage was not found. Install it with `npm i -g ccusage`, then restart AIMonitor.");
             }
 
             process = _start(BuildStartInfo(path, since, offline));
@@ -95,8 +95,8 @@ public sealed class CcUsageRunner : ICcUsageRunner
             if (process.ExitCode != 0)
             {
                 throw new AgentUsageUnavailableException(
-                    "ccusage could not read usage. Run `ccusage daily` in a terminal to see why.",
-                    AgentUsageErrorKind.Failed);
+                    AgentUsageErrorKind.Failed,
+                    "ccusage could not read usage. Run `ccusage daily` in a terminal to see why.");
             }
 
             return CcUsageRunOnceResult.Success(await stdout.ConfigureAwait(false));
@@ -104,14 +104,14 @@ public sealed class CcUsageRunner : ICcUsageRunner
         catch (CcUsageOutputLimitExceededException)
         {
             throw new AgentUsageUnavailableException(
-                "ccusage output exceeded the maximum allowed size.",
-                AgentUsageErrorKind.OutputTooLarge);
+                AgentUsageErrorKind.OutputTooLarge,
+                "ccusage output exceeded the maximum allowed size.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new AgentUsageUnavailableException(
-                "ccusage did not respond in time. Check ccusage, then refresh.",
-                AgentUsageErrorKind.Timeout);
+                AgentUsageErrorKind.Timeout,
+                "ccusage did not respond in time. Check ccusage, then refresh.");
         }
         catch (OperationCanceledException)
         {
@@ -125,8 +125,8 @@ public sealed class CcUsageRunner : ICcUsageRunner
                                    or System.ComponentModel.Win32Exception or DecoderFallbackException)
         {
             throw new AgentUsageUnavailableException(
-                "Could not run ccusage. Check that ccusage is installed, then refresh.",
-                AgentUsageErrorKind.Failed);
+                AgentUsageErrorKind.Failed,
+                "Could not run ccusage. Check that ccusage is installed, then refresh.");
         }
         finally
         {

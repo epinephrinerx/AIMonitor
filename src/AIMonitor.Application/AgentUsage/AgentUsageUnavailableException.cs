@@ -8,13 +8,13 @@ public class AgentUsageUnavailableException : Exception
 {
     public AgentUsageErrorKind Kind { get; }
 
-    public AgentUsageUnavailableException(string message, AgentUsageErrorKind kind = AgentUsageErrorKind.Failed)
+    public AgentUsageUnavailableException(AgentUsageErrorKind kind, string message)
         : base(message)
     {
         Kind = kind;
     }
 
-    public AgentUsageUnavailableException(string message, Exception innerException, AgentUsageErrorKind kind = AgentUsageErrorKind.Failed)
+    public AgentUsageUnavailableException(AgentUsageErrorKind kind, string message, Exception innerException)
         : base(message, innerException)
     {
         Kind = kind;

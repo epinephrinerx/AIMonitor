@@ -32,12 +32,13 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
     /// </summary>
     public AgentUsageUnavailableException? LastError { get; private set; }
 
-    public CachedAgentUsageSource(IAgentUsageSource inner, IClock clock, TimeSpan minInterval)
+    public CachedAgentUsageSource(IAgentUsageSource inner, IClock clock, TimeSpan? minInterval = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
-        if (minInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minInterval));
-        MinInterval = minInterval;
+        var interval = minInterval ?? TimeSpan.FromMinutes(15);
+        if (interval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minInterval));
+        MinInterval = interval;
     }
 
     public Task<AgentUsageReport> ReadAsync(DateOnly? since, CancellationToken ct)
@@ -72,9 +73,9 @@ public sealed class CachedAgentUsageSource : IAgentUsageSource
         catch (Exception ex)
         {
             var wrapped = new AgentUsageUnavailableException(
+                AgentUsageErrorKind.Failed,
                 "Could not read agent usage. Check ccusage, then refresh.",
-                ex,
-                AgentUsageErrorKind.Failed);
+                ex);
             LastError = wrapped;
             throw wrapped;
         }
