@@ -215,3 +215,68 @@ Reviewed `083120e`. Both reviewers found R1 independently; R1–R4 block the mer
 | R8 | PATH entries that are drive-relative (`C:`, `C:x`) are skipped (A2). | WO2 |
 | R9 | Accepted as is: the stdout limit counts UTF-16 chars (ccusage JSON is ASCII). | — |
 | R10 | `AgentUsageReport` itself normalizes in its constructor (P1.1 states order/dedup as a property of the record): daily by date asc, monthly by (year, month) asc, sessions by `LastActivity` desc, `UnpricedModels` distinct + ordinal sort. The parser may keep sorting too. Found by Test Author (4 red `AgentUsageReportTests`). | WO2 |
+
+## P2b detailed (Coding Owner, 2026-11-09) — replaces the P2b outline above; Writing Owner 3
+
+Base: branch `agent/opencode-r014-p2a` at `d76762a` (P2a pricing, reviewed). Reference behaviour: ccusage
+`rust/adapters/claude/src/daily.rs` + `lib.rs` (`usage_dedupe_hash`, `push_deduped_daily_entry`,
+`should_replace_deduped_daily_entry`). Scope: `ClaudeTranscriptPathResolver.cs`, `ClaudeTranscriptStore.cs`,
+`UsageCounters.cs` (Domain), `ClaudeLiveQuotaClient.cs` and `App.xaml.cs` wiring only.
+
+### P2b.1 Roots (`ClaudeTranscriptPathResolver`)
+New `public static IReadOnlyList<string> ResolveAll(string? claudeConfigDir, string? xdgConfigHome, string userProfileDirectory)`
+returning `projects` directories, pure (no environment or disk access):
+1. `claudeConfigDir` non-blank (A11: blank/whitespace = unset) → split on `,`, trim each, drop empty entries,
+   each entry → `<entry>\projects`. Defaults are **not** added.
+2. Otherwise → `<xdg>\claude\projects` where `<xdg>` = `xdgConfigHome` if non-blank else
+   `<profile>\.config`, then `<profile>\.claude\projects`.
+3. Duplicates removed (`Path.GetFullPath`, `StringComparer.OrdinalIgnoreCase`), first occurrence kept, order kept.
+The existing `Resolve(...)` stays unchanged (credential path logic is out of scope).
+
+### P2b.2 Store roots and scan (`ClaudeTranscriptStore`)
+- New ctor overload taking `IReadOnlyList<string> roots` (non-null, ≥ 1 entry, no blank entry); the existing
+  `string root` ctors delegate with a one-item list. Internal ctor keeps the `Func<string, Stream> openFile` seam.
+- On each refresh, a root is used only if its directory exists. None exists → `LastDirectoryError =
+  "No Claude transcripts directory found."`, `FilesScanned = 0`, return 0. A root that exists but cannot be
+  enumerated → `LastDirectoryError = "Could not read a Claude transcripts directory."`, other roots still scanned.
+- Files: every `*.jsonl` under each root at any depth (including `subagents\`), via `EnumerationOptions
+  { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = ReparsePoint }`; all files of all
+  roots sorted `StringComparer.Ordinal` by full path; `FilesScanned` = total count.
+- Fallback project label comes from the **first directory segment below the root** (the encoded project folder),
+  not the immediate parent; a file directly in a root uses `""` → `(unknown)`.
+
+### P2b.3 Record filter (before any key is claimed; not counted as malformed)
+Skip a record if `message.model` is `<synthetic>`, or if any of `sessionId`, `requestId`, `message.id`,
+`message.model` is **present as an empty string**. A missing model stays as today (priced as unknown).
+
+### P2b.4 Dedup keys
+Let `id` = non-empty `message.id`, `req` = non-empty `requestId`, `sid` = `sessionId` (else the file name without
+extension), `ts` = the raw `timestamp` string, `side` = `isSidechain == true`.
+- No `id` → no dedup (always counted; offsets still prevent re-reading).
+- Exact key: `req` present → `id + "\n" + req`; else if `id` starts with `msg_` or `resp_` → `id + "\n\n" + sid`;
+  else → `id + "\n\n" + sid + "\n" + ts`.
+- Replay key `id + "\n" + sid`: a new record also matches a kept record with the same replay key when **either**
+  of the two is a sidechain record (ccusage `/btw` replay rule).
+- Match = exact key hit, else replay-key hit. A kept record is registered under its exact key and its replay key.
+
+### P2b.5 Survivor and replacement
+On a match, the new record replaces the kept one when (in order): kept is sidechain and new is not → replace;
+new is sidechain and kept is not → keep; larger total tokens (input + output + cache creation + cache read)
+wins; equal → larger cost wins; equal → keep the existing one.
+Replacement subtracts the kept record's stored contribution (its day, model label, project label and
+`UsageCounters`, tokens **and** cost — OP4) from day×model, day×project and `AllTotals`, then folds the new one.
+A day bucket that was pruned is skipped for the subtraction; a label whose counters reach all-zero with
+`Messages == 0` is removed. `Messages` stays 1 per surviving record.
+Domain: `UsageCounters.Subtract(UsageCounters other)` (checked; throws if any field would go negative).
+Stored contributions live in the bounded seen-set (400,000 entries, oldest evicted together with its keys).
+
+### P2b.6 Wiring
+`ClaudeLiveQuotaClient` builds the store from `ResolveAll(claudeConfigDir, xdgConfigHome, userProfile)`;
+`App.xaml.cs` passes `Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")`. Credentials path unchanged.
+
+### P2b.7 Tests (Test Author) and acceptance
+Synthetic fixtures only. Cover each rule above, including: exact vs replay match, each survivor branch, cost
+subtraction with a Haiku 5.5 > 100k record replaced by a smaller one, eviction, recursive `subagents\` scan,
+first-segment project label, root list rules 1–3, missing/unreadable roots. Acceptance A10 (Integrator, manual):
+every completed local day present in both sources has equal Claude input/output/cache-creation/cache-read sums
+versus `ccusage claude daily --json`.
