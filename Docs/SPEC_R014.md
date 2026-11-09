@@ -408,3 +408,15 @@ slow fake source. No real ccusage.
 | C16 | `AllAgentsTabViewModel` exposes `HasDays`, `HasMonths`, `HasSessions`; section headers bind to them; `ShowInstallHint` true → only the install card is visible (MINOR 5). |
 | C17 | Summary cards: tokens on one line (FontSize 20), cost on the next line (FontSize 14, wraps) so nothing clips at the 300 px minimum width (MINOR 7). |
 | C18 | `AllAgentsTabViewModel.Update(lastGood, lastError, today, rangeDays, TimeZoneInfo zone)` and the presenter's session/time texts take the zone; `MainWindowViewModel` passes `TimeZoneInfo.Local`. No `DateTime.UtcNow` / `ToLocalTime()` inside these types (testability of the C11 oracle). Remove unused usings. |
+
+## Coding Owner decisions after the P2b trial merge (2026-11-09)
+
+Trial merge (integration HEAD + `7c4589a` + `c1f8c76`): build clean, 1,890 pass, 3 fail — all three in
+`ClaudeTranscriptPathResolverResolveAllTests`, all test-side.
+
+| # | Decision | Who |
+|---|---|---|
+| B18 | `ResolveAll` returns each kept entry in its **original spelling** (case and trailing separator as written, with `\projects` appended unless B9 applies); duplicates are detected with `GetFullPath` + `OrdinalIgnoreCase`. Tests compare paths `OrdinalIgnoreCase` after `GetFullPath`. `ResolveAll_XdgAndProfileDefaultsThatResolveToTheSameDirectory_AreListedOnce` has a false premise (`<profile>\.config\claude\projects` ≠ `<profile>\.claude\projects`) — replace it with a case where `xdgConfigHome` really equals another candidate, or drop it. | Test Author |
+| B19 | A record that **replaces** a kept one is not "added": `TryIngest` returns `false` for it and `RefreshAsync`'s count excludes it (its counters still change). | Test Author (assert), WO3 (already so) |
+| B20 | `version: "2.1"` (two components) is not a semver prefix → record skipped (ccusage needs `<d>.<d>.<d>`). | Test Author |
+| B21 | `ClaudeLiveQuotaClient` ctors take an optional trailing `string? xdgConfigHome = null` (already in `7c4589a`); tests may feed it. | Test Author |
