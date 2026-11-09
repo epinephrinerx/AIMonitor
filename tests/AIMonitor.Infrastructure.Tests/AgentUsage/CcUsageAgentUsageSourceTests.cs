@@ -137,8 +137,9 @@ public sealed class CcUsageAgentUsageSourceTests
     [Fact]
     public async Task ReadAsync_RunnersOutputUnparseable_ThrowsInvalidResponse_AndCallsTheRunnerExactlyOnce()
     {
-        // Decision A6: "Exit 0 + parse failure → InvalidResponse, no retry." The source must not add a
-        // second run of its own: the fake has one outcome queued, so a second call would throw.
+        // Decision A6: "Exit 0 + parse failure → InvalidResponse, no retry." Decision R1 lists
+        // InvalidResponse among the "no retry (exactly one start)" cases: the source must not add a
+        // second run of its own, so the fake has one outcome queued and a second call would throw.
         var runner = new FakeRunner();
         runner.EnqueueSuccess("}}} not json {{{"); // M3: exit-0 output, unparseable
 

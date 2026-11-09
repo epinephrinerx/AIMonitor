@@ -6,7 +6,10 @@ namespace AIMonitor.Domain.Tests;
 /// Tests for the aggregate records of SPEC R-014 §P1.1: <see cref="DailyAgentUsage"/>,
 /// <see cref="MonthlyAgentUsage"/>, <see cref="SessionAgentUsage"/>, <see cref="AgentUsagePricing"/>
 /// and <see cref="AgentUsageReport"/>. The spec lists the orderings under the report's definition,
-/// so these tests assert the report normalises order in its constructor (see handoff assumptions).
+/// and decision R10 confirms "AgentUsageReport itself normalizes in its constructor": daily by date
+/// ascending, monthly by (year, month) ascending, sessions by LastActivity descending, UnpricedModels
+/// distinct + ordinal sort. The four ordering/dedup report tests below are the red set against
+/// 083120e (the reviewed record stores its lists as given).
 /// </summary>
 public class AgentUsageReportTests
 {
@@ -110,7 +113,9 @@ public class AgentUsageReportTests
     [Fact]
     public void Report_SortsDailyByDateAscending()
     {
-        // SPEC P1.1: "Daily sorted by date ascending".
+        // SPEC P1.1: "Daily sorted by date ascending". Decision R10: "AgentUsageReport itself
+        // normalizes in its constructor" — this record-level sort is the red expectation at 083120e
+        // (the reviewed record stores the list as given; only the parser sorts).
         var daily = new[] { Daily(2026, 11, 3), Daily(2026, 11, 1), Daily(2026, 11, 2) };
 
         var report = Report(daily: daily);
@@ -123,7 +128,7 @@ public class AgentUsageReportTests
     [Fact]
     public void Report_SortsMonthlyByYearThenMonthAscending()
     {
-        // SPEC P1.1: "Monthly by (year, month) ascending".
+        // SPEC P1.1: "Monthly by (year, month) ascending". Decision R10: normalised by the record.
         var monthly = new[] { Monthly(2026, 1), Monthly(2025, 12), Monthly(2026, 3) };
 
         var report = Report(monthly: monthly);
@@ -136,7 +141,7 @@ public class AgentUsageReportTests
     [Fact]
     public void Report_SortsSessionsByLastActivityDescending()
     {
-        // SPEC P1.1: "Sessions by LastActivity descending".
+        // SPEC P1.1: "Sessions by LastActivity descending". Decision R10: normalised by the record.
         var sessions = new[] { Session("early", 9), Session("latest", 11), Session("middle", 10) };
 
         var report = Report(sessions: sessions);
@@ -147,7 +152,8 @@ public class AgentUsageReportTests
     [Fact]
     public void Report_UnpricedModels_AreDistinctAndOrdinalSorted()
     {
-        // SPEC P1.1: "UnpricedModels distinct, ordinal-sorted".
+        // SPEC P1.1: "UnpricedModels distinct, ordinal-sorted". Decision R10: the record applies this
+        // normalisation, so an unsorted, duplicated input list reads back sorted and distinct.
         // Ordinal order puts upper case before lower case: "Alpha" < "alpha" < "zeta" (code points 65 < 97 < 122).
         var report = Report(unpricedModels: new[] { "zeta", "Alpha", "alpha", "zeta" });
 

@@ -6,9 +6,11 @@ namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 
 /// <summary>
 /// Tests for <see cref="CcUsageJsonParser"/> per SPEC R-014 §P1.3 "Parser", decisions A3–A6, the
-/// post-trial-merge decisions E1, E2, E3 and E5, and the P1.4 must-cover list. Every numeric
-/// expectation cites the spec line, a decision id, or shows the hand calculation (§5.6 item 2). All
-/// JSON is synthetic; nothing here runs the real ccusage.
+/// post-trial-merge decisions E1, E2, E3 and E5, the code-review decisions R3 (lastActivity must
+/// carry an offset or Z in the time part), R4 (session rows parse modelBreakdowns like agent
+/// objects) and R5 (the 500-entry limit applies to every modelBreakdowns array read), and the P1.4
+/// must-cover list. Every numeric expectation cites the spec line, a decision id, or shows the hand
+/// calculation (§5.6 item 2). All JSON is synthetic; nothing here runs the real ccusage.
 /// </summary>
 public sealed class CcUsageJsonParserTests
 {
@@ -158,6 +160,9 @@ public sealed class CcUsageJsonParserTests
     public void Parse_MoreThanFiveHundredModelBreakdownsInOneRow_ThrowsInvalidResponse()
     {
         // SPEC P1.3: "more than 500 modelBreakdowns in one row → InvalidResponse". 501 > 500.
+        // Decision R5: the limit applies to "every modelBreakdowns array that is read: row level,
+        // each agents[i], and session rows" — this case is the agents[i] shape, and the two sibling
+        // tests below cover the session row and the row-level array.
         var agent = $"{{\"agent\":\"claude\",{AgentTokens},\"modelBreakdowns\":[{Many(ValidModel, 501)}]}}";
 
         AssertInvalidResponse(Root(daily: DailyRow("2026-11-05", agent)));
@@ -166,13 +171,47 @@ public sealed class CcUsageJsonParserTests
     [Fact]
     public void Parse_ExactlyFiveHundredModelBreakdownsInOneRow_IsAccepted()
     {
-        // Boundary of "more than 500": 500 breakdowns → row kept, not rejected.
+        // Boundary of "more than 500": 500 breakdowns → row kept, not rejected (decision R5 keeps 500
+        // explicitly inside the limit).
         var agent = $"{{\"agent\":\"claude\",{AgentTokens},\"modelBreakdowns\":[{Many(ValidModel, 500)}]}}";
 
         var report = Parse(Root(daily: DailyRow("2026-11-05", agent)));
 
         Assert.Single(report.Daily);
         Assert.Equal(500, report.Daily[0].Agents[0].Models.Count);
+    }
+
+    [Fact]
+    public void Parse_SessionRowWithFiveHundredOneModelBreakdowns_ThrowsInvalidResponse_R5()
+    {
+        // Decision R5: the 500-entry limit applies to session rows too — "also in a session row" —
+        // and it is structural ("violation → InvalidResponse, whole report rejected"), not a row skip.
+        // At 083120e the pre-scan only walks daily/monthly row-level modelBreakdowns, and session rows
+        // skip their models altogether (R4) → this shape parses into a kept row instead → red.
+        AssertInvalidResponse(Root(session: SessionRowWithModels(Many(ValidModel, 501))));
+    }
+
+    [Fact]
+    public void Parse_SessionRowWithFiveHundredModelBreakdowns_IsAccepted_R5()
+    {
+        // Decision R5 boundary: 500 ≤ 500 in a session row → the report is produced. The Models count
+        // is asserted through decision R4's "session rows parse modelBreakdowns" wiring.
+        var report = Parse(Root(session: SessionRowWithModels(Many(ValidModel, 500))));
+
+        Assert.Equal(0, report.SkippedRows);
+        var session = Assert.Single(report.Sessions);
+        Assert.Equal(500, session.Usage.Models.Count);
+    }
+
+    [Fact]
+    public void Parse_RowLevelModelBreakdownsOverLimit_ThrowsInvalidResponse_R5()
+    {
+        // Decision R5's third location: "row level" — a modelBreakdowns array sitting on the daily row
+        // itself (the derived agent:"all" totals shape the real ccusage output carries). Its data is
+        // ignored (SPEC P1.3), but the array is still read, so > 500 entries reject the whole report.
+        var row = $$"""{"period":"2026-11-05","agent":"all","modelBreakdowns":[{{Many(ValidModel, 501)}}],"agents":[{{ClaudeAgent}}]}""";
+
+        AssertInvalidResponse(Root(daily: row));
     }
 
     [Fact]
@@ -493,6 +532,9 @@ public sealed class CcUsageJsonParserTests
     public void Parse_SessionRow_TheRowItselfBecomesTheAgentUsage()
     {
         // SPEC P1.3: "session[i]: … the row itself is the AgentUsage (no agents[])".
+        // Decision R4: "Session rows parse modelBreakdowns like daily/monthly agent objects …
+        // Usage.Models is populated" — the model assertions below are the red part at 083120e, which
+        // skips the entries instead of parsing them.
         // Row tokens 10 + 20 + 0 + 0 = 30 = total → Other 0; model Total = bucket sum = 30.
         var report = Parse(Root(session: SessionRow()));
 
@@ -526,13 +568,55 @@ public sealed class CcUsageJsonParserTests
     public void Parse_SessionBadLastActivity_SkipsRow(string metadataField)
     {
         // SPEC P1.3 + decision A5: session row with missing metadata / missing lastActivity / no
-        // offset → row skipped. The valid sibling prevents the all-rows-skipped rejection.
+        // offset → row skipped. Decision R3 restates the no-offset case as "in the time part" and
+        // names the exact string 2026-11-09T10:00:00 (asserted again in the sibling R3 test, because
+        // at 083120e the date's own '-' is mistaken for an offset). The valid sibling prevents the
+        // all-rows-skipped rejection.
         var json = Root(session: string.Join(",", SessionRow(lastActivity: metadataField), SessionRow(id: "\"period\":\"s-good\"")));
 
         var report = Parse(json);
 
         Assert.Equal(1, report.SkippedRows);
         Assert.Equal("s-good", Assert.Single(report.Sessions).SessionId);
+    }
+
+    [Fact]
+    public void Parse_SessionLastActivityNoOffsetInTimePart_SkipsRow_R3()
+    {
+        // Decision R3: "metadata.lastActivity must carry an explicit offset or Z in the time part
+        // (A5). 2026-11-09T10:00:00 → row skipped." This is the exact instant the handoff cites. At
+        // 083120e the parser's offset sniff uses LastIndexOf('-'), so it misreads the date component's
+        // own '-' at index 7 as an offset and accepts the row — red. The valid sibling keeps the
+        // report alive so the skip (not the all-rows-skipped rejection) is what is under test.
+        var json = Root(session: string.Join(",",
+            SessionRow(id: """ "period":"s-naive" """, lastActivity: """ "metadata":{"lastActivity":"2026-11-09T10:00:00"} """),
+            SessionRow(id: "\"period\":\"s-good\"")));
+
+        var report = Parse(json);
+
+        Assert.Equal(1, report.SkippedRows);
+        Assert.Equal("s-good", Assert.Single(report.Sessions).SessionId);
+    }
+
+    [Theory]
+    [InlineData("2026-11-09T10:00:00+07:00", 3)] // +07:00 → 03:00Z (hand calc: 10:00 − 7 h)
+    [InlineData("2026-11-09T10:00:00-05:00", 15)] // -05:00 → 15:00Z (hand calc: 10:00 + 5 h)
+    [InlineData("2026-11-09T10:00:00Z", 10)]      // Z → 10:00Z unchanged
+    public void Parse_SessionLastActivityWithExplicitOffsetOrZ_IsKept_R3(string lastActivity, int hourUtc)
+    {
+        // Decision R3: "...+07:00, ...-05:00, ...Z accepted." These are the shapes the offset rule
+        // must KEEP (the sibling "no offset" rule above must skip). The negative-offset and Z cases are
+        // specifically guarded here because a LastIndexOf('-') guess or a fix that only handles 'Z'
+        // would wrongly skip (or mis-convert) them. Each accepted row is checked at the UTC instant it
+        // denotes, so the offset is verified to be applied, not ignored.
+        var report = Parse(Root(session: SessionRow(
+            id: "\"period\":\"s-offset\"",
+            lastActivity: $"\"metadata\":{{\"lastActivity\":\"{lastActivity}\"}}")));
+
+        var session = Assert.Single(report.Sessions);
+        Assert.Equal(0, report.SkippedRows); // the row was accepted, not skipped
+        // The instant is what matters: 2026-11-09 at hourUtc in UTC, whatever offset arrived.
+        Assert.Equal(new DateTimeOffset(2026, 11, 9, hourUtc, 0, 0, TimeSpan.Zero), session.LastActivity);
     }
 
     [Theory]
@@ -591,6 +675,57 @@ public sealed class CcUsageJsonParserTests
         var json = Root(session: string.Join(",", SessionRow(agent: agentField), SessionRow(id: "\"period\":\"s-good\"")));
 
         var report = Parse(json);
+
+        Assert.Equal(1, report.SkippedRows);
+        Assert.Equal("s-good", Assert.Single(report.Sessions).SessionId);
+    }
+
+    /// <summary>
+    /// A session row (the row itself is the AgentUsage) with caller-supplied modelBreakdowns contents
+    /// — decisions R4/R5 need to vary the models array while keeping the row fields valid. Row token
+    /// fields are the helper's valid set (buckets 10 + 20 + 0 + 0 = 30 = total → Other 0).
+    /// </summary>
+    private static string SessionRowWithModels(string modelsInner)
+        => "{\"period\":\"s-r4\",\"agent\":\"claude\",\"inputTokens\":10,\"outputTokens\":20,\"cacheCreationTokens\":0,"
+           + "\"cacheReadTokens\":0,\"totalTokens\":30,\"modelBreakdowns\":[" + modelsInner + "],"
+           + "\"metadata\":{\"lastActivity\":\"2026-11-07T10:00:00Z\"}}";
+
+    [Fact]
+    public void Parse_SessionRowWithPricedAndUnpricedModels_PopulatesUsageModels_R4()
+    {
+        // Decision R4: "Session rows parse modelBreakdowns like daily/monthly agent objects: same
+        // model-entry rules … Usage.Models is populated." A priced model plus a missingPricing model
+        // must produce two ModelUsage entries with the SPEC P1.4 oracle cost maths:
+        // PricedCostUsd = 1.25 (the unknown 0.75 cost is excluded), HasUnpricedModels = true.
+        // At 083120e the session path skips model entries entirely (allowModels = false) → red.
+        var priced = """{"modelName":"claude-opus-4-8","inputTokens":5,"outputTokens":5,"cacheCreationTokens":0,"cacheReadTokens":0,"cost":1.25}""";
+        var unknown = """{"modelName":"gemini-3","inputTokens":5,"outputTokens":5,"cacheCreationTokens":0,"cacheReadTokens":0,"cost":0.75,"missingPricing":true}""";
+
+        var report = Parse(Root(session: SessionRowWithModels($"{priced},{unknown}")));
+
+        Assert.Equal(0, report.SkippedRows);
+        var usage = Assert.Single(report.Sessions).Usage;
+        Assert.Equal(2, usage.Models.Count);
+        Assert.Equal(1.25m, usage.PricedCostUsd); // hand calc: 1.25 + (null) → 1.25 (P1.4 oracle)
+        Assert.True(usage.HasUnpricedModels);
+        Assert.Equal(1.25m, usage.Models.Single(m => m.Model == "claude-opus-4-8").CostUsd);
+        Assert.Null(usage.Models.Single(m => m.Model == "gemini-3").CostUsd); // missingPricing wins over cost
+    }
+
+    [Theory]
+    [InlineData("""{"modelName":"","inputTokens":1,"outputTokens":2,"cacheCreationTokens":0,"cacheReadTokens":0,"cost":0.01}""")] // blank name
+    [InlineData("""{"modelName":"m","inputTokens":-1,"outputTokens":2,"cacheCreationTokens":0,"cacheReadTokens":0,"cost":0.01}""")] // negative token field
+    [InlineData("""{"modelName":"m","inputTokens":1,"outputTokens":2,"cacheCreationTokens":0,"cacheReadTokens":0}""")] // E1: cost absent, no missingPricing
+    public void Parse_SessionRowWithInvalidModelEntry_SkipsRow_R4(string badModel)
+    {
+        // Decision R4: "same model-entry rules, an invalid entry skips the row" — the session row must
+        // be invalidated exactly like a daily/monthly row (SPEC P1.3 "An invalid model entry
+        // invalidates its row"). One valid model beside the bad one does not save the row. The valid
+        // sibling session keeps the report alive so the skip, not the all-rows-skipped rejection, is
+        // what is under test. At 083120e session model entries are never validated → red.
+        var report = Parse(Root(session: string.Join(",",
+            SessionRowWithModels($"{badModel},{ValidModel}"),
+            SessionRow(id: "\"period\":\"s-good\""))));
 
         Assert.Equal(1, report.SkippedRows);
         Assert.Equal("s-good", Assert.Single(report.Sessions).SessionId);
