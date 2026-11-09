@@ -70,6 +70,7 @@ internal sealed class CcUsageRunner : ICcUsageRunner
         ICcUsageProcess? process = null;
         Task<string>? stdout = null;
         Task<string>? stderr = null;
+        var outputLimitExceeded = false;
 
         try
         {
@@ -117,6 +118,7 @@ internal sealed class CcUsageRunner : ICcUsageRunner
         }
         catch (CcUsageOutputLimitExceededException)
         {
+            outputLimitExceeded = true;
             return CcUsageRunOnceResult.Failure(
                 new AgentUsageUnavailableException(
                     AgentUsageErrorKind.OutputTooLarge,
@@ -143,11 +145,14 @@ internal sealed class CcUsageRunner : ICcUsageRunner
                 try { process.Kill(); }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
 
-                try
+                if (!outputLimitExceeded)
                 {
-                    await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    try
+                    {
+                        await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
                 }
-                catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
 
                 process.Dispose();
             }
@@ -228,12 +233,6 @@ internal sealed class CcUsageRunner : ICcUsageRunner
             {
                 if (retain)
                 {
-                    // If the deadline already fired, the result is Timeout, not OutputTooLarge (R2).
-                    if (deadline.Token.IsCancellationRequested)
-                    {
-                        throw new OperationCanceledException(deadline.Token);
-                    }
-
                     throw new CcUsageOutputLimitExceededException();
                 }
 
