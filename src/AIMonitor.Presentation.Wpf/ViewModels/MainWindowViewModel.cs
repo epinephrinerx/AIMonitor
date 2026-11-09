@@ -1,6 +1,8 @@
 using System.Windows.Input;
+using AIMonitor.Application.AgentUsage;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
+using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Tray;
 
 namespace AIMonitor.Presentation.Wpf.ViewModels;
@@ -9,6 +11,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly LatestRefreshCoordinator _refreshCoordinator;
     private readonly SettingsSession _settingsSession;
+    private readonly CachedAgentUsageSource? _agentUsageSource;
+    private readonly AgentUsageRefresher? _agentUsageRefresher;
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
     private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
@@ -17,35 +21,61 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _pendingRefresh;
     private string _lastRefreshStatus = "Ready";
     private ProviderTabViewModel _selectedTab;
+    private object? _selectedTabItem;
+    private bool _isAllAgentsSelected;
     private DashboardOption<string> _selectedMetric;
     private DashboardOption<int> _selectedRange;
     private DashboardOption<int> _selectedInterval;
     private bool _syncingFromSettings;
     private DateTimeOffset? _lastSuccess;
     private bool _showComposedStatus;
+    private Task? _agentUsageTask;
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
         SettingsSession settingsSession,
-        ITrayReadingsSink? trayHost = null)
+        ITrayReadingsSink? trayHost = null,
+        CachedAgentUsageSource? agentUsage = null)
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
         _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
         _traySink = trayHost;
+        _agentUsageSource = agentUsage;
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
         AgyTab = new ProviderTabViewModel("agy", "Gemini / AGY");
+        AllAgentsTab = new AllAgentsTabViewModel();
 
         ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
+        Tabs = [ClaudeTab, OpenAiTab, AgyTab, AllAgentsTab];
+
         var settings = _settingsSession.Current;
-        _selectedTab = ProviderTabs.FirstOrDefault(t => t.ProviderId == settings.ActiveProvider) ?? ClaudeTab;
+        if (settings.ActiveProvider == "all-agents")
+        {
+            _isAllAgentsSelected = true;
+            _selectedTab = ClaudeTab;
+            _selectedTabItem = AllAgentsTab;
+        }
+        else
+        {
+            _selectedTab = ProviderTabs.FirstOrDefault(t => t.ProviderId == settings.ActiveProvider) ?? ClaudeTab;
+            _selectedTabItem = _selectedTab;
+        }
+
         _selectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
         _selectedRange = DashboardOptions.Find(DashboardOptions.Ranges, settings.ChartRangeDays, 1);
         _selectedInterval = DashboardOptions.Find(DashboardOptions.Intervals, settings.RefreshIntervalSeconds, 2);
+
+        if (_agentUsageSource is not null)
+        {
+            _agentUsageRefresher = new AgentUsageRefresher(_agentUsageSource, () => DateTimeOffset.UtcNow, TimeZoneInfo.Local);
+            _agentUsageRefresher.Updated += OnAgentUsageUpdated;
+        }
+
         _settingsSession.Changed += OnSettingsChanged;
 
-        RefreshCommand = new RelayCommand(async () => await RefreshAsync(), () => !IsRefreshing);
+        RefreshCommand = new RelayCommand(async () => await RefreshAsync(manual: true), () => !IsRefreshing);
         OpenSettingsCommand = new RelayCommand(() => RequestOpenSettings?.Invoke());
         SwitchToWidgetCommand = new RelayCommand(() => RequestSwitchToWidget?.Invoke());
         OpenLogCommand = new RelayCommand(() => RequestOpenLog?.Invoke());
@@ -79,7 +109,49 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ProviderTabViewModel ClaudeTab { get; }
     public ProviderTabViewModel OpenAiTab { get; }
     public ProviderTabViewModel AgyTab { get; }
+    public AllAgentsTabViewModel AllAgentsTab { get; }
     public IReadOnlyList<ProviderTabViewModel> ProviderTabs { get; }
+    public IReadOnlyList<object> Tabs { get; }
+
+    public object? SelectedTabItem
+    {
+        get => _selectedTabItem;
+        set
+        {
+            if (ReferenceEquals(_selectedTabItem, value))
+            {
+                return;
+            }
+
+            switch (value)
+            {
+                case ProviderTabViewModel provider:
+                    _selectedTabItem = provider;
+                    OnPropertyChanged();
+                    IsAllAgentsSelected = false;
+                    SelectedTab = provider;
+                    break;
+                case AllAgentsTabViewModel:
+                    _selectedTabItem = AllAgentsTab;
+                    OnPropertyChanged();
+                    IsAllAgentsSelected = true;
+                    _ = SaveAsync(s => s with { ActiveProvider = "all-agents" });
+                    break;
+                default:
+                    _selectedTabItem = value;
+                    OnPropertyChanged();
+                    break;
+            }
+        }
+    }
+
+    public bool IsAllAgentsSelected
+    {
+        get => _isAllAgentsSelected;
+        set => SetProperty(ref _isAllAgentsSelected, value);
+    }
+
+    internal Task? AgentUsageTask => _agentUsageTask;
 
     public IReadOnlyDictionary<string, Domain.ProviderSnapshot> LatestSnapshots => _latestSnapshots;
     private IReadOnlyDictionary<string, Domain.ProviderSnapshot> _latestSnapshots = new Dictionary<string, Domain.ProviderSnapshot>();
@@ -89,9 +161,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedTab;
         set
         {
-            if (value is null || !SetProperty(ref _selectedTab, value))
+            if (value is null)
             {
                 return;
+            }
+
+            SetProperty(ref _selectedTab, value);
+
+            if (_selectedTabItem != value)
+            {
+                _selectedTabItem = value;
+                OnPropertyChanged(nameof(SelectedTabItem));
+            }
+
+            if (_isAllAgentsSelected)
+            {
+                _isAllAgentsSelected = false;
+                OnPropertyChanged(nameof(IsAllAgentsSelected));
             }
 
             if (!_syncingFromSettings)
@@ -286,8 +372,19 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private long _requestIdCounter;
 
+    private int ChartRangeDays => _selectedRange.Value;
+
+    private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.Local).DateTime);
+        AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
+        // P4: ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
+        // P4: OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
+        // P4: AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
+    }
+
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
-    public async Task RefreshAsync(string? onlyProviderId = null)
+    public async Task RefreshAsync(string? onlyProviderId = null, bool manual = false)
     {
         if (IsRefreshing)
         {
@@ -357,6 +454,14 @@ public sealed class MainWindowViewModel : ViewModelBase
                 _pendingRefresh = false;
                 await RefreshAsync();
             }
+        }
+
+        // Start a background ccusage read for the All agents tab after the provider refresh
+        // (success or failure) so the All agents UI never depends on provider state.
+        if (_agentUsageRefresher is not null && onlyProviderId is null)
+        {
+            var force = manual && IsAllAgentsSelected;
+            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
         }
     }
 }

@@ -56,7 +56,7 @@ public sealed record AppSettings
         var range = ChartRangeDays is 7 or 14 or 30 or 90 ? ChartRangeDays : 14;
         var rememberSize = DashboardWidth == 0 && DashboardHeight == 0;
         var activeProvider = ActiveProvider == "gemini" ? "agy"
-            : ActiveProvider is "claude" or "openai" or "agy" ? ActiveProvider : "claude";
+            : ActiveProvider is "claude" or "openai" or "agy" or "all-agents" ? ActiveProvider : "claude";
         var providers = Providers is null
             ? new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase)
             : Providers.Where(static pair => pair.Value is not null)
