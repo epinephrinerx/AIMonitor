@@ -648,9 +648,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         LastUpdated = snapshot.FetchedAt;
         IsConfigured = configuredNow;
         HasSnapshot = true;
-        // A configured service that reported an error shows the error banner, not the setup card
-        // (E10: an unconfigured hint would otherwise be empty for the OpenCode tab).
-        ShowSetupCard = !snapshot.Configured && meterList.Count == 0;
+        // Every other provider keeps R-004's setup card. Only the OpenCode tab never shows it, so an
+        // error-only snapshot shows the error banner instead (E10), and a configured snapshot with no
+        // meters does not draw an empty gauge card.
+        var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
