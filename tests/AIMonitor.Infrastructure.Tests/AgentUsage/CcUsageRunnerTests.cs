@@ -10,7 +10,8 @@ namespace AIMonitor.Infrastructure.Tests.AgentUsage;
 /// Tests for <see cref="CcUsageRunner"/> per SPEC R-014 §P1.3 "Runner", decisions A6, A12, OP3,
 /// R1 (the offline retry rules, which retry cases run and which failures must not),
 /// R2 (OutputTooLarge vs Timeout classification with asynchronous readers),
-/// R11 (R2 holds even when the child never exits) and R7 (the seam),
+/// R11 (R2 holds even when the child never exits), R7 (the seam) and R12/R13 (the deadline always
+/// beats a late-exited child — deterministic reproduction),
 /// mirroring the hand-written fake-process shape of the AGY runner tests
 /// (<c>tests/AIMonitor.Infrastructure.Tests/Providers/Agy/AgyProcessBoundaryTests.cs</c>).
 /// No real process is ever started.
@@ -634,6 +635,57 @@ public sealed class CcUsageRunnerTests
         Assert.Equal(BaseArguments.Append("--offline").ToArray(), factory.Infos[1].ArgumentList);
         Assert.True(first.Killed);
         Assert.True(second.Killed);
+    }
+
+    [Fact]
+    public async Task DeadlineFiredWhileStartBlocks_CompleteExitedChildArrivesLate_ThrowsTimeout_AndOfflineRetryAlsoTimesOut()
+    {
+        // Decision R13 — the deterministic R12 reproduction: "the fake `start` blocks (e.g.
+        // Thread.Sleep) longer than the runner timeout, then returns a child with complete
+        // StringReader stdout/stderr, already-exited, exit code 0 → Timeout; 2 starts; the second
+        // has --offline last". Expected RED against the current code (R12: once all three tasks
+        // have completed, WaitAsync(deadline.Token) returns without looking at the token and exit
+        // code 0 turns into a success) — WO2 is fixing R12 in parallel; the flaky
+        // DeadlineFiredWhileProcessExited_… test above (the 2-in-30-parallel-runs version of the
+        // same bug) stays unchanged.
+        //
+        // The deadline is the run's per-run timeout (SPEC P1.3 "Timeout per run"), so sleeping
+        // past it inside `start` means the token has already fired when the child exists — the
+        // R12 rule then applies: "after the reads and the exit wait complete, if the deadline
+        // fired and the caller did not cancel → Timeout". A first-run Timeout is retryable (R1,
+        // A6), hence exactly one second start with --offline; the second start blocks the same
+        // way and times out too, and "Both fail → error of the second run" (P1.3) throws Timeout.
+        const int TimeoutMs = 50;  // the runner's per-run deadline, as the seam takes it (M3/R7)
+        const int BlockMs = 500;   // `start` returns 10× after that deadline has fired — deterministic
+
+        var infos = new List<ProcessStartInfo>();
+        var children = new List<Child>();
+        ICcUsageRunner runner = new CcUsageRunner( // M3: reached through ICcUsageRunner, as the source does
+            () => "synthetic.exe",
+            info =>
+            {
+                infos.Add(info);
+                Thread.Sleep(BlockMs); // the deadline fires while this thread sleeps
+                var child = new Child(); // Child's defaults: complete StringReader stdout/stderr,
+                children.Add(child);     // already exited (Hang = false), exit code 0
+                return child;
+            },
+            TimeSpan.FromMilliseconds(TimeoutMs),
+            DefaultLimit);
+
+        var error = await Assert.ThrowsAsync<AgentUsageUnavailableException>(() =>
+            runner.RunAsync(null, default).WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(AgentUsageErrorKind.Timeout, error.Kind); // R12: a run is never a success once the deadline fired
+        Assert.Equal(2, infos.Count); // R1: the --offline retry actually ran
+        Assert.Equal(2, children.Count);
+        Assert.Equal(BaseArguments, infos[0].ArgumentList); // the first run has no --offline
+        Assert.Equal(BaseArguments.Append("--offline").ToArray(), infos[1].ArgumentList); // the second has it last
+
+        // SPEC P1.3 "same pipe-drain and kill-on-deadline behaviour": both late children are
+        // killed and disposed — an undisposed or un-killed child would leak a running ccusage.
+        Assert.All(children, c => Assert.True(c.Killed));
+        Assert.All(children, c => Assert.True(c.Disposed));
     }
 
     /// <summary>
