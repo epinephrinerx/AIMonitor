@@ -4,6 +4,7 @@ using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
+using System.Collections.Concurrent;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
@@ -30,6 +31,13 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// decision F21: every test here captures ONE local day (CreateWithReport) — fixture and
 /// assertions read the same value, and MainWindowViewModel's own clock read is the residual,
 /// reported midnight-boundary risk (no production seam, F22).
+/// F23/F24 (WO1 8afa278): the view model captures SynchronizationContext.Current in its
+/// constructor and POSTS the settings sync when SettingsSession.Changed fires off that context.
+/// xUnit's own AsyncTestSyncContext pumps its queue at every await and hides that, so every
+/// view model here is constructed under a controllable QueuedSyncContext (installed before
+/// construction, restored in finally) that only runs callbacks when the test drains it; the
+/// tests that raise Changed through the session drain before asserting, and the F23 tests pin
+/// posted-versus-inline and the one-post-per-raise contract directly.
 /// </summary>
 public sealed class MainWindowViewModelOpenCodeChartWiringTests
 {
@@ -43,18 +51,34 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         CachedAgentUsageSource? agentUsage,
         AppSettings initial,
         out BlockingSettingsStore store,
-        out SettingsSession session)
+        out SettingsSession session,
+        out QueuedSyncContext context)
     {
         var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
         store = new BlockingSettingsStore(initial);
         store.Release(); // tab selection and view-change saves write through
         session = new SettingsSession(store, initial);
-        return new MainWindowViewModel(coordinator, session, agentUsage: agentUsage);
+
+        // F24: install the controllable context BEFORE constructing so the view model captures it
+        // as its UI context (xUnit's AsyncTestSyncContext would pump its queue at every await and
+        // hide F23's posting), and restore it straight after so the test's own awaits stay on the
+        // xUnit context. Off-context raises then sit in the queue until the test drains it.
+        var previous = SynchronizationContext.Current;
+        context = new QueuedSyncContext();
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            return new MainWindowViewModel(coordinator, session, agentUsage: agentUsage);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
     }
 
     private static MainWindowViewModel CreateVm(CachedAgentUsageSource? agentUsage, AppSettings initial, out BlockingSettingsStore store)
     {
-        return CreateVm(agentUsage, initial, out store, out _);
+        return CreateVm(agentUsage, initial, out store, out _, out _);
     }
 
     /// <summary>One opencode day row: kimi total 2000 / output 100 / $1.25, deepseek total 300 /
@@ -84,14 +108,16 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     /// every assertion read this value, never a second <c>DateTime.Now</c>. MainWindowViewModel
     /// takes no clock/TimeProvider (F21 forbids a production change, F22 forbids seams), so the
     /// residual risk is only the VM's own <c>DateTimeOffset.UtcNow</c> rolling past midnight
-    /// between the capture below and its internal read — reported, not pinned.</summary>
-    private static (MainWindowViewModel Vm, FakeAgentUsageSource Source, SettingsSession Session, DateOnly Today) CreateWithReport()
+    /// between the capture below and its internal read — reported, not pinned.
+    /// F24: the returned context is the one the view model captured at construction; tests that
+    /// raise <c>Changed</c> through the session must drain it before asserting.</summary>
+    private static (MainWindowViewModel Vm, FakeAgentUsageSource Source, SettingsSession Session, DateOnly Today, QueuedSyncContext Context) CreateWithReport()
     {
         var today = DateOnly.FromDateTime(DateTime.Now);
         var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(today)));
         var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
-        var vm = CreateVm(cache, new AppSettings(), out _, out var session);
-        return (vm, source, session, today);
+        var vm = CreateVm(cache, new AppSettings(), out _, out var session, out var context);
+        return (vm, source, session, today, context);
     }
 
     private static DashboardOption<int> RangeOption(MainWindowViewModel vm, int days) =>
@@ -105,7 +131,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     [Fact]
     public async Task Updated_G13_OpenCodeTabShowsPerModelChartWithCosts()
     {
-        var (vm, source, _, localToday) = CreateWithReport();
+        var (vm, source, _, localToday, _) = CreateWithReport();
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!; // E2's Updated path: Build gets the live ChartRangeDays/metric
@@ -140,7 +166,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     [Fact]
     public async Task Updated_F9_RangeThenMetricChange_RebuildTab_NoExtraCcusageRead()
     {
-        var (vm, source, _, localToday) = CreateWithReport();
+        var (vm, source, _, localToday, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
@@ -179,7 +205,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         // F1: "Changing the refresh interval does not rebuild the OpenCode tab." Observable: the
         // tab's chart/gauge instances are untouched even after the settings change has fully
         // settled through the session (a rebuild wired from OnSettingsChanged would replace them).
-        var (vm, source, session, _) = CreateWithReport();
+        var (vm, source, session, _, context) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -187,7 +213,8 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         var meters = vm.OpenCodeTab.Meters;
 
         vm.SelectedInterval = vm.IntervalOptions.First(o => o.Value == 0); // "Manual only"
-        await session.FlushAsync(); // the save (and its Changed round-trip) has fully settled
+        await session.FlushAsync(); // the save has fully settled
+        context.Drain(); // F23/F24: the Changed round-trip is POSTED to the captured context — run it
 
         Assert.Equal("Manual only", vm.SelectedInterval.Label); // the interval itself did change
         Assert.Same(buckets, vm.OpenCodeTab.ChartBuckets);
@@ -201,7 +228,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F1: "when the value really changes" — re-selecting the current range (e.g. a combobox
         // re-binding the same option) is not a view change at all.
-        var (vm, _, _, _) = CreateWithReport();
+        var (vm, _, _, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -215,7 +242,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     public async Task F1_E29_EqualBudgetsStillShortCircuit_ButARangeChangeRebuildsAnyway()
     {
         // F1: "E29's equal-budgets short-cut stays for budget changes only."
-        var (vm, source, _, _) = CreateWithReport();
+        var (vm, source, _, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -283,7 +310,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F11 (R1 m2): "a range/metric/budget rebuild does not move LastUpdated" — the snapshot's
         // FetchedAt is lastGood.RetrievedAt (FixedUtc), not the wall clock at rebuild time.
-        var (vm, source, _, _) = CreateWithReport();
+        var (vm, source, _, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(FixedUtc, vm.OpenCodeTab.LastUpdated);
@@ -304,13 +331,16 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F13 (R1 m4): "the OpenCode rebuild also runs when range/metric change through
         // OnSettingsChanged (the _syncingFromSettings path), still only when the value really
-        // changes." The change enters through the session, not the combobox setter.
-        var (vm, source, session, _) = CreateWithReport();
+        // changes." The change enters through the session, not the combobox setter. F23/F24: that
+        // raise fires on a thread-pool thread, so the sync is posted to the captured context —
+        // drain the queue before asserting (before F24 this test raced xUnit's own pump).
+        var (vm, source, session, _, context) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
 
         await session.UpdateAsync(s => s with { ChartRangeDays = 30, ChartMetric = UsageMetric.OutputTokens });
+        context.Drain();
 
         Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
         Assert.Equal(100.0, vm.OpenCodeTab.ChartBuckets[^1].PerModel[Kimi]); // values switched with the metric
@@ -323,14 +353,107 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F13's "only when the value really changes" holds on the sync path too: OnSettingsChanged
         // re-assigns every selector, and a same-valued re-assignment must not rebuild the tab.
-        var (vm, _, session, _) = CreateWithReport();
+        // F24: drain so the sync actually runs — otherwise the assert would pass on a starved queue.
+        var (vm, _, session, _, context) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
 
         await session.UpdateAsync(s => s with { Theme = "dark" });
+        context.Drain();
 
         Assert.Same(buckets, vm.OpenCodeTab.ChartBuckets);
+    }
+
+    // ── F23/F24: the settings sync is posted to the context captured at construction ──
+
+    [Fact]
+    public async Task F23_OffContextRaise_IsPosted_AppliedOnDrain_ExactlyOnePost()
+    {
+        // F23 (R2 major) + F24: Changed fires on a thread-pool thread (the blocking store's save
+        // continuation is RunContinuationsAsynchronously), so OnSettingsChanged must POST to the
+        // context the view model captured — nothing applies before Drain, SelectedRange and the
+        // OpenCode chart apply on Drain, and one raise produces exactly one Post (no re-post loop:
+        // the posted body never re-tests the context).
+        var (vm, source, session, _, context) = CreateWithReport();
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        context.Drain(); // settle any round-trips of the first refresh: clean baseline below
+        Assert.Equal(14, vm.SelectedRange.Value);
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+
+        var postsBefore = context.PostCount;
+        await session.UpdateAsync(s => s with { ChartRangeDays = 30, ChartMetric = UsageMetric.OutputTokens });
+
+        // posted, not run: exactly one callback sits in the queue with no visible effect
+        Assert.Equal(postsBefore + 1, context.PostCount);
+        Assert.Equal(1, context.PendingCount);
+        Assert.Equal(14, vm.SelectedRange.Value);
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+
+        context.Drain();
+
+        Assert.Equal(0, context.PendingCount);
+        Assert.Equal(postsBefore + 1, context.PostCount); // the body did not re-post itself
+        Assert.Equal(30, vm.SelectedRange.Value);
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
+        Assert.Equal(100.0, vm.OpenCodeTab.ChartBuckets[^1].PerModel[Kimi]); // values switched with the metric
+        Assert.Equal(UsageMetric.OutputTokens, vm.OpenCodeTab.ChartMetric);
+        Assert.Equal(1, source.ReadCount); // rebuild from the stored pair only (E2 pattern)
+    }
+
+    [Fact]
+    public async Task F23_OnContextRaise_RunsInline_NoPost()
+    {
+        // F23: "runs inline when already on [the captured] it". The blocking store can only raise
+        // off-context (its save continuation always hops to the thread pool), so this test uses a
+        // store whose SaveAsync completes synchronously: UpdateAsync then raises Changed ON the
+        // test thread while the very context the view model captured is installed — the sync must
+        // run there and then, without a single Post.
+        var today = DateOnly.FromDateTime(DateTime.Now); // F21: ONE local day for the whole test
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(today)));
+        var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        var session = new SettingsSession(new InlineSettingsStore(), new AppSettings());
+        var context = new QueuedSyncContext();
+        var previous = SynchronizationContext.Current;
+
+        MainWindowViewModel vm;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+
+        var postsBefore = context.PostCount;
+        Task update;
+        SynchronizationContext.SetSynchronizationContext(context); // the captured context is current
+        try
+        {
+            update = session.UpdateAsync(s => s with { ChartRangeDays = 30, ChartMetric = UsageMetric.OutputTokens });
+            Assert.True(update.IsCompleted); // the synchronous store keeps the whole raise on this thread
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await update;
+
+        Assert.Equal(postsBefore, context.PostCount); // ran inline — nothing was posted
+        Assert.Equal(30, vm.SelectedRange.Value);
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
+        Assert.Equal(100.0, vm.OpenCodeTab.ChartBuckets[^1].PerModel[Kimi]);
+        Assert.Equal(UsageMetric.OutputTokens, vm.OpenCodeTab.ChartMetric);
+        Assert.Equal(1, source.ReadCount);
     }
 
     // ── Fakes (hand-written, same as the R-014/R-015 test files) ───────────────
@@ -345,6 +468,74 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         {
             var number = Interlocked.Increment(ref _readCount);
             return handler(number);
+        }
+    }
+
+    /// <summary>F24 helper: a <see cref="SynchronizationContext"/> that queues every Post and runs
+    /// nothing until the test calls <see cref="Drain"/>. xUnit's own AsyncTestSyncContext pumps its
+    /// queue at every await, which hid F23's "posted, not inline" behaviour (the failing F13 test
+    /// raced that pump). Installed around the view model's construction and restored in the
+    /// caller's finally — the VM captures this context as its UI context while the test thread
+    /// keeps using the xUnit context for its own awaits, so nothing here ever blocks.</summary>
+    private sealed class QueuedSyncContext : SynchronizationContext
+    {
+        // A posted body that re-posted itself (the loop F23's design forbids) would otherwise hang
+        // the test run; fail fast instead — the real body drains after the first callback.
+        private const int DrainGuard = 64;
+
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private int _postCount;
+
+        /// <summary>Total Post calls received, from any thread.</summary>
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        /// <summary>Callbacks queued and not yet drained.</summary>
+        public int PendingCount => _queue.Count;
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            _queue.Enqueue((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) =>
+            throw new InvalidOperationException("F23: OnSettingsChanged must Post to the captured context, never Send.");
+
+        /// <summary>
+        /// Runs the queued callbacks FIFO on the calling thread WITHOUT installing this context —
+        /// the posted body must not depend on Current (WO1 kept the context check out of
+        /// OnSettingsChangedCore for exactly this reason).
+        /// </summary>
+        public void Drain()
+        {
+            for (var run = 0; _queue.TryDequeue(out var item); run++)
+            {
+                if (run >= DrainGuard)
+                {
+                    throw new InvalidOperationException(
+                        "The settings sync re-posted to its own context: the queue never drains (F23 re-post loop).");
+                }
+
+                item.Callback(item.State);
+            }
+        }
+    }
+
+    /// <summary>Store whose SaveAsync completes synchronously, so SettingsSession raises Changed on
+    /// the CALLER's thread — the only way to get an on-context raise for F23's inline branch (the
+    /// blocking store's already-completed continuation task always hops to the thread pool).</summary>
+    private sealed class InlineSettingsStore : ISettingsStore
+    {
+        private AppSettings _current = new();
+
+        public bool Exists => true;
+
+        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(_current);
+
+        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+        {
+            Volatile.Write(ref _current, settings);
+            return Task.CompletedTask;
         }
     }
 }
