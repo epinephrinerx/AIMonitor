@@ -16,31 +16,31 @@
 ### Agent Roster
 
 เก้าบทบาท (ต้นแบบมีแปด โปรเจกต์นี้เพิ่ม Writing Owner 3) บทบาทละสามช่อง: ตัว agent, model และ effort
-ตั้งค่าโดยผู้ใช้ 2026-11-09
+ตั้งค่าโดยผู้ใช้ 2026-11-09 · แก้ WO1/WO2/WO3/Inspector/Reviewer2 เมื่อ 2026-11-10 (ผู้ใช้ขอ Reviewer1 = Opus 5.5 แต่ซ้ำกับ Coding Owner จึงคง Fable 5.1 ตามคำตัดสินของผู้ใช้)
 
 - Coding Owner : `Claude Code` (Anthropic)
 - Coding Owner Model : `Claude Opus 5.5`
 - Coding Owner Effort : `High`
-- Writing Owner 1 : `opencode` ใช้ provider Ollama บนเครื่อง `192.168.1.128`
-- Writing Owner 1 Model : `qwen-coder-12k`
+- Writing Owner 1 : `opencode`
+- Writing Owner 1 Model : `opencode-go/glm-5.3-flash` (เปลี่ยนจาก Ollama qwen-coder-12k เมื่อ 2026-11-10)
 - Writing Owner 1 Effort : `High`
 - Writing Owner 2 : `opencode`
-- Writing Owner 2 Model : `opencode-go/kimi-k2.7-code`
-- Writing Owner 2 Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
+- Writing Owner 2 Model : `opencode-go/qwen3.7-plus` (เปลี่ยนจาก kimi-k2.7-code เมื่อ 2026-11-10)
+- Writing Owner 2 Effort : `High` (`opencode run` ไม่มี flag กำหนด effort)
 - Writing Owner 3 : `opencode`
-- Writing Owner 3 Model : `opencode-go/deepseek-v4.1-flash`
-- Writing Owner 3 Effort : `High` (`opencode run` ไม่มี flag กำหนด effort; เปลี่ยนจาก agy Gemini 3.8 Flash เมื่อ 2026-11-09)
+- Writing Owner 3 Model : `opencode-go/kimi-k2.7-code` (เปลี่ยนจาก deepseek-v4.1-flash เมื่อ 2026-11-10)
+- Writing Owner 3 Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
 - Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
 - Test Author Model : `opencode-go/qwen3.8-flash`
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
-- Inspector : `opencode` ผู้ตรวจ spec และตรวจเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.7
-- Inspector Model : `opencode-go/qwen3.7-plus`
+- Inspector : `Codex` ผู้ตรวจ spec และตรวจเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.7
+- Inspector Model : `GPT-6-Sol` (เปลี่ยนจาก opencode qwen3.7-plus เมื่อ 2026-11-10)
 - Inspector Effort : `High`
 - Reviewer1 : `Claude Code`
 - Reviewer1 Model : `Claude Fable 5.1`
 - Reviewer1 Effort : `High`
-- Reviewer2 : `opencode`
-- Reviewer2 Model : `opencode-go/glm-5.3-flash`
+- Reviewer2 : `Codex`
+- Reviewer2 Model : `GPT-6.1-Sol` (เปลี่ยนจาก opencode glm-5.3-flash เมื่อ 2026-11-10)
 - Reviewer2 Effort : `High`
 - Integrator : `Claude Code`
 - Integrator Model : `Claude Sonnet 5.5`
@@ -65,18 +65,13 @@
 - **Inspector Model ซ้ำกับ Reviewer ได้ แต่ต้องเป็น session แยกกัน** และ**ควรต่างจาก Reviewer1**
   เพื่อให้มุมมองไม่กระจุกอยู่ที่โมเดลเดียว — ถ้าตั้งให้ซ้ำกับ Reviewer1 ให้บันทึกเหตุผลไว้หนึ่งบรรทัด
 
-**ข้อสังเกตของ roster นี้**
+****ข้อสังเกตของ roster นี้**
 
-- Writing Owner 1, Test Author และ Inspector เป็นตระกูล Qwen ทั้งสามตัว (คนละโมเดล จึงไม่ผิดกฎ)
-  แต่อาจมองข้ามจุดเดียวกัน — เฟสที่ Writing Owner 1 เขียน ให้ Reviewer ทั้งสองตัวตรวจครบเสมอ
-  และไม่ใช้ Writing Owner 1 เป็นผู้ตรวจงานที่ Test Author/Inspector ส่งกลับ
-- Writing Owner 1 ใช้ผ่าน opencode เป็น `ollama/qwen-coder-12k-tools:latest` (สร้างบน Ollama 2026-11-09:
-  น้ำหนักเดียวกับ qwen-coder-12k แต่ template ให้ tool call เป็น JSON เปล่า เพราะโมเดลไม่ใส่แท็ก `<tool_call>`,
-  `num_ctx 24576` เพราะ prompt ของ opencode ใช้ราว 9.3k token และ `temperature 0` เพราะค่าเดิมแก้ไฟล์ได้ไม่สม่ำเสมอ)
-  ล้นออก CPU ราว 1.2 GiB จึงช้ากว่าโมเดลอื่น — ส่งงานที่ scope แคบ (ไม่กี่ไฟล์) ให้ตัวนี้
-  ค่า Effort `High` ไม่มีผลกับ Ollama
-
-### ขอบเขตการทำงานของ agent
+- Writing Owner 2 (qwen3.7-plus) กับ Test Author (qwen3.8-flash) เป็นตระกูล Qwen ทั้งคู่ (คนละโมเดล จึงไม่ผิดกฎ)
+  แต่อาจเชื่อสมมติฐานเดียวกัน — เฟสที่ Writing Owner 2 เขียน ให้ Inspector ขั้น B สร้าง mutant ของตัวเองเสมอ
+- Inspector (GPT-6-Sol) กับ Reviewer2 (GPT-6.1-Sol) เป็นตระกูล GPT ทั้งคู่ (คนละโมเดล คนละ session) — ไม่ผิดกฎ
+- Writing Owner 1 (glm-5.3-flash) เดิมเป็น Reviewer2 — งานที่ Reviewer2 เดิมเคยรีวิวไว้ไม่ต้องให้ WO1 แก้
+ขอบเขตการทำงานของ agent
 
 - Max Sessions ต่อ agent: `1`
 - Progress Report Interval: `15 นาที`
