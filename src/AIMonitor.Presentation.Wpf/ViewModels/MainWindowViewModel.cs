@@ -225,10 +225,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedMetric;
         set
         {
-            if (value is not null && SetProperty(ref _selectedMetric, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedMetric, value))
             {
                 RebuildOpenCodeTabForViewChange();
-                _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                }
             }
         }
     }
@@ -239,10 +242,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedRange;
         set
         {
-            if (value is not null && SetProperty(ref _selectedRange, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedRange, value))
             {
                 RebuildOpenCodeTabForViewChange();
-                _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                }
             }
         }
     }

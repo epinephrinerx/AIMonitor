@@ -1,5 +1,4 @@
 using AIMonitor.Domain;
-using AIMonitor.Presentation.Wpf.Controls;
 
 namespace AIMonitor.Presentation.Wpf.ViewModels;
 
@@ -11,8 +10,6 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 public static class OpenCodeHistoryBuilder
 {
     public const string AgentId = "opencode";
-    public const string TotalTokens = "Total tokens";
-    public const string OutputTokens = "Output tokens";
 
     /// <summary>
     /// Returns <c>null</c> when there is no report; otherwise a history covering the
@@ -132,16 +129,16 @@ public static class OpenCodeHistoryBuilder
 
     private static double ValueFor(ModelUsage model, string metric) => metric switch
     {
-        OutputTokens => model.Tokens.Output,
-        ChartFormat.ValueMetric => model.CostUsd is { } cost ? (double)cost : 0d,
+        UsageMetric.OutputTokens => model.Tokens.Output,
+        UsageMetric.EquivalentValue => model.CostUsd is { } cost ? (double)cost : 0d,
         _ => model.Tokens.Total,
     };
 
     private static string NormaliseMetric(string metric) => metric switch
     {
-        OutputTokens => OutputTokens,
-        ChartFormat.ValueMetric => ChartFormat.ValueMetric,
-        _ => TotalTokens,
+        UsageMetric.OutputTokens => UsageMetric.OutputTokens,
+        UsageMetric.EquivalentValue => UsageMetric.EquivalentValue,
+        _ => UsageMetric.TotalTokens,
     };
 
     private sealed class DayCost

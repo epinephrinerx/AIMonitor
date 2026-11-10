@@ -106,6 +106,15 @@ public sealed class StackedColumnChartControl : FrameworkElement
         return entries;
     }
 
+    /// <summary>
+    /// Right-hand cost-axis tick label. Below $1,000 it shows up to four decimal places with at
+    /// least two; from $1,000 it falls back to the compact number format (F10).
+    /// </summary>
+    internal static string CostTickLabel(double v) =>
+        v < 1000.0
+            ? "$" + v.ToString("#,##0.00##", CultureInfo.InvariantCulture)
+            : "$" + ChartFormat.Compact(v);
+
     /// <summary>Colour for a series: categorical hue by position, muted ink for the "Other" spill.</summary>
     internal static Color ColourFor(ThemePalette palette, IReadOnlyList<string> series, string name)
     {
@@ -155,7 +164,7 @@ public sealed class StackedColumnChartControl : FrameworkElement
         var showCosts = ShowsCostAxis(costs);
         _bands.Clear();
 
-        if (buckets.Count == 0 || (series.Count == 0 && !showCosts))
+        if (buckets.Count == 0 || series.Count == 0)
         {
             var empty = Text("No usage recorded in this range", 13, p.InkMuted, dpi, FontWeights.Normal);
             dc.DrawText(empty, new Point((width - empty.Width) / 2.0, (height - empty.Height) / 2.0));
@@ -182,7 +191,7 @@ public sealed class StackedColumnChartControl : FrameworkElement
         {
             costAxisMax = ChartFormat.NiceAxisMax(costs!.Max(cost => cost.PricedUsd), GridDivisions);
             costTickTexts = Enumerable.Range(0, GridDivisions + 1)
-                .Select(i => ChartFormat.Money(costAxisMax * i / GridDivisions))
+                .Select(i => CostTickLabel(costAxisMax * i / GridDivisions))
                 .ToList();
             var widest = costTickTexts.Max(t => Text(t, fontSize, p.InkMuted, dpi, FontWeights.Normal).Width);
             right = Math.Max(right, widest + 10.0);
@@ -250,7 +259,7 @@ public sealed class StackedColumnChartControl : FrameworkElement
             }
         }
 
-        // Optional cost line over the bars, on its own right-hand axis (F5).
+        // Optional cost line over the bars, on its own right-hand axis (F5, F14).
         if (showCosts && costs is not null)
         {
             var costByDay = new Dictionary<DateOnly, DailyCost>();
@@ -259,8 +268,8 @@ public sealed class StackedColumnChartControl : FrameworkElement
                 costByDay[cost.Day] = cost;
             }
 
-            var linePen = new Pen(Solid(p.Ink), 1.5);
-            var unpricedPen = new Pen(Solid(p.Ink), 1.5);
+            var costPen = new Pen(Solid(p.Ink), 1.5);
+            costPen.Freeze();
             var points = new List<(Point Point, bool Unpriced)>();
             for (var index = 0; index < buckets.Count; index++)
             {
@@ -287,14 +296,15 @@ public sealed class StackedColumnChartControl : FrameworkElement
                 }
 
                 geometry.Freeze();
-                dc.DrawGeometry(null, linePen, geometry);
+                dc.DrawGeometry(null, costPen, geometry);
             }
 
+            var surfaceBrush = Solid(p.Surface);
             foreach (var (point, unpriced) in points)
             {
                 if (unpriced)
                 {
-                    dc.DrawEllipse(null, unpricedPen, point, CostUnpricedDotRadius, CostUnpricedDotRadius);
+                    dc.DrawEllipse(surfaceBrush, costPen, point, CostUnpricedDotRadius, CostUnpricedDotRadius);
                 }
                 else
                 {
@@ -374,9 +384,19 @@ public sealed class StackedColumnChartControl : FrameworkElement
                 y += rowHeight;
             }
 
-            var colour = name == CostSeries ? p.Ink : ColourFor(p, series, name);
-            dc.DrawRoundedRectangle(Solid(colour), null,
-                new Rect(x, y + (label.Height - swatch) / 2, swatch, swatch), 2, 2);
+            if (name == CostSeries)
+            {
+                var lineY = y + label.Height / 2;
+                dc.DrawLine(new Pen(Solid(p.Ink), 2),
+                    new Point(x, lineY),
+                    new Point(x + swatch, lineY));
+            }
+            else
+            {
+                dc.DrawRoundedRectangle(Solid(ColourFor(p, series, name)), null,
+                    new Rect(x, y + (label.Height - swatch) / 2, swatch, swatch), 2, 2);
+            }
+
             dc.DrawText(label, new Point(x + swatch + 6, y));
             x += itemWidth;
         }

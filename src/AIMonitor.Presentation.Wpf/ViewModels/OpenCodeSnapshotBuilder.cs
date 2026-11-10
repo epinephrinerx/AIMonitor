@@ -15,6 +15,19 @@ public static class OpenCodeSnapshotBuilder
     private const string Agent = "opencode";
 
     /// <summary>
+    /// Backward-compatible overload used by existing tests (F15 keeps the parameters on the primary
+    /// overload required, so this shim forwards the previous defaults).
+    /// </summary>
+    public static ProviderSnapshot? Build(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        IReadOnlyDictionary<string, decimal> budgets,
+        DateOnly today,
+        DateTimeOffset now,
+        TimeZoneInfo zone) =>
+        Build(lastGood, lastError, budgets, today, now, zone, 14, UsageMetric.TotalTokens);
+
+    /// <summary>
     /// Returns <c>null</c> while ccusage has not reported yet (E23), an error-only snapshot when the
     /// last read failed with no cached report (E10), or the month-to-date budget snapshot.
     /// </summary>
@@ -25,8 +38,8 @@ public static class OpenCodeSnapshotBuilder
         DateOnly today,
         DateTimeOffset now,
         TimeZoneInfo zone,
-        int rangeDays = 14,
-        string metric = OpenCodeHistoryBuilder.TotalTokens)
+        int rangeDays,
+        string metric)
     {
         ArgumentNullException.ThrowIfNull(budgets);
         ArgumentNullException.ThrowIfNull(zone);
@@ -73,7 +86,7 @@ public static class OpenCodeSnapshotBuilder
             configured: true,
             meters: [meter],
             history: OpenCodeHistoryBuilder.Build(lastGood, today, rangeDays, metric),
-            fetchedAt: now);
+            fetchedAt: lastGood.RetrievedAt);
     }
 
     /// <summary>First day of the next local month at 00:00 in <paramref name="zone"/> (E1).</summary>
