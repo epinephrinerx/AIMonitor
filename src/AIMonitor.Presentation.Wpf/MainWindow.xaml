@@ -205,7 +205,7 @@
                     </StackPanel>
                 </Border>
 
-                <!-- R-016 I3: Overview empty-state text (Checking ccusage…, No agent usage recorded,
+                <!-- R-016 I3: Overview empty-state text (Checking ccusage..., No agent usage recorded,
                      or Waiting for this month's ccusage data). Collapsed when EmptyMessage is null. -->
                 <TextBlock x:Name="OverviewEmptyMessage" Text="{Binding SelectedTab.EmptyMessage}" TextWrapping="Wrap"
                            Margin="4,8,4,12" FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}">
@@ -247,14 +247,15 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                            <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                                     BorderThickness="1" CornerRadius="10" Padding="12,10">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
-                                                        <!-- I11: add a 12px top margin when the section wraps to more than one row. -->
+                                                        <!-- I18: default margin lives in the style so the wrap trigger can override it. -->
+                                                        <Setter Property="Margin" Value="0,0,12,0" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding DataContext.HasMultipleRows, RelativeSource={RelativeSource AncestorType=ItemsControl, AncestorLevel=1}}" Value="True">
-                                                                <Setter Property="Margin" Value="0,12,12,0" />
+                                                                <Setter Property="Margin" Value="0,0,12,12" />
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>

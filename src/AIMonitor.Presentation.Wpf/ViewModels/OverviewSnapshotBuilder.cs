@@ -90,13 +90,14 @@ public static class OverviewSnapshotBuilder
     }
 
     /// <summary>
-    /// Computes the empty-state message for the Overview tab (I3/I4/I10/I12).
+    /// Computes the empty-state message for the Overview tab (I3/I4/I10/I12/I17).
     /// State 1 (no snapshot yet): "Checking ccusage...".
     /// State 2 (error only): null (the error banner shows).
-    /// State 3 (snapshot exists): "Waiting for this month's ccusage data" when the report has no
-    /// Monthly entry for today's month AND the month of lastGood.RetrievedAt (in zone) differs from
-    /// today's month. Otherwise "No agent usage recorded this month" (including a current-month
-    /// entry with zero agents).
+    /// State 3 with ≥1 meter (current-month entry has agents): null.
+    /// State 3 with a current-month entry and zero agents: "No agent usage recorded this month".
+    /// State 3 with no current-month entry: "Waiting for this month's ccusage data" when the month
+    /// of lastGood.RetrievedAt (in zone) differs from today's month, otherwise "No agent usage
+    /// recorded this month".
     /// </summary>
     public static string? EmptyMessage(
         AgentUsageReport? lastGood,
@@ -119,10 +120,16 @@ public static class OverviewSnapshotBuilder
         }
 
         // State 3: we have a snapshot.
-        var hasCurrentMonth = lastGood.Monthly.Any(m => m.Year == today.Year && m.Month == today.Month);
-        if (hasCurrentMonth)
+        var currentMonth = lastGood.Monthly.FirstOrDefault(m => m.Year == today.Year && m.Month == today.Month);
+        if (currentMonth is not null && currentMonth.Agents.Count > 0)
         {
-            // Current month exists (even with zero agents).
+            // I17: state 3 with ≥1 meter — no empty message.
+            return null;
+        }
+
+        if (currentMonth is not null)
+        {
+            // Current month entry exists but has zero agents.
             return "No agent usage recorded this month";
         }
 

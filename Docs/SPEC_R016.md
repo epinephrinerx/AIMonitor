@@ -107,3 +107,10 @@ Fixture month = today's month 2026-11, `today = 2026-11-10`, zone UTC. Monthly a
 | I15 | (R1 m4) Do not rebuild Overview on chart range/metric changes; it rebuilds only on a ccusage update and on budget changes (H1.2, I4). | WO2 + TA |
 | I16 | (R1 m5) Comments use ASCII "..." too (tidy with I10). | WO2 |
 
+## Coding Owner decisions after Reviewer2 (Codex GPT-6.1-Sol High, 2026-11-10, at c02da4e, verdict request changes)
+
+| Id | Decision | Owner |
+|---|---|---|
+| I17 | (R2 major 1; spec gap in I12) `OverviewSnapshotBuilder.EmptyMessage` returns **null whenever state 3 produces at least one meter**. Full table: state 1 → `"Checking ccusage..."`; state 2 → null; state 3 with ≥1 meter → null; state 3 with a current-month entry and zero agents → `"No agent usage recorded this month"`; state 3 with no current-month entry → `"Waiting for this month's ccusage data"` when the month of `RetrievedAt` (in `zone`) differs from today's month, otherwise `"No agent usage recorded this month"`. Oracle: the O1 November fixture → null. | WO2 + TA |
+| I18 | (R2 minor 2) The wrapped-row gap must actually render. Move the card's default `Margin="0,0,12,0"` from the local attribute into the style (a `Setter`), so the trigger can override it. When wrapping, use `0,0,12,12` (a gap *below* each card, so the first row does not move down). Single-row tabs keep `0,0,12,0` exactly. | WO2 |
+
