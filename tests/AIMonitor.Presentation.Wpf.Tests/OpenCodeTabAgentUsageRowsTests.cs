@@ -7,8 +7,8 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// R-015 Q2.2 rows / decision E3 — <c>ProviderTabViewModel</c> treats <c>"opencode"</c> exactly like
 /// <c>"agy"</c> for ccusage rows (C8/C9/C10/C19/C21 of SPEC_R014): SupportsAgentUsage =
 /// AppendsAgentUsage || id is "agy" or "opencode" (case-insensitive); other ids (e.g. "gemini") still
-/// ignore a summary (C25a). Written from Docs/SPEC_R015.md only (§5.6). Q2 tests: expected not to
-/// compile against today's build until the Q2 branch merges (handoff note, E16).
+/// ignore a summary (C25a). Written from Docs/SPEC_R015.md only (§5.6). The Q2 branch has merged
+/// (handoff), so these tests compile and run against the real tab view model.
 /// </summary>
 public sealed class OpenCodeTabAgentUsageRowsTests
 {

@@ -17,8 +17,14 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// returns <c>ProviderSnapshot?</c>: null for "no ccusage result yet", and the view model then pushes
 /// nothing) and E2 (the last (lastGood, lastError) and the last budgets are stored: ApplyAgentBudgets
 /// rebuilds from the stored pair WITHOUT running ccusage; before the first Updated it only stores).
-/// Hand-written fakes follow the R-014 test files; no real ccusage, no network. Q2 tests: expected not
-/// to compile until the Q2 branch merges (E16).
+/// E26 pins the subtitle texts ("$25.00 of $50.00 budget" / "$25.00 · No budget set — add one in
+/// Settings"), E28 exposes the widget's <c>ActiveProviderTabId</c> and E29 makes an equal-budgets
+/// <c>ApplyAgentBudgets</c> call a no-op. The App-level E27 preview callback
+/// (<c>App.OpenSettingsDialog</c>) is NOT unit-testable — App builds a WPF dialog on its dispatcher;
+/// the chain is covered at the view-model level here (budgets → gauge) and in
+/// SettingsViewModelAgentBudgetsTests (E5 preview, E19 Discard restores the entry budgets).
+/// Hand-written fakes follow the R-014 test files; no real ccusage, no network. The Q2 branch has
+/// merged (handoff), so these tests compile and run against the real view model.
 /// </summary>
 public sealed class MainWindowViewModelOpenCodeTabTests
 {
@@ -145,9 +151,9 @@ public sealed class MainWindowViewModelOpenCodeTabTests
         // Q2.2: the gauge meter is built from the stored budgets and the stored lastGood.
         var meter = Assert.Single(vm.OpenCodeTab.Meters);
         Assert.Equal("Month to date", meter.Title);
-        Assert.Equal("of your $50.00 budget", meter.Subtitle); // money(50) per E12
-        Assert.Equal("50%", meter.ValueText);                  // (25 / 50) × 100 hand-derived
-        Assert.Equal("$25.00", meter.Detail);                  // MonthCostUsd, not the daily sum
+        Assert.Equal("$25.00 of $50.00 budget", meter.Subtitle); // E26/O1 shape: spent + money(50) per E12
+        Assert.Equal("50%", meter.ValueText);                    // (25 / 50) × 100 hand-derived
+        Assert.Equal("$25.00", meter.Detail);                    // E26: detail = spent (MonthCostUsd, not the daily sum)
 
         // Q2.2: SetAgentUsage(SummaryFor(lastGood, "opencode", today)) — C9-style opencode lines.
         Assert.True(vm.OpenCodeTab.ShowSupplementary);
@@ -169,8 +175,8 @@ public sealed class MainWindowViewModelOpenCodeTabTests
         await vm.AgentUsageTask!;
 
         var meter = Assert.Single(vm.OpenCodeTab.Meters);
-        Assert.Equal("No budget set — add one in Settings", meter.Subtitle); // O3
-        Assert.Equal("--", meter.ValueText);                                 // O3 gauge text
+        Assert.Equal("$25.00 · No budget set — add one in Settings", meter.Subtitle); // E26/O3
+        Assert.Equal("--", meter.ValueText);                                          // O3 gauge text
         Assert.Equal("$25.00", meter.Detail);
     }
 
@@ -184,7 +190,7 @@ public sealed class MainWindowViewModelOpenCodeTabTests
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        Assert.Equal("No budget set — add one in Settings", Assert.Single(vm.OpenCodeTab.Meters).Subtitle);
+        Assert.Equal("$25.00 · No budget set — add one in Settings", Assert.Single(vm.OpenCodeTab.Meters).Subtitle);
         Assert.Equal(1, source.ReadCount);
 
         // E2: store the budgets and rebuild the snapshot from the stored (lastGood, lastError) —
@@ -192,13 +198,13 @@ public sealed class MainWindowViewModelOpenCodeTabTests
         vm.ApplyAgentBudgets(new Dictionary<string, decimal> { ["opencode"] = 50m });
 
         var meter = Assert.Single(vm.OpenCodeTab.Meters);
-        Assert.Equal("of your $50.00 budget", meter.Subtitle);
+        Assert.Equal("$25.00 of $50.00 budget", meter.Subtitle); // E26
         Assert.Equal("50%", meter.ValueText);
         Assert.Equal(1, source.ReadCount); // still: ApplyAgentBudgets never runs ccusage
 
         // Clearing every budget returns the gauge to the O3 text (final-state check).
         vm.ApplyAgentBudgets(new Dictionary<string, decimal>());
-        Assert.Equal("No budget set — add one in Settings", Assert.Single(vm.OpenCodeTab.Meters).Subtitle);
+        Assert.Equal("$25.00 · No budget set — add one in Settings", Assert.Single(vm.OpenCodeTab.Meters).Subtitle);
         Assert.Equal("--", Assert.Single(vm.OpenCodeTab.Meters).ValueText);
         Assert.Equal(1, source.ReadCount);
     }
@@ -242,6 +248,97 @@ public sealed class MainWindowViewModelOpenCodeTabTests
         Assert.Equal("Checking...", vm.OpenCodeTab.Status);
         Assert.Empty(vm.OpenCodeTab.Meters);
         Assert.False(vm.OpenCodeTab.ShowSupplementary);
+    }
+
+    // ── E28: ActiveProviderTabId — the provider tab the widget/tray speak for ──
+
+    [Fact]
+    public void ActiveProviderTabId_E28_FollowsProviderTabsAndHoldsAcrossOpenCodeAndAllAgents()
+    {
+        // E28: SelectedTab.ProviderId only while the tab is in ProviderTabs; otherwise the last
+        // provider tab (initially the startup provider tab).
+        var vm = CreateVm(agentUsage: null, new AppSettings(), out _, out _);
+        Assert.Equal("claude", vm.ActiveProviderTabId); // startup provider tab
+
+        vm.SelectedTabItem = vm.OpenAiTab;
+        Assert.Equal("openai", vm.ActiveProviderTabId); // a provider tab updates it…
+
+        vm.SelectedTabItem = vm.OpenCodeTab; // …OpenCode is NOT in ProviderTabs (Q2.1)…
+        Assert.Equal("openai", vm.ActiveProviderTabId);
+
+        vm.SelectedTabItem = vm.AllAgentsTab; // …nor is All agents (C1, R-014)…
+        Assert.Equal("openai", vm.ActiveProviderTabId);
+
+        vm.SelectedTabItem = vm.OpenCodeTab; // back to OpenCode — still the last provider tab
+        Assert.Equal("openai", vm.ActiveProviderTabId);
+
+        vm.SelectedTabItem = vm.AgyTab; // selecting a provider tab moves it again
+        Assert.Equal("agy", vm.ActiveProviderTabId);
+    }
+
+    [Fact]
+    public void ActiveProviderTabId_E28_StartupOpenCode_IsClaude()
+    {
+        // E28: "initially the startup provider tab, Claude when startup is opencode/all-agents".
+        // E4 selects the OpenCode tab itself (covered by Startup_ActiveProviderOpenCode above).
+        var vm = CreateVm(agentUsage: null, new AppSettings { ActiveProvider = "opencode" }, out _, out _);
+
+        Assert.Same(vm.OpenCodeTab, vm.SelectedTab);
+        Assert.Equal("claude", vm.ActiveProviderTabId);
+    }
+
+    [Fact]
+    public void ActiveProviderTabId_E28_StartupAllAgents_IsClaude()
+    {
+        // E28 at startup "all-agents" (R-014 C13 keeps SelectedTab = ClaudeTab): the widget stays Claude.
+        var vm = CreateVm(agentUsage: null, new AppSettings { ActiveProvider = "all-agents" }, out _, out _);
+
+        Assert.True(vm.IsAllAgentsSelected);
+        Assert.Equal("claude", vm.ActiveProviderTabId);
+    }
+
+    [Fact]
+    public void ActiveProviderTabId_E28_SetSelectedTabProgrammatically_StillHoldsForOpenCode()
+    {
+        // The widget source must hold for the SelectedTab path too (App binds ActiveProviderTabId,
+        // not SelectedTab.ProviderId — the App call-site itself is not unit-testable, like E27).
+        var vm = CreateVm(agentUsage: null, new AppSettings(), out _, out _);
+
+        vm.SelectedTab = vm.OpenCodeTab;
+
+        Assert.Same(vm.OpenCodeTab, vm.SelectedTab);
+        Assert.Equal("claude", vm.ActiveProviderTabId);
+    }
+
+    // ── E29: ApplyAgentBudgets no-ops on equal budgets ─────────────────────────
+
+    [Fact]
+    public async Task ApplyAgentBudgets_E29_EqualBudgetsLeaveTheMetersInstance_ChangedBudgetsRebuild()
+    {
+        // E29: "does nothing when the new budgets equal the stored ones (same keys case-insensitively
+        // and same values)". Observable: the OpenCode tab's Meters instance is unchanged; a changed
+        // budget rebuilds with the new final state (E16 — assert state, not internal call counts).
+        var report = Report(LocalToday());
+        var cache = new CachedAgentUsageSource(new FakeAgentUsageSource(_ => Task.FromResult(report)), new FakeClock(FixedUtc));
+        var initial = new AppSettings { AgentBudgets = new Dictionary<string, decimal> { ["opencode"] = 50m } };
+        var vm = CreateVm(cache, initial, out _);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        var before = vm.OpenCodeTab.Meters;
+        Assert.Equal("$25.00 of $50.00 budget", Assert.Single(before).Subtitle); // the settings' budget is live
+
+        // Equal content — new instance, different key case, ordinal comparer (the session stored an
+        // OrdinalIgnoreCase "opencode"). No rebuild.
+        vm.ApplyAgentBudgets(new Dictionary<string, decimal> { ["OpenCode"] = 50m });
+        Assert.Same(before, vm.OpenCodeTab.Meters);
+
+        // A changed budget rebuilds: (25 / 25) × 100 = 100 %, E26 subtitle.
+        vm.ApplyAgentBudgets(new Dictionary<string, decimal> { ["opencode"] = 25m });
+        var after = vm.OpenCodeTab.Meters;
+        Assert.NotSame(before, after);
+        Assert.Equal("$25.00 of $25.00 budget", Assert.Single(after).Subtitle);
+        Assert.Equal("100%", after[0].ValueText);
     }
 
     // ── Fakes (hand-written, same as the R-014 test files) ─────────────────────

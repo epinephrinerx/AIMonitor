@@ -8,15 +8,16 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// <summary>
 /// R-015 Q2.2 — <c>OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, now, zone)</c>
 /// written from Docs/SPEC_R015.md only (§5.6): the three-state table, the meter fields, oracles
-/// O2/O3/O5/O7 (O8 is superseded by E10) and decisions E1 (resetsAt day 1 00:00 in the caller's zone
-/// with zone.GetUtcOffset of THAT local instant), E10 (the error-first snapshot is configured TRUE —
-/// it overrides the "configured: false" wording of the state table and of O8), E11 (120 % renders
-/// Critical through the existing local thresholds, no new code) and E12 (money(x) is
-/// ChartFormat.Money((double)x), also for the budget in the subtitle).
+/// O1/O2/O3/O4/O5/O7/E12 (subtitle and detail texts are pinned by E26: spent goes into the subtitle,
+/// <c>detail</c> keeps the same spent text; O8 is superseded by E10) and decisions E1 (resetsAt day 1
+/// 00:00 in the caller's zone with zone.GetUtcOffset of THAT local instant), E10 (the error-first
+/// snapshot is configured TRUE — it overrides the "configured: false" wording of the state table and
+/// of O8), E11 (120 % renders Critical through the existing local thresholds, no new code) and E12
+/// (money(x) is ChartFormat.Money((double)x), also for the budget in the subtitle).
 /// E23 pins the return type: <c>ProviderSnapshot?</c> — <c>null</c> means "no ccusage result yet"
 /// (lastGood AND lastError are null) and the view model then pushes nothing; the snapshot it does
-/// return carries <c>ProviderId == "opencode"</c>. Q2 tests: expected not to compile until the Q2
-/// branch merges (handoff note, E16).
+/// return carries <c>ProviderId == "opencode"</c>. The Q2 branch has merged (handoff), so these
+/// tests compile and run against the real builder.
 /// </summary>
 public sealed class OpenCodeSnapshotBuilderTests
 {
@@ -115,18 +116,33 @@ public sealed class OpenCodeSnapshotBuilderTests
         Assert.Empty(snapshot.Stats);
     }
 
-    // ── O2 / O3 / O5: the meter values ─────────────────────────────────────────
+    // ── O1–O5: the meter values (subtitle texts pinned by E26) ────────────────
+
+    [Fact]
+    public void Build_O1_CostAgainstBudget_SubtitleCarriesBothMoneyTexts()
+    {
+        // O1 (E26): cost 12.345, budget 50 → Percent 24.69 and subtitle
+        // "$12.35 of $50.00 budget" — money(12.345) = ChartFormat.Money((double)12.345) = "$12.35"
+        // (the double sits above the 12.345 midpoint), money(50) = "$50.00". The calculator side of
+        // O1 lives in Q1's AgentBudgetComputeTests; here the texts and the uncapped ratio.
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(12.345m)), null, Budget(("opencode", 50m)), Today);
+
+        var meter = Assert.Single(snapshot.Meters);
+        Assert.Equal(24.69, meter.Percent); // (12.345 / 50) × 100 hand-derived
+        Assert.Equal("$12.35 of $50.00 budget", meter.Subtitle); // E26 O1
+        Assert.Equal("$12.35", meter.Detail); // E26: detail = the spent text
+    }
 
     [Fact]
     public void Build_O2_OverBudget_PercentIsNotCapped_AndBudgetUsesMoneyFormatter()
     {
-        // O2: cost 60, budget 50 → Percent 120, not capped. Subtitle text pinned by O1/E12:
-        // money(50) = ChartFormat.Money(50.0) = "$50.00". Detail = money(60) = "$60.00".
+        // O2: cost 60, budget 50 → Percent 120, not capped. E26 subtitle: "$60.00 of $50.00 budget";
+        // money = ChartFormat.Money (E12), detail keeps the spent text.
         var snapshot = Build(ReportWithMonth(Today, OpenCode(60m)), null, Budget(("opencode", 50m)), Today);
 
         var meter = Assert.Single(snapshot.Meters);
         Assert.Equal(120.0, meter.Percent); // E12/O2: (60/50)*100 uncapped
-        Assert.Equal("of your $50.00 budget", meter.Subtitle);
+        Assert.Equal("$60.00 of $50.00 budget", meter.Subtitle); // E26 O2
         Assert.Equal("$60.00", meter.Detail);
         Assert.Equal(Severity.Normal, meter.ServerSeverity); // Q2.2: colour comes from the local thresholds
     }
@@ -134,30 +150,59 @@ public sealed class OpenCodeSnapshotBuilderTests
     [Fact]
     public void Build_O3_NoBudget_PercentNullAndNoBudgetSubtitle()
     {
-        // O3: cost 7.5, no budget → Percent null, subtitle "No budget set — add one in Settings",
-        // detail "$7.50".
+        // O3 (E26): cost 7.5, no budget → Percent null, subtitle
+        // "$7.50 · No budget set — add one in Settings", detail "$7.50". The gauge text "--" is
+        // pinned in Build_O3_GaugeTextIsDashesWhenNoBudget.
         var snapshot = Build(ReportWithMonth(Today, OpenCode(7.5m)), null, NoBudgets, Today);
 
         var meter = Assert.Single(snapshot.Meters);
         Assert.Null(meter.Percent);
-        Assert.Equal("No budget set — add one in Settings", meter.Subtitle);
+        Assert.Equal("$7.50 · No budget set — add one in Settings", meter.Subtitle); // E26 O3
         Assert.Equal("$7.50", meter.Detail);
         Assert.NotNull(meter.ResetsAt); // the month window is shown regardless of the budget
     }
 
-    [Fact]
-    public void Build_O5_UnpricedModels_AppendsUnpricedToTheDetail()
+    [Theory]
+    // O4 (E26 variants): the report has an opencode row for LAST month only → MonthCostUsd 0,
+    // HasUsageThisMonth false. Budget 10 → Percent 0 and subtitle "$0.00 of $10.00 budget"; no
+    // budget → subtitle "$0.00 · No budget set — add one in Settings". Detail is the spent text.
+    [InlineData("10", 0.0, "$0.00 of $10.00 budget")]
+    [InlineData(null, null, "$0.00 · No budget set — add one in Settings")]
+    public void Build_O4_NoRowThisMonth_SpendsZero(
+        string? budgetText,
+        double? expectedPercent,
+        string expectedSubtitle)
     {
-        // O5: model A cost 3, model B unpriced → detail "$3.00 + unpriced" (cost not counted as $0).
+        var lastMonth = new DateOnly(Today.Year, Today.Month, 1).AddMonths(-1);
+        var budgets = budgetText is null
+            ? NoBudgets
+            : Budget(("opencode", decimal.Parse(budgetText, CultureInfo.InvariantCulture)));
+
+        var snapshot = Build(ReportWithMonth(lastMonth, OpenCode(99m)), null, budgets, Today);
+
+        var meter = Assert.Single(snapshot.Meters);
+        Assert.Equal(expectedPercent, meter.Percent);
+        Assert.Equal(expectedSubtitle, meter.Subtitle);
+        Assert.Equal("$0.00", meter.Detail);
+    }
+
+    [Fact]
+    public void Build_O5_UnpricedModels_AppendsUnpricedToSpentText()
+    {
+        // O5 (E26): model A cost 3, model B unpriced → spent = "$3.00 + unpriced" (cost not counted
+        // as $0); detail keeps that text and the no-budget subtitle carries it too.
         var monthRow = Usage("opencode", ("model-a", 3m), ("model-b", null));
 
         var snapshot = Build(ReportWithMonth(Today, monthRow), null, NoBudgets, Today);
 
-        Assert.Equal("$3.00 + unpriced", Assert.Single(snapshot.Meters).Detail); // Q2.2: money(MonthCostUsd) + " + unpriced"
+        var meter = Assert.Single(snapshot.Meters);
+        Assert.Equal("$3.00 + unpriced", meter.Detail); // money(MonthCostUsd) + " + unpriced"
+        Assert.Equal("$3.00 + unpriced · No budget set — add one in Settings", meter.Subtitle); // E26 O5
     }
 
     [Theory]
     // E12: money(x) is ChartFormat.Money((double)x) — the AgentUsagePresenter priced-cost text.
+    // E26: the same text is the detail AND the leading spent part of the no-budget subtitle.
     [InlineData("0.005", "<$0.01")]
     [InlineData("0", "$0.00")]
     [InlineData("12.34", "$12.34")]
@@ -167,16 +212,19 @@ public sealed class OpenCodeSnapshotBuilderTests
 
         var snapshot = Build(ReportWithMonth(Today, OpenCode(cost)), null, NoBudgets, Today);
 
-        Assert.Equal(expectedDetail, Assert.Single(snapshot.Meters).Detail);
+        var meter = Assert.Single(snapshot.Meters);
+        Assert.Equal(expectedDetail, meter.Detail);
+        Assert.Equal($"{expectedDetail} · No budget set — add one in Settings", meter.Subtitle);
     }
 
     [Fact]
     public void Build_E12_BudgetInSubtitleIsTheSameMoneyFormatter()
     {
-        // E12: "the budget in the subtitle uses it too" — money(20.01) = "$20.01".
+        // E12: "the budget in the subtitle uses it too" — money(20.01) = "$20.01"; E26 puts the
+        // spend in front: money(1) = "$1.00".
         var snapshot = Build(ReportWithMonth(Today, OpenCode(1m)), null, Budget(("opencode", 20.01m)), Today);
 
-        Assert.Equal("of your $20.01 budget", Assert.Single(snapshot.Meters).Subtitle);
+        Assert.Equal("$1.00 of $20.01 budget", Assert.Single(snapshot.Meters).Subtitle);
     }
 
     // ── O7 / E1: resetsAt — first day of the next local month, in the given zone ──
