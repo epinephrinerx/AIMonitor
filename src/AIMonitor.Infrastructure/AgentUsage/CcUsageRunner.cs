@@ -112,6 +112,13 @@ internal sealed class CcUsageRunner : ICcUsageRunner
 
             await all.WaitAsync(deadline.Token).ConfigureAwait(false);
 
+            // R12/R14: a fired deadline must never become Success; caller cancellation wins.
+            if (deadline.Token.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new OperationCanceledException(deadline.Token);
+            }
+
             if (process.ExitCode != 0)
             {
                 return CcUsageRunOnceResult.Failure(
