@@ -41,6 +41,13 @@ public sealed record AppSettings
         new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Monthly budget in USD per ccusage agent name (e.g. opencode, claude, codex).
+    /// An empty dictionary means no budgets are set.
+    /// </summary>
+    public IReadOnlyDictionary<string, decimal> AgentBudgets { get; init; } =
+        new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Opaque Qt geometry retained during the forward-only migration. A later WPF geometry
     /// adapter may consume recognized values; unknown encodings remain preserved, not invented.
     /// </summary>
@@ -55,8 +62,12 @@ public sealed record AppSettings
             : "Total tokens";
         var range = ChartRangeDays is 7 or 14 or 30 or 90 ? ChartRangeDays : 14;
         var rememberSize = DashboardWidth == 0 && DashboardHeight == 0;
-        var activeProvider = ActiveProvider == "gemini" ? "agy"
-            : ActiveProvider is "claude" or "openai" or "agy" or "all-agents" ? ActiveProvider : "claude";
+        var activeProvider = ActiveProvider switch
+        {
+            "gemini" => "agy",
+            "claude" or "openai" or "agy" or "all-agents" or "opencode" => ActiveProvider,
+            _ => "claude",
+        };
         var providers = Providers is null
             ? new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase)
             : Providers.Where(static pair => pair.Value is not null)
@@ -64,6 +75,28 @@ public sealed record AppSettings
         if (!providers.ContainsKey("agy") && providers.TryGetValue("gemini", out var legacyGemini))
         {
             providers["agy"] = new ProviderPreference(legacyGemini.Enabled);
+        }
+
+        var budgets = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        if (AgentBudgets is not null)
+        {
+            foreach (var pair in AgentBudgets)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key))
+                {
+                    continue;
+                }
+
+                var key = pair.Key.Trim().ToLowerInvariant();
+                var rounded = Math.Round(pair.Value, 2, MidpointRounding.AwayFromZero);
+                if (rounded <= 0m || rounded > 1_000_000m)
+                {
+                    // E18: invalid values are skipped and never remove or replace an entry.
+                    continue;
+                }
+
+                budgets[key] = rounded;
+            }
         }
 
         return this with
@@ -79,6 +112,7 @@ public sealed record AppSettings
             ChartMetric = metric,
             ActiveProvider = activeProvider,
             Providers = providers,
+            AgentBudgets = budgets,
             LegacyGeometry = LegacyGeometry is null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : LegacyGeometry
