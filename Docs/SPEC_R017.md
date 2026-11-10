@@ -131,3 +131,10 @@ Fixture (today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10). `r
 | F20 | (IB minor 3) Keep the agent case-insensitivity test, but its comment states it covers domain normalisation (`AgentUsage` lower-cases the agent); the builder's own comparison is an equivalent mutant through the public path. No production change. | TA |
 | F21 | (IB minor 4) Wiring tests must not read the live date twice: capture one local day per test. If `MainWindowViewModel` takes a clock/`TimeProvider`, inject a fixed one; if it has none, capture once, note the residual midnight risk in the report, and do not change production code. | TA |
 | F22 | If F18/F19 cannot be pinned without a production seam, stop and report the seam needed; do not change `src/`. | TA |
+
+## Coding Owner decision after Reviewer2 fix re-review (Codex GPT-6.1-Sol, 2026-11-10, at 81a5cc2)
+
+| Id | Decision | Owner |
+|---|---|---|
+| F23 | (R2 major) `SettingsSession.Changed` can fire on a thread-pool thread (`UpdateAsync` continues after `ConfigureAwait(false)`), and the Settings dialog can change `ChartRangeDays` (`SettingsViewModel.cs:354`), so the F13 rebuild could update the OpenCode tab off the UI thread and interleave with a UI selection. Fix: `MainWindowViewModel` captures `SynchronizationContext.Current` in its constructor; `OnSettingsChanged` posts itself to that context (async `Post`, not `Send`) when called on another context, and runs inline when already on it or when no context was captured (tests). No other behaviour change; `_syncingFromSettings` stays. Tests (TA): with a recording `SynchronizationContext`, a `Changed` raised from another thread is posted, not run inline; after the post runs, `SelectedRange`/chart reflect the new value; raised on the captured context it runs inline (existing tests unchanged). | WO1, then TA |
+
