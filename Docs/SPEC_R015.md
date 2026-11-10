@@ -157,3 +157,14 @@ AGY gauges; the Overview tab (R-016).
 | E14 | Settings agent order: `opencode` first, then the others distinct (case-insensitive) sorted by `AgentDisplayName` with `StringComparer.OrdinalIgnoreCase`. | WO2 + TA |
 | E15 | The OpenAI "Monthly budget (USD)" field lives on the Connections page (`ProviderMeta.OpenAi.ExtraLabel`); it is unrelated and unchanged. | — |
 | E16 | Test Author: put Q1 tests and Q2 tests in **separate commits** (Q1 tests must compile against Q1 alone; Q2 tests may not compile until Q2 merges). Assert final state, not the number of internal `ApplyAgentUsage` calls. | TA |
+
+## Coding Owner decisions after Q1 code review (Reviewer1 + Reviewer2, 2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| E17 | (MAJOR, both reviewers) A row is valid only when empty or `0.01 <= value <= 1_000_000` (value as parsed, before rounding); `0.004`, `0.001`, `$0.0049` are invalid with the Q1.3 error text. `Normalize` rounds first (2 dp, AwayFromZero) and then drops values `<= 0` or `> 1_000_000`, so a stored `0.00` can never appear. Oracle: `{ "opencode": 0.004 }` → `{}`; row `"0.004"` → error, Save disabled. | WO2 + TA |
+| E18 | Duplicate keys after normalising: invalid values are skipped and never remove or replace an entry; among the **valid** ones the last in enumeration order wins. Oracles: `{ "opencode": 20, "OpenCode ": 0 }` → `{ "opencode": 20 }`; `{ "opencode": 20, "OpenCode": 30 }` → `{ "opencode": 30 }`. | WO2 + TA |
+| E19 | `Discard()` re-applies the preview with `AgentBudgets` taken from `_entrySettings`, like the other previewed fields. | WO2 + TA |
+| E20 | Budget rows hold the agent name trimmed + lower-cased (labels from `AgentDisplayName` of that name). Preview budgets use the same rules as `Normalize` (key normalised, value rounded 2 dp AwayFromZero), so preview equals what Save stores. Oracle: typing `20.005` previews `20.01`; knownAgents `" Codex "` → row agent `codex`. | WO2 + TA |
+| E21 | `AgentBudget.Compute` finds the budget case-insensitively whatever comparer the caller's dictionary has (exact `TryGetValue` first, then an `OrdinalIgnoreCase` scan over trimmed keys). Oracle: default-comparer dictionary `{ "OpenCode": 10 }` → `BudgetUsd == 10`. | WO2 + TA |
+| — | Kept as specified: `NumberStyles.Number` + invariant culture reads `20,50` as `2050` (Q1.3). | — |
