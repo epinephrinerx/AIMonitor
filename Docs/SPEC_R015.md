@@ -175,3 +175,10 @@ AGY gauges; the Overview tab (R-016).
 |---|---|---|
 | E22 | Names the spec left open follow the Q1 code: `SettingsViewModel.BudgetRows` (`IReadOnlyList<AgentBudgetRowViewModel>`), row `Agent` / `DisplayName` / `Text` / `Error` / `HasError`; constructor `SettingsViewModel(session, startupRegistrar, applyPreview = null, knownAgents = null)`. | TA |
 | E23 | `OpenCodeSnapshotBuilder.Build(...)` returns `ProviderSnapshot?`: `null` for "no ccusage result yet" (lastGood and lastError both null), and the view model then pushes nothing. The snapshot `ProviderId` is `"opencode"`. O8 is superseded by E10 (`configured: true`). | WO3 + TA |
+
+## Coding Owner decisions after the Q2 code (2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| E24 | Keep the existing setup-card rule for every provider: `ShowSetupCard = !configuredNow && meterList.Count == 0` (the WO3 change to `!snapshot.Configured` altered Claude/OpenAI/AGY when Detection is null and a configured snapshot carries an error — not allowed by R-015 "tab อื่นหน้าตาเดิม" / R-004). Only the `opencode` tab never shows the setup card (`&& !IsOpenCode`), so E10 still shows the error banner there. Test: a Claude/OpenAI/AGY snapshot with `configured: true`, `detection: null`, `error: "x"`, no meters still shows the setup card as before. | WO3 + TA |
+| E25 | R-015 changes the tab list, so the existing R-014 test `MainWindowViewModelAllAgentsTests.Tabs_ExposesThreeProviderTabsThenAllAgentsTab_ProviderTabsUnchanged` is updated by the Test Author to `[Claude, OpenAI, Agy, OpenCode, AllAgents]` (ProviderTabs unchanged). | TA |
