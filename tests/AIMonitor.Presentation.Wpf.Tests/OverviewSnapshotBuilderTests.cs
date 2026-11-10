@@ -14,15 +14,18 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// resetsAt = first day of the next local month 00:00 in zone — "same helper/semantics as R-015 E1",
 /// detail = spent, subtitles identical to R-015 E26), the per-oracle fixture values O1–O6, O8,
 /// I1 (Monthly section authoritative — the builder reads report.Monthly only), I2 (duplicate names
-/// in any case → one meter, first row's values, never throw) and I6/O11 (budgets for agents outside
-/// the current month, or absent from the report entirely, create no meter).
+/// in any case → one meter, first row's values, never throw), I6/O11 (budgets for agents outside
+/// the current month, or absent from the report entirely, create no meter) and — added in round 2
+/// per I12 — <c>public static string? EmptyMessage(lastGood, lastError, today, zone)</c> tested
+/// directly with explicit today/zone: the I3/I10 ASCII texts, the I4 rollover trigger (I12: both
+/// halves, plus a current-month entry with zero agents and a month boundary in a non-local zone).
 /// The fixture is the spec's oracle fixture: fixture month 2026-11, today = 2026-11-10, zone UTC,
 /// monthly 2026-11 agents claude $12.50 priced · codex $3.20 + unpriced model · copilot $0.00 with
 /// usage · newagent $3.20; monthly 2026-10 has zcode $9.99 only; budgets { "claude": 50, "NewAgent": 10 }.
 /// Expected values are the spec's oracles with the hand calculations shown; nothing here is derived
 /// from the implementation (the code is written in parallel — these tests are expected not to compile
 /// until the R-016 H1 branch merges; I8: the builder is pure, so these tests are clock-free and fully
-/// deterministic).
+/// deterministic). The branch has since merged (5167681 + c02da4e) and the tests run against it.
 /// </summary>
 public sealed class OverviewSnapshotBuilderTests
 {
@@ -70,14 +73,31 @@ public sealed class OverviewSnapshotBuilderTests
         new Dictionary<string, decimal> { ["claude"] = 50m, ["NewAgent"] = 10m };
 
     private static AgentUsageReport ReportWithAgents(int year, int month, params AgentUsage[] agents) =>
+        MonthlyReport(year, month, agents.ToList(), RetrievedAt);
+
+    private static AgentUsageReport MonthlyReport(
+        int year,
+        int month,
+        IReadOnlyList<AgentUsage> agents,
+        DateTimeOffset retrievedAt) =>
         new(
             daily: [],
-            monthly: [new MonthlyAgentUsage(year, month, agents.ToList())],
+            monthly: [new MonthlyAgentUsage(year, month, agents)],
             sessions: [],
             unpricedModels: [],
             pricing: AgentUsagePricing.OnlineRequested,
-            retrievedAt: RetrievedAt,
+            retrievedAt: retrievedAt,
             skippedRows: 0);
+
+    // I12 seam: the builder exposes the resulting empty-state text for MainWindowViewModel to hand
+    // to the Overview tab — tested directly here with an explicit today and zone, so nothing reads
+    // the machine clock.
+    private static string? Message(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        DateOnly today,
+        TimeZoneInfo zone) =>
+        OverviewSnapshotBuilder.EmptyMessage(lastGood, lastError, today, zone);
 
     // H1.1: Build is the 6-parameter pure function (no rangeDays/metric — Overview has no chart).
     private static ProviderSnapshot? BuildRaw(
@@ -389,5 +409,108 @@ public sealed class OverviewSnapshotBuilderTests
             snapshot.Meters.Select(m => m.Title));
         Assert.DoesNotContain(snapshot.Meters, m => m.Key == "agent:zcode");
         Assert.DoesNotContain(snapshot.Meters, m => m.Key == "agent:ghost");
+    }
+
+    // ── I12: EmptyMessage(lastGood, lastError, today, zone) — the I3/I4 texts, decided here ──
+
+    [Fact]
+    public void EmptyMessage_I3I10_State1_IsTheAsciiCheckingText()
+    {
+        // I3 state 1 + I10: exactly "Checking ccusage..." with three ASCII dots — NOT U+2026.
+        var message = Message(null, null, Today, TimeZoneInfo.Utc);
+
+        Assert.Equal("Checking ccusage...", message);
+        Assert.DoesNotContain('\u2026', message!); // I10 names WO2's 5167681 ellipsis bug
+    }
+
+    [Fact]
+    public void EmptyMessage_I3_State2_IsNullBecauseOnlyTheBannerShows()
+    {
+        // I3: "In state 2 it is null and only the error banner shows." I7's concrete error shape.
+        var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.NotInstalled, "ccusage was not found on PATH.");
+
+        Assert.Null(Message(null, failure, Today, TimeZoneInfo.Utc));
+    }
+
+    [Fact]
+    public void EmptyMessage_I12_CurrentMonthEntryWithZeroAgents_IsTheRecordedText()
+    {
+        // I12 pins this case explicitly: a current-month entry with zero agents shows "No agent
+        // usage recorded this month" — the rollover text needs the month difference too (below).
+        var report = ReportWithAgents(2026, 11); // entry exists, no agents
+
+        Assert.Equal("No agent usage recorded this month", Message(report, null, Today, TimeZoneInfo.Utc));
+    }
+
+    [Fact]
+    public void EmptyMessage_I4_RolledToANewMonth_IsTheWaitingText()
+    {
+        // I12's trigger, both halves true: no Monthly entry for today's 2026-11 AND the month of
+        // lastGood.RetrievedAt (2026-10-20, UTC) differs from today's → the I4 rollover text.
+        var report = MonthlyReport(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))],
+            new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal("Waiting for this month's ccusage data", Message(report, null, Today, TimeZoneInfo.Utc));
+    }
+
+    [Fact]
+    public void EmptyMessage_I12_NoCurrentMonthEntryButRetrievedThisMonth_IsTheRecordedText()
+    {
+        // I12's trigger is a conjunction: the report has no 2026-11 entry but was retrieved on
+        // 2026-11-05 (this month, in zone) — NOT rollover, so I3's text stands. This separates the
+        // rollover from O8's plain "no entry" case.
+        var report = MonthlyReport(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))],
+            new DateTimeOffset(2026, 11, 5, 8, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal("No agent usage recorded this month", Message(report, null, Today, TimeZoneInfo.Utc));
+    }
+
+    [Fact]
+    public void EmptyMessage_H11_RolledReportWithLaterError_KeepsTheState3Text()
+    {
+        // H1.1 state 3 tail ("lastError is ignored when lastGood exists") applies to the message
+        // too: a rolled last month's report with a fresh failure still shows the I4 waiting text.
+        var report = MonthlyReport(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))],
+            new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero));
+        var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.Failed, "ccusage failed this time");
+
+        Assert.Equal("Waiting for this month's ccusage data", Message(report, failure, Today, TimeZoneInfo.Utc));
+    }
+
+    [Theory]
+    // I12: the rollover condition is computed from the method's OWN zone — the same instant
+    // (2026-11-30T20:00Z) sits in 2026-12 at UTC+5 but in 2026-11 at UTC, and today is 2026-12-01.
+    // The report has only a 2026-11 entry, so in the +5 zone the retrieved month EQUALS today's
+    // month (not rollover → I3's text) while in UTC it differs (rollover → I4's text). A builder
+    // that hardcoded UTC or read TimeZoneInfo.Local would land on one row only.
+    [InlineData(5, "No agent usage recorded this month")]
+    [InlineData(0, "Waiting for this month's ccusage data")]
+    public void EmptyMessage_I12_RolloverHonoursTheSuppliedZone(
+        int offsetHours,
+        string expected)
+    {
+        var today = new DateOnly(2026, 12, 1);
+        var report = MonthlyReport(2026, 11, [Usage("claude", ("claude-model", 1m))],
+            new DateTimeOffset(2026, 11, 30, 20, 0, 0, TimeSpan.Zero));
+        var offset = TimeSpan.FromHours(offsetHours);
+        var zone = TimeZoneInfo.CreateCustomTimeZone(
+            $"Fixture UTC{offsetHours:+0#;-0#;0}", offset, "Fixture zone", "Fixture zone");
+
+        Assert.Equal(expected, Message(report, null, today, zone));
+    }
+
+    // SPEC mismatch (kept as a failing-but-skipped oracle, §5.6 rule 3): merged code returns the
+    // recorded text whenever a current-month entry EXISTS, ignoring its agents — so with gauges on
+    // screen the tab still carries an empty-state text. Do not weaken the assertion.
+    [Fact(Skip = "SPEC mismatch: I3")]
+    public void EmptyMessage_I3_CurrentMonthEntryWithAgents_HasNoEmptyStateText()
+    {
+        // I3 pins the texts to the no-meter states ("With no snapshot yet... / In state 3 with zero
+        // meters... / In state 2 it is null") and I12 says the method returns "the I3/I4/I10 text OR
+        // NULL". A current-month entry WITH agents is not an empty state: Build exposes four meters
+        // for this exact fixture (O1, pinned above), so the tab shows gauges and the handed-off
+        // message must be null. The merged builder returns "No agent usage recorded this month"
+        // here, and MainWindowViewModel hands it to the tab while the gauges render.
+        Assert.Null(Message(SpecReport(), null, Today, TimeZoneInfo.Utc));
     }
 }

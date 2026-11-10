@@ -6,19 +6,22 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 
 /// <summary>
 /// R-016 H1.2 — <see cref="ProviderTabViewModel"/> behaviour for provider id "overview", written
-/// from Docs/SPEC_R016.md only (§5.6): I3 (nullable <c>EmptyMessage</c>, set only for the Overview
-/// tab: "Checking ccusage..." with no snapshot yet (state 1), "No agent usage recorded this month"
-/// in state 3 with zero meters (O8), null in state 2 where only the error banner shows; other tabs
-/// keep it null), I4 (rollover: a snapshot retrieved in an earlier month with no current-month
-/// entry shows "Waiting for this month's ccusage data" instead; LastUpdated keeps
-/// lastGood.RetrievedAt — the F11 style), I5 (<c>MeterColumns = min(count, 3)</c> for Overview —
-/// e.g. 6 agents → 3 columns, wrapping to 2 rows — other tabs keep their existing value), E24
-/// extended to "overview" (no setup card), H1.2's no-ccusage-section rule
-/// (<c>SupportsAgentUsage</c> stays false) and H1.2's no-chart rule.
-/// I3's "plus a visibility flag" is not named in the spec, so these tests assert <c>EmptyMessage</c>
-/// itself: the flag is its non-nullness (XAML collapses the text element when null). Snapshots are
-/// hand-built ProviderSnapshots, so nothing here leans on the builder (covered by
-/// OverviewSnapshotBuilderTests). I8: each test uses one captured local day; the retrieval
+/// from Docs/SPEC_R016.md (§5.6), aligned in round 2 with decisions I12–I15: the message TEXTS and
+/// the rollover condition live in <c>OverviewSnapshotBuilder.EmptyMessage</c> (I12 — tested in
+/// OverviewSnapshotBuilderTests), and the view model only accepts the hand-off:
+/// <c>UpdateOverviewEmptyMessage(string?)</c> sets <c>EmptyMessage</c> for the Overview tab and is
+/// ignored by every other tab (I3 "plus a visibility flag" — the code names it
+/// <c>HasEmptyMessage</c>; I13's non-overview exemption). I13: a directly constructed
+/// <c>new ProviderTabViewModel("overview", "Overview")</c> already carries the I10 ASCII state-1
+/// text "Checking ccusage..." and the I5 3-column cap. I14: the tab caption stays plain
+/// "Overview", never "Overview NN%". I5: <c>MeterColumns = min(count, 3)</c> for Overview (the
+/// cap's XAML consumer wraps rows; I11's gap itself is not pixel-tested, but the wrap signal
+/// <c>MeterSection.HasMultipleRows</c> is asserted where the spec is silent on names — code names
+/// win), other tabs keep their existing value. E24 extended to "overview" (no setup card), H1.2's
+/// no-ccusage-section rule (<c>SupportsAgentUsage</c> stays false) and H1.2's no-chart rule.
+/// Snapshots are hand-built ProviderSnapshots, so nothing here leans on the builder (covered by
+/// OverviewSnapshotBuilderTests); <c>UpdateFromSnapshot</c> no longer computes any message (I12),
+/// which these tests pin directly. I8: each test uses one captured instant; the retrieval
 /// timestamps sit on day 15 of their month, 12:00 UTC, so no ±14 h local conversion can shift the
 /// compared month — behaviour is independent of the machine's zone.
 /// </summary>
@@ -67,13 +70,17 @@ public sealed class OverviewTabViewModelTests
     // ── I3: the empty-message mechanism ─────────────────────────────────────────
 
     [Fact]
-    public void Ctor_I3_Overview_KeepsTheCheckingMessageWhileState1()
+    public void Ctor_I13_Overview_KeepsTheCheckingMessageWhileState1()
     {
-        // I3: "With no snapshot yet (state 1) it is 'Checking ccusage...'". The builder returned null,
-        // no snapshot was pushed, yet the tab must not look stuck — this text is what the user sees.
+        // I13: the initial text derives from ProviderId inside the constructor, so a directly
+        // constructed tab — before any builder has ever run — shows I3's state-1 text ("it must not
+        // look stuck") with I10's exact ASCII spelling ("Checking ccusage...", three dots, not
+        // U+2026) and the I5 cap ready (0 meters so far → 0 columns).
         var tab = OverviewTab();
 
         Assert.Equal(Checking, tab.EmptyMessage);
+        Assert.DoesNotContain('\u2026', tab.EmptyMessage!); // I10
+        Assert.True(tab.HasEmptyMessage); // I3's "visibility flag" — code name, asserted where visible
         Assert.Equal("Checking...", tab.Status);
         Assert.Equal(0, tab.MeterColumns); // I5: min(count = 0, 3) = 0
     }
@@ -86,14 +93,19 @@ public sealed class OverviewTabViewModelTests
     public void Ctor_I3_OtherTabs_KeepEmptyMessageNull(string providerId)
     {
         // I3: "Other tabs keep EmptyMessage null and look the same." (Set only for the Overview tab.)
-        Assert.Null(new ProviderTabViewModel(providerId, providerId).EmptyMessage);
+        var tab = new ProviderTabViewModel(providerId, providerId);
+
+        Assert.Null(tab.EmptyMessage);
+        Assert.False(tab.HasEmptyMessage);
     }
 
     [Fact]
-    public void Update_I3_State2Error_ClearsTheEmptyMessageAndShowsOnlyTheBanner()
+    public void Update_I3_State2Error_ShowsOnlyTheBannerAfterTheHandoff()
     {
-        // I3: "In state 2 it is null and only the error banner shows." E24 extended to "overview":
-        // an error-only snapshot never falls back to the setup card (configuredNow is false because
+        // I3 state 2: "null and only the error banner shows". Round-2 design (I12): the snapshot
+        // update itself no longer touches the message — MainWindowViewModel hands off the builder's
+        // state-2 value (null) via UpdateOverviewEmptyMessage. E24 extended to "overview": an
+        // error-only snapshot never falls back to the setup card (configuredNow is false because
         // Ok requires Error == null — without the exemption the card would appear).
         var tab = OverviewTab();
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.NotInstalled, "ccusage was not found on PATH.");
@@ -101,6 +113,7 @@ public sealed class OverviewTabViewModelTests
         tab.UpdateFromSnapshot(
             OverviewSnapshot(configured: true, error: AgentUsagePresenter.ErrorText(failure.Kind, failure.Message)),
             LiveNow);
+        tab.UpdateOverviewEmptyMessage(null); // I3 state 2 — the builder returns null (I12 tests pin that)
 
         Assert.Null(tab.EmptyMessage);
         Assert.Equal(AgentUsagePresenter.ErrorText(AgentUsageErrorKind.NotInstalled, "ccusage was not found on PATH."), tab.ErrorMessage);
@@ -111,41 +124,73 @@ public sealed class OverviewTabViewModelTests
     }
 
     [Fact]
-    public void Update_I3_O8_ZeroMetersThisMonth_ShowsTheRecordedMessage()
+    public void UpdateOverviewEmptyMessage_I13_TheHandoffSetsAndClearsTheOverviewTab()
     {
-        // I3 / O8: state 3 with zero meters → "No agent usage recorded this month". The retrieval is
-        // from THIS month, so I4's rollover text does not apply.
+        // I13: the builder's result reaches the tab through this method (I12), and UpdateFromSnapshot
+        // itself no longer derives any text — the constructor's state-1 text survives the snapshot
+        // until the hand-off runs. The three texts are asserted as carried values (their selection is
+        // OverviewSnapshotBuilderTests' I12 job).
         var tab = OverviewTab();
 
         tab.UpdateFromSnapshot(OverviewSnapshot(meters: []), LiveNow);
+        Assert.Equal(Checking, tab.EmptyMessage); // I12: a snapshot update does not compute the message
+
+        tab.UpdateOverviewEmptyMessage(Recorded); // state 3 with zero meters (I3/O8)
+        Assert.Equal(Recorded, tab.EmptyMessage);
+        Assert.True(tab.HasEmptyMessage);
+
+        tab.UpdateOverviewEmptyMessage(Waiting); // I4 rollover text
+        Assert.Equal(Waiting, tab.EmptyMessage);
+
+        tab.UpdateOverviewEmptyMessage(null); // state 2, or meters present
+        Assert.Null(tab.EmptyMessage);
+        Assert.False(tab.HasEmptyMessage);
+    }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("openai")]
+    [InlineData("agy")]
+    [InlineData("opencode")]
+    public void UpdateOverviewEmptyMessage_I13_OtherTabsIgnoreTheHandoff(string providerId)
+    {
+        // I13: "the I12 hand-off goes through a method that ignores non-Overview tabs"; I3: "set
+        // only for the Overview tab" — any value, even the state-1 text, leaves other tabs blank.
+        var tab = new ProviderTabViewModel(providerId, providerId);
+
+        tab.UpdateOverviewEmptyMessage(Checking);
+        tab.UpdateOverviewEmptyMessage(Recorded);
+
+        Assert.Null(tab.EmptyMessage);
+        Assert.False(tab.HasEmptyMessage);
+    }
+
+    [Fact]
+    public void Update_I3_O8_ZeroMetersThisMonth_CarriesTheRecordedMessage_AndDoesNotLookStuck()
+    {
+        // O8/I3 through the VM: state 3 with zero meters — the hand-off text is shown while the tab
+        // is visibly updated (HasSnapshot true, no gauge cards), so "it must not look stuck".
+        var tab = OverviewTab();
+
+        tab.UpdateFromSnapshot(OverviewSnapshot(meters: []), LiveNow);
+        tab.UpdateOverviewEmptyMessage(Recorded); // the builder's message for this state (I12)
 
         Assert.Equal(Recorded, tab.EmptyMessage);
         Assert.Empty(tab.MeterSections); // no gauge cards
-        Assert.True(tab.HasSnapshot); // the tab visibly changed — it does not look stuck
+        Assert.True(tab.HasSnapshot); // the tab visibly changed
     }
 
     [Fact]
-    public void Update_I4_StaleRetrievalWithNoCurrentMonthEntry_ShowsTheWaitingMessage()
+    public void Update_I4_StaleRetrievalWithMeters_KeepsTheGaugesAndTheRetrievedInstant()
     {
-        // I4 rollover: the month of lastGood.RetrievedAt (= the snapshot's FetchedAt, state 3) is
-        // last month and the current month has no entry (zero meters) → "Waiting for this month's
-        // ccusage data" instead of I3's text.
-        var tab = OverviewTab();
-
-        tab.UpdateFromSnapshot(OverviewSnapshot(meters: [], fetchedAt: PreviousMonth), LiveNow);
-
-        Assert.Equal(Waiting, tab.EmptyMessage);
-    }
-
-    [Fact]
-    public void Update_I4_StaleRetrievalWithMeters_KeepsTheGaugesAndHasNoEmptyMessage()
-    {
-        // I4: "a failed refresh keeps the old gauges; that stays" — a stale retrieval with meters is
-        // NOT the empty state: no empty message, and LastUpdated shows the retrieval instant
-        // (F11 style), proving the tab is not stuck at "now".
+        // I4: "a failed refresh keeps the old gauges; that stays" — LastUpdated shows the retrieval
+        // instant (F11 style), proving the tab is not stuck at "now". With meters there is no empty
+        // state to message, so the wiring hands off null (the text question is I12/I3's, pinned in
+        // OverviewSnapshotBuilderTests and MainWindowViewModelOverviewTabTests).
         var tab = OverviewTab();
 
         tab.UpdateFromSnapshot(OverviewSnapshot(meters: [AgentCard("claude", 25.0, "$12.50 of $50.00 budget")], fetchedAt: PreviousMonth), LiveNow);
+        tab.UpdateOverviewEmptyMessage(null);
 
         Assert.Null(tab.EmptyMessage);
         Assert.Single(tab.Meters);
@@ -153,9 +198,12 @@ public sealed class OverviewTabViewModelTests
     }
 
     [Fact]
-    public void Update_I3_MetersPresent_ClearsTheEmptyMessage()
+    public void Update_I14_BudgetedMeters_KeepThePlainOverviewCaption()
     {
-        // I3: the message exists only while there is nothing to show; with meters it is null.
+        // I14: "The Overview tab's caption is always plain 'Overview', never 'Overview NN%'" — even
+        // though the lead meter (claude, O2 hand-derived 12.50 ÷ 50 × 100 = 25) would otherwise put
+        // "25%" in the caption (the other-tab lead-meter rule is unchanged, see the claude guard in
+        // Update_I5_OtherTabs_KeepTheirExistingColumnRule and the R-004 tab-caption tests).
         var tab = OverviewTab();
 
         tab.UpdateFromSnapshot(OverviewSnapshot(meters:
@@ -164,25 +212,26 @@ public sealed class OverviewTabViewModelTests
             AgentCard("codex", null, "$3.20 + unpriced · No budget set — add one in Settings"),
         ]), LiveNow);
 
-        Assert.Null(tab.EmptyMessage);
-        Assert.Equal(2, tab.MeterColumns); // I5: min(2, 3) = 2
-        // Existing lead-meter tab caption applies unchanged (O2 percent hand-derived: 12.50 ÷ 50 × 100 = 25):
-        Assert.Equal("Overview 25%", tab.TabTitle);
+        Assert.Equal("Overview", tab.TabTitle); // I14 — not "Overview 25%"
+        Assert.Equal(2, tab.MeterColumns); // I5: min(2, 3) = 2 — the direct-construction cap (I13)
         Assert.Equal("--", tab.Meters[1].ValueText); // null percent renders dashes (existing card rule)
+        Assert.False(Assert.Single(tab.MeterSections).HasMultipleRows); // 2 cards in 2 columns: no wrap (I11 signal)
     }
 
     [Fact]
     public void Update_I5_SixAgents_WrapToThreeColumns()
     {
         // I5: "at most 3 gauge columns, wrapping to more rows" — the handoff's worked example:
-        // 6 agents → min(6, 3) = 3 columns, which with 6 meters makes 6 ÷ 3 = 2 rows in the template.
+        // 6 agents → min(6, 3) = 3 columns. I11's pixel gap is not testable here, but the wrap
+        // signal the XAML uses (code name MeterSection.HasMultipleRows — the spec is silent on
+        // names, so the code's name wins) is pinned: 6 meters over 3 columns = more than one row.
         var tab = OverviewTab();
 
         tab.UpdateFromSnapshot(OverviewSnapshot(meters: Cards(6)), LiveNow);
 
         Assert.Equal(6, tab.Meters.Count);
         Assert.Equal(3, tab.MeterColumns);
-        Assert.Null(tab.EmptyMessage);
+        Assert.True(Assert.Single(tab.MeterSections).HasMultipleRows); // wraps to 2 rows (I11)
     }
 
     [Fact]
@@ -201,8 +250,21 @@ public sealed class OverviewTabViewModelTests
         tab.UpdateFromSnapshot(snapshot, LiveNow);
 
         Assert.Equal(Assert.Single(tab.MeterSections).Columns, tab.MeterColumns); // the existing value
-        Assert.Equal(6, tab.MeterColumns); // NOT capped
+        Assert.Equal(6, tab.MeterColumns); // NOT capped (I5: the cap is Overview's only)
+        Assert.False(Assert.Single(tab.MeterSections).HasMultipleRows); // I11: other tabs stay one-row
         Assert.Null(tab.EmptyMessage); // I3: other tabs stay null even with meters present…
+
+        // The lead-meter caption rule (R-004) is unchanged on other tabs — the I14 override is
+        // Overview-only. Cards(6) all have percent null, so re-apply a percented lead instead:
+        var capped = new ProviderTabViewModel("claude", "Claude");
+        capped.UpdateFromSnapshot(
+            new ProviderSnapshot(
+                providerId: "claude",
+                configured: true,
+                meters: [AgentCard("claude", 25.0, "$12.50 of $50.00 budget")],
+                fetchedAt: ThisMonth),
+            LiveNow);
+        Assert.Equal("Claude 25%", capped.TabTitle); // "Overview NN%" ban (I14) does NOT leak here
     }
 
     [Fact]

@@ -18,13 +18,17 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// no view-rebuild hook because Overview has no chart) and O10: "ApplyAgentBudgets with a new
 /// budget for codex moves the codex gauge to a percent without a ccusage read".
 /// The tab-level EmptyMessage texts (O8 "No agent usage recorded this month", I4 "Waiting for this
-/// month's ccusage data") are checked here through the real wiring. I8: no new clock seam exists in
-/// the view model — each run captures one local day (the midnight-crossing residual risk is the one
+/// month's ccusage data") are checked here through the real wiring — the I12 hand-off from
+/// OverviewSnapshotBuilder.EmptyMessage to the tab. Round 2 also pins I14 (the caption stays plain
+/// "Overview" with budgeted meters), I15 (chart range/metric changes do NOT rebuild Overview) and
+/// keeps O10's budgeted codex subtitle per H1.1's formula: "{spent} of {Money(budget)} budget" with
+/// spent = ChartFormat.Money + " + unpriced". I8: no new clock seam exists in the view model — each
+/// run captures one local day (the midnight-crossing residual risk is the one
 /// I8 accepts, same as R-017 F21); every monthly fixture row is built from the captured month, and
 /// the stale fixture is retrieved on day 15 of the previous month so no ±14 h local conversion can
 /// make its month equal the captured one. Hand-written fakes follow the R-014/R-015 test files; no
-/// real ccusage, no network. These tests are expected not to compile until the R-016 H1 branch
-/// merges (written from the spec only, §5.6).
+/// real ccusage, no network. The R-016 H1 branch has since merged (5167681 + c02da4e), so these
+/// tests compile and run against it.
 /// </summary>
 public sealed class MainWindowViewModelOverviewTabTests
 {
@@ -111,6 +115,23 @@ public sealed class MainWindowViewModelOverviewTabTests
     private static MainWindowViewModel CreateVm(CachedAgentUsageSource? agentUsage, AppSettings initial, out BlockingSettingsStore store)
     {
         return CreateVm(agentUsage, initial, out store, out _);
+    }
+
+    /// <summary>
+    /// Same wiring as the CreateVm helpers but the store stays BLOCKED: a save never lands, so the
+    /// setters' fire-and-forget save→refresh→ccusage-update follow-up (a LEGITIMATE Overview rebuild
+    /// point, H1.2) cannot run and nothing completes on the thread pool. Any Overview rebuild
+    /// observed synchronously after a view change is therefore the DIRECT one that I15 forbids.
+    /// </summary>
+    private static MainWindowViewModel CreateVmWithBlockedSaves(
+        CachedAgentUsageSource agentUsage,
+        AppSettings initial,
+        out BlockingSettingsStore store)
+    {
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
+        store = new BlockingSettingsStore(initial);
+        var session = new SettingsSession(store, initial);
+        return new MainWindowViewModel(coordinator, session, agentUsage: agentUsage);
     }
 
     // ── O9: tab shape ───────────────────────────────────────────────────────────
@@ -214,8 +235,7 @@ public sealed class MainWindowViewModelOverviewTabTests
         Assert.Equal("--", tab.Meters[1].ValueText);
         Assert.Equal("$3.20 + unpriced · No budget set — add one in Settings", tab.Meters[1].Subtitle);
         Assert.Equal(2, tab.MeterColumns); // I5: min(2, 3)
-        Assert.Equal("Overview 25%", tab.TabTitle);
-        Assert.Null(tab.EmptyMessage); // meters present — the empty texts are for the no-meter states
+        Assert.Equal("Overview", tab.TabTitle); // I14: plain caption even with the 25% lead meter
         Assert.Equal(LiveNow, tab.LastUpdated); // I4 (F11): LastUpdated shows lastGood.RetrievedAt
         Assert.False(tab.HasHistory); // H1.2: no chart
         Assert.False(tab.ShowSupplementary); // H1.2: no ccusage supplementary section
@@ -258,7 +278,10 @@ public sealed class MainWindowViewModelOverviewTabTests
         vm.ApplyAgentBudgets(new Dictionary<string, decimal> { ["claude"] = 50m, ["codex"] = 8m });
 
         Assert.Equal("40%", vm.OverviewTab.Meters[1].ValueText);
-        Assert.Equal("$3.20 of $8.00 budget", vm.OverviewTab.Meters[1].Subtitle);
+        // H1.1's formula composes the budgeted subtitle from the SAME spent text: "{spent} of
+        // {Money(budget)} budget", and spent = "$3.20" plus " + unpriced" (codex keeps its unpriced
+        // model) — so "$3.20 + unpriced of $8.00 budget".
+        Assert.Equal("$3.20 + unpriced of $8.00 budget", vm.OverviewTab.Meters[1].Subtitle);
         Assert.Equal("25%", vm.OverviewTab.Meters[0].ValueText);
         Assert.Equal("$12.50 of $50.00 budget", vm.OverviewTab.Meters[0].Subtitle);
         Assert.Equal(1, source.ReadCount); // O10: the rebuild used the cached pair — no new ccusage read
@@ -295,6 +318,41 @@ public sealed class MainWindowViewModelOverviewTabTests
         Assert.Equal("$12.50 of $25.00 budget", after[0].Subtitle);
         Assert.Equal("50%", after[0].ValueText);
         Assert.Equal(1, source.ReadCount); // still exactly one ccusage read across every rebuild
+    }
+
+    [Fact]
+    public async Task Updated_I15_ChartRangeAndMetricChanges_DontRebuildOverview()
+    {
+        // I15 (R1 m4): "Do not rebuild Overview on chart range/metric changes; it rebuilds only on
+        // a ccusage update and on budget changes". Seam: the range/metric setters rebuild the
+        // OpenCode tab synchronously (F9), then fire a save→refresh whose ccusage-update callback is
+        // itself a legitimate Overview rebuild point — so the store is BLOCKED (see helper): the
+        // follow-up can never run, and Assert.Same below can only be broken by the forbidden direct
+        // rebuild. Meter-instance identity is the "no rebuild happened" observable (as in E29).
+        var report = CurrentMonthReport(CapturedToday);
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(report));
+        var cache = new CachedAgentUsageSource(source, new FakeClock(LiveNow));
+        var initial = new AppSettings { AgentBudgets = new Dictionary<string, decimal> { ["claude"] = 50m } };
+        var vm = CreateVmWithBlockedSaves(cache, initial, out _);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        var overviewMeters = vm.OverviewTab.Meters;
+        Assert.NotEmpty(overviewMeters);
+
+        // Default range is 14 days; switching to 30 is a real view change — OpenCode rebuilt…
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+        vm.SelectedRange = DashboardOptions.Find(DashboardOptions.Ranges, 30, 1);
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count); // …synchronously, in the setter (guard
+                                                             // against a vacuous pass: the view change fired)
+        Assert.Same(overviewMeters, vm.OverviewTab.Meters); // I15: Overview untouched
+
+        // …and so does the metric switch (ChartMetric only changes through a snapshot rebuild).
+        vm.SelectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, "Output tokens", 0);
+        Assert.Equal("Output tokens", vm.OpenCodeTab.ChartMetric); // F9's rebuild happened
+        Assert.Same(overviewMeters, vm.OverviewTab.Meters); // I15
+
+        Assert.Equal(1, source.ReadCount); // the setters' own code path never runs ccusage
     }
 
     // ── State 2 and the two empty texts through the wiring ──────────────────────
@@ -359,6 +417,28 @@ public sealed class MainWindowViewModelOverviewTabTests
         Assert.Empty(vm.OverviewTab.Meters);
         Assert.Equal("Waiting for this month's ccusage data", vm.OverviewTab.EmptyMessage); // I4
         Assert.Equal(PreviousMonthFetchedAt, vm.OverviewTab.LastUpdated);
+    }
+
+    // Same mismatch through the real wiring (see the builder-level oracle in
+    // OverviewSnapshotBuilderTests — the skipped half of §5.6 rule 3). Do not weaken.
+    [Fact(Skip = "SPEC mismatch: I3")]
+    public async Task Updated_I3_MetersPresent_EmptyTextIsNotHandedToTheTab()
+    {
+        // I3 defines the empty texts for the no-meter states (state 1 / state 3-zero-meters / state
+        // 2 null); with gauges on screen there is no empty state, so nothing must be handed to the
+        // tab — and the XAML shows the text element whenever HasEmptyMessage is true, so a non-null
+        // hand-off would render "No agent usage recorded this month" ABOVE the working gauges.
+        var report = CurrentMonthReport(CapturedToday);
+        var cache = new CachedAgentUsageSource(
+            new FakeAgentUsageSource(_ => Task.FromResult(report)), new FakeClock(LiveNow));
+        var vm = CreateVm(cache, new AppSettings(), out _);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+
+        Assert.NotEmpty(vm.OverviewTab.Meters); // state 3 with gauges
+        Assert.Null(vm.OverviewTab.EmptyMessage); // I3: the text is for the no-meter states only
+        Assert.False(vm.OverviewTab.HasEmptyMessage); // the I3 flag would otherwise reveal the element
     }
 
     // ── Fakes (hand-written, same as the R-014/R-015 test files) ─────────────────
