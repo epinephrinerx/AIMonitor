@@ -11,11 +11,13 @@ using AgentUsage = AIMonitor.Domain.AgentUsage;
 
 /// <summary>
 /// R-015 Q1.2 — <see cref="AgentBudget.Compute"/> written from Docs/SPEC_R015.md only (§5.6):
-/// oracles O1–O5 and decision E7, the Q1.2 rules (month from today.Year/Month, only report.Monthly
-/// is read, case-insensitive agent/budget match, budget &lt;= 0 absent, null report → null,
-/// blank agent → ArgumentException, null budgets → ArgumentNullException, pure / never throws for a
-/// valid report). Percent oracle maths are hand-derived in each test. Expected not to compile
-/// until Q1 merges.
+/// oracles O1–O5 and decisions E7 (blank agent → ArgumentException("agent"), month row matched on
+/// year AND month, reading.Agent normalised), E17 (a 0.00-class budget is never usable) and E21 (the
+/// budget is found case-insensitively whatever comparer the caller's dictionary has), plus the Q1.2
+/// rules (month from today.Year/Month, only report.Monthly is read, case-insensitive agent match,
+/// budget &lt;= 0 absent, null report → null, blank agent → ArgumentException, null budgets →
+/// ArgumentNullException, pure / never throws for a valid report). Percent oracle maths are
+/// hand-derived in each test.
 /// </summary>
 public sealed class AgentBudgetComputeTests
 {
@@ -159,18 +161,22 @@ public sealed class AgentBudgetComputeTests
     [Fact]
     public void Compute_E7_MonthMatchesYearAndMonthNotMonthAlone()
     {
-        // E7: month row = m.Year == today.Year && m.Month == today.Month. December rows of 2025 and
-        // 2026 share the month number with each other but neither matches November 2026.
+        // E7: month row = m.Year == today.Year && m.Month == today.Month. A same-month/other-year row
+        // comes FIRST in the list, so an implementation that matches on the month number alone reads
+        // 5m from November 2025 instead of 2m from November 2026. December rows share the month number
+        // with each other but match neither.
         var report = Report(
-            new MonthlyAgentUsage(2025, 12, [Usage("opencode", ("glm-4.6", 5m))]),
+            new MonthlyAgentUsage(2025, 11, [Usage("opencode", ("glm-4.6", 5m))]),
+            new MonthlyAgentUsage(2025, 12, [Usage("opencode", ("glm-4.6", 6m))]),
             new MonthlyAgentUsage(2026, 12, [Usage("opencode", ("glm-4.6", 7m))]),
             new MonthlyAgentUsage(2026, 11, [Usage("opencode", ("glm-4.6", 2m))]));
 
-        var reading = AgentBudget.Compute(report, "opencode", Budgets(), Today);
+        var reading = AgentBudget.Compute(report, "opencode", Budgets(("opencode", 8m)), Today);
 
         Assert.NotNull(reading);
-        Assert.Equal(2m, reading.MonthCostUsd);
+        Assert.Equal(2m, reading.MonthCostUsd); // November 2026 only
         Assert.True(reading.HasUsageThisMonth);
+        Assert.Equal(25.0, reading.Percent); // hand-derived: 2m / 8m = 0.25 × 100 = 25
     }
 
     [Fact]
@@ -187,6 +193,26 @@ public sealed class AgentBudgetComputeTests
         Assert.False(reading.HasUnpricedModels);
         Assert.False(reading.HasUsageThisMonth);
         Assert.Equal(0.0, reading.Percent!.Value);
+    }
+
+    [Fact]
+    public void Compute_Q12_NoMonthRowForThisMonthAtAll_ReadsAsMissingMonth()
+    {
+        // Q1.2: "Missing month or agent → MonthCostUsd = 0, HasUnpricedModels = false,
+        // HasUsageThisMonth = false" — here the report has NO row for November at all, only an older
+        // month that carries the agent (and an unpriced model). Falling back to any other month row
+        // (last/first) is what this pins down, not merely picking the wrong agent.
+        var report = Report(
+            new MonthlyAgentUsage(2026, 9, [Usage("opencode", ("model-a", 40m), ("model-b", null))]));
+
+        var reading = AgentBudget.Compute(report, "opencode", Budgets(("opencode", 10m)), Today);
+
+        Assert.NotNull(reading);
+        Assert.Equal(0m, reading.MonthCostUsd);      // the September row is not this month's cost
+        Assert.False(reading.HasUnpricedModels);      // the flag belongs to the missing month, too
+        Assert.False(reading.HasUsageThisMonth);
+        Assert.Equal(10m, reading.BudgetUsd);
+        Assert.Equal(0.0, reading.Percent);           // hand-derived: 0m / 10m = 0 × 100 = 0
     }
 
     [Fact]
@@ -223,6 +249,104 @@ public sealed class AgentBudgetComputeTests
         Assert.Equal("opencode", reading.Agent); // E7: agent.Trim().ToLowerInvariant()
         Assert.Equal(10m, reading.MonthCostUsd);
         Assert.Equal(50m, reading.BudgetUsd);
+    }
+
+    [Theory]
+    // E21: "AgentBudget.Compute finds the budget case-insensitively whatever comparer the caller's
+    // dictionary has (exact TryGetValue first, then an OrdinalIgnoreCase scan over trimmed keys)".
+    // Oracle: a default-comparer (ordinal) dictionary { "OpenCode": 10 } → BudgetUsd == 10. The exact
+    // TryGetValue misses, so only the trimmed, case-insensitive scan can find it. Last row: a padded
+    // key needs the Trim() of that scan; "co dex" must never match "opencode".
+    [InlineData("OpenCode", 10.0)]      // E21 oracle: different case, ordinal dictionary
+    [InlineData(" OPENCODE ", 10.0)]    // E21: padded key found by the trimmed scan
+    [InlineData("opencode", 10.0)]      // exact hit on the first branch
+    [InlineData("codex", null)]         // another agent's budget is not this reading's
+    public void Compute_E21_BudgetIsFoundCaseInsensitively_WhateverComparerTheCallerUses(
+        string budgetKey,
+        double? expectedBudget)
+    {
+        // (decimal cannot be an attribute argument — the expected budget is written as a double?
+        // only as an "absent / present" marker and compared against the exact 10m.)
+        var report = NovemberReport(Usage("opencode", ("glm-4.6", 5m)));
+        var budgets = new Dictionary<string, decimal> { [budgetKey] = 10m }; // default = ordinal comparer
+
+        var reading = AgentBudget.Compute(report, "opencode", budgets, Today);
+
+        Assert.NotNull(reading);
+        if (expectedBudget is null)
+        {
+            Assert.Null(reading.BudgetUsd);
+            Assert.Null(reading.Percent);
+        }
+        else
+        {
+            Assert.Equal(10m, reading.BudgetUsd);
+            Assert.Equal(50.0, reading.Percent); // hand-derived: 5m / 10m = 0.5 × 100 = 50
+        }
+    }
+
+    [Fact]
+    public void Compute_E21_OrderIgnoringDictionary_HitsTheExactTryGetValueBranch()
+    {
+        // E21: the exact TryGetValue branch still works for a caller that already uses the
+        // OrdinalIgnoreCase comparer that Normalize produces.
+        var report = NovemberReport(Usage("opencode", ("glm-4.6", 8m)));
+        var budgets = AppSettingsBudgetsLikeNormalize(("OpenCode", 16m));
+
+        var reading = AgentBudget.Compute(report, "opencode", budgets, Today);
+
+        Assert.NotNull(reading);
+        Assert.Equal(16m, reading.BudgetUsd);
+        Assert.Equal(50.0, reading.Percent); // hand-derived: 8m / 16m = 0.5 × 100 = 50
+    }
+
+    [Fact]
+    public void Compute_Q12_E17_NonPositiveBudgetIsIgnoredByBothLookupBranches()
+    {
+        // Q1.2 "a budget <= 0 is treated as absent" — also on the E21 scan branch, where a padded
+        // ordinal dictionary must not report 0.004 (or 0) as a budget.
+        var report = NovemberReport(Usage("opencode", ("glm-4.6", 5m)));
+
+        var ordinal = AgentBudget.Compute(
+            report, "opencode", new Dictionary<string, decimal> { ["OpenCode"] = 0m }, Today);
+        var padded = AgentBudget.Compute(
+            report, "opencode", new Dictionary<string, decimal> { [" OpenCode "] = 0m }, Today);
+
+        Assert.NotNull(ordinal);
+        Assert.Null(ordinal.BudgetUsd);
+        Assert.Null(ordinal.Percent);
+        Assert.NotNull(padded);
+        Assert.Null(padded.BudgetUsd);
+        Assert.Null(padded.Percent);
+    }
+
+    private static IReadOnlyDictionary<string, decimal> AppSettingsBudgetsLikeNormalize(
+        params (string Agent, decimal Usd)[] entries)
+    {
+        // Normalize() hands the caller a fresh OrdinalIgnoreCase dictionary (E8) — same shape here.
+        return entries.ToDictionary(
+            e => e.Agent.Trim().ToLowerInvariant(),
+            e => e.Usd,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Compute_Q12_ReportRowNameCaseIsIgnoredToo_NotOnlyTheRequestedAgent()
+    {
+        // Q1.2: "Agent match is case-insensitive on the normalised name" — ccusage may name the row
+        // "OpenCode" while the caller asks for "opencode"; the month row must still be the one read
+        // (cost 10m, HasUsageThisMonth true), not treated as a missing agent. Note that AgentUsage
+        // itself normalises its Agent (trim + lower-case), so the row arrives lower-cased here; this
+        // test pins the pairing rather than the row's raw spelling.
+        var report = NovemberReport(Usage("OpenCode", ("glm-4.6", 10m)));
+
+        var reading = AgentBudget.Compute(report, "opencode", Budgets(("opencode", 25m)), Today);
+
+        Assert.NotNull(reading);
+        Assert.Equal("opencode", reading.Agent);
+        Assert.Equal(10m, reading.MonthCostUsd);
+        Assert.True(reading.HasUsageThisMonth);
+        Assert.Equal(40.0, reading.Percent); // hand-derived: 10m / 25m = 0.4 × 100 = 40
     }
 
     [Fact]

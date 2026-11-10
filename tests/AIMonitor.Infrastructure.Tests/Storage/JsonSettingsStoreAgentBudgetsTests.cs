@@ -7,8 +7,7 @@ namespace AIMonitor.Infrastructure.Tests.Storage;
 /// R-015 Q1.1 persistence — <c>AgentBudgets</c> through the existing JSON settings store, written from
 /// Docs/SPEC_R015.md only (§5.6): Q1.1 "an old settings file without the property loads as no budgets,
 /// SchemaVersion stays 1" and E8 "JSON round trip of { "opencode": 20.01 } must give the same value"
-/// with the comparer (lost by JSON) rebuilt by Normalize on load. Does not compile until Q1 merges
-/// (the property is new) — expected per the R-015 Test Author handoff.
+/// with the comparer (lost by JSON) rebuilt by Normalize on load.
 /// </summary>
 public sealed class JsonSettingsStoreAgentBudgetsTests : IDisposable
 {
