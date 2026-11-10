@@ -30,6 +30,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private DateTimeOffset? _lastSuccess;
     private bool _showComposedStatus;
     private Task? _agentUsageTask;
+    private AgentUsageReport? _lastAgentUsageReport;
+    private AgentUsageUnavailableException? _lastAgentUsageError;
+    private IReadOnlyDictionary<string, decimal> _agentBudgets =
+        new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+    private string _lastProviderTabId;
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
@@ -45,12 +50,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
         AgyTab = new ProviderTabViewModel("agy", "Gemini / AGY");
+        OpenCodeTab = new ProviderTabViewModel(OpenCodeSnapshotBuilder.ProviderId, "OpenCode");
         AllAgentsTab = new AllAgentsTabViewModel();
 
         ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
-        Tabs = [ClaudeTab, OpenAiTab, AgyTab, AllAgentsTab];
+        Tabs = [ClaudeTab, OpenAiTab, AgyTab, OpenCodeTab, AllAgentsTab];
 
         var settings = _settingsSession.Current;
+        _agentBudgets = settings.AgentBudgets ?? new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         if (settings.ActiveProvider == "all-agents")
         {
             _isAllAgentsSelected = true;
@@ -59,9 +66,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         else
         {
-            _selectedTab = ProviderTabs.FirstOrDefault(t => t.ProviderId == settings.ActiveProvider) ?? ClaudeTab;
+            // E4: restore any provider tab in Tabs (including OpenCode); ProviderTabs stays tray-only.
+            _selectedTab = Tabs.OfType<ProviderTabViewModel>()
+                .FirstOrDefault(t => string.Equals(t.ProviderId, settings.ActiveProvider, StringComparison.OrdinalIgnoreCase))
+                ?? ClaudeTab;
             _selectedTabItem = _selectedTab;
         }
+
+        // E28: the widget starts on the startup provider tab when the selected tab is not one of them.
+        _lastProviderTabId = ProviderTabs.Contains(_selectedTab) ? _selectedTab.ProviderId : ClaudeTab.ProviderId;
 
         _selectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
         _selectedRange = DashboardOptions.Find(DashboardOptions.Ranges, settings.ChartRangeDays, 1);
@@ -109,9 +122,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ProviderTabViewModel ClaudeTab { get; }
     public ProviderTabViewModel OpenAiTab { get; }
     public ProviderTabViewModel AgyTab { get; }
+    public ProviderTabViewModel OpenCodeTab { get; }
     public AllAgentsTabViewModel AllAgentsTab { get; }
     public IReadOnlyList<ProviderTabViewModel> ProviderTabs { get; }
     public IReadOnlyList<object> Tabs { get; }
+
+    /// <summary>
+    /// The provider tab the widget and tray speak for (E28): the selected tab while it is one of
+    /// <see cref="ProviderTabs"/>, otherwise the last provider tab that was selected.
+    /// </summary>
+    public string ActiveProviderTabId =>
+        ProviderTabs.Contains(_selectedTab) ? _selectedTab.ProviderId : _lastProviderTabId;
 
     public object? SelectedTabItem
     {
@@ -167,6 +188,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             SetProperty(ref _selectedTab, value);
+
+            if (ProviderTabs.Contains(value))
+            {
+                _lastProviderTabId = value.ProviderId;
+            }
+
+            OnPropertyChanged(nameof(ActiveProviderTabId));
 
             if (_selectedTabItem != value)
             {
@@ -376,11 +404,94 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.Local).DateTime);
+        // E2: keep the last pair so a live budget change can rebuild the OpenCode tab without
+        // running ccusage again.
+        _lastAgentUsageReport = lastGood;
+        _lastAgentUsageError = lastError;
+
+        var now = DateTimeOffset.UtcNow;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
         ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
         OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
         AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
+        UpdateOpenCodeTab(today, now);
+    }
+
+    /// <summary>
+    /// Applies monthly budgets live (E2): stores them and rebuilds the OpenCode snapshot from the
+    /// cached ccusage pair; it never starts a ccusage read. Call on the UI thread.
+    /// </summary>
+    public void ApplyAgentBudgets(IReadOnlyDictionary<string, decimal> budgets)
+    {
+        ArgumentNullException.ThrowIfNull(budgets);
+
+        // E29: unrelated settings changes must not rebuild the OpenCode tab.
+        if (BudgetsEqual(_agentBudgets, budgets))
+        {
+            return;
+        }
+
+        _agentBudgets = budgets;
+
+        var now = DateTimeOffset.UtcNow;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
+        UpdateOpenCodeTab(today, now);
+    }
+
+    /// <summary>Same keys (case-insensitive) and same values (E29).</summary>
+    private static bool BudgetsEqual(
+        IReadOnlyDictionary<string, decimal> left,
+        IReadOnlyDictionary<string, decimal> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var (agent, amount) in left)
+        {
+            if (right.TryGetValue(agent, out var other))
+            {
+                if (other != amount)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            var match = right.FirstOrDefault(
+                pair => string.Equals(pair.Key.Trim(), agent.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match.Key is null || match.Value != amount)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void UpdateOpenCodeTab(DateOnly today, DateTimeOffset now)
+    {
+        var snapshot = OpenCodeSnapshotBuilder.Build(
+            _lastAgentUsageReport,
+            _lastAgentUsageError,
+            _agentBudgets,
+            today,
+            now,
+            TimeZoneInfo.Local);
+        if (snapshot is not null)
+        {
+            OpenCodeTab.UpdateFromSnapshot(snapshot, now);
+        }
+
+        OpenCodeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(_lastAgentUsageReport, "opencode", today));
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>

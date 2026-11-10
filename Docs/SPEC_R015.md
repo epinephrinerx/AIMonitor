@@ -175,3 +175,21 @@ AGY gauges; the Overview tab (R-016).
 |---|---|---|
 | E22 | Names the spec left open follow the Q1 code: `SettingsViewModel.BudgetRows` (`IReadOnlyList<AgentBudgetRowViewModel>`), row `Agent` / `DisplayName` / `Text` / `Error` / `HasError`; constructor `SettingsViewModel(session, startupRegistrar, applyPreview = null, knownAgents = null)`. | TA |
 | E23 | `OpenCodeSnapshotBuilder.Build(...)` returns `ProviderSnapshot?`: `null` for "no ccusage result yet" (lastGood and lastError both null), and the view model then pushes nothing. The snapshot `ProviderId` is `"opencode"`. O8 is superseded by E10 (`configured: true`). | WO3 + TA |
+
+## Coding Owner decisions after the Q2 code (2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| E24 | Keep the existing setup-card rule for every provider: `ShowSetupCard = !configuredNow && meterList.Count == 0` (the WO3 change to `!snapshot.Configured` altered Claude/OpenAI/AGY when Detection is null and a configured snapshot carries an error — not allowed by R-015 "tab อื่นหน้าตาเดิม" / R-004). Only the `opencode` tab never shows the setup card (`&& !IsOpenCode`), so E10 still shows the error banner there. Test: a Claude/OpenAI/AGY snapshot with `configured: true`, `detection: null`, `error: "x"`, no meters still shows the setup card as before. | WO3 + TA |
+| E25 | R-015 changes the tab list, so the existing R-014 test `MainWindowViewModelAllAgentsTests.Tabs_ExposesThreeProviderTabsThenAllAgentsTab_ProviderTabsUnchanged` is updated by the Test Author to `[Claude, OpenAI, Agy, OpenCode, AllAgents]` (ProviderTabs unchanged). | TA |
+
+## Coding Owner decisions after Q2 code review (Reviewer1 + Reviewer2, 2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| E26 | (MAJOR, Reviewer1) The gauge card shows no `Detail`, so the money goes into the OpenCode meter **subtitle** (the shared card template stays unchanged). Let `spent = money(MonthCostUsd) + (HasUnpricedModels ? " + unpriced" : "")`. Budget set → `subtitle: "{spent} of {money(budget)} budget"` (O1: `$12.35 of $50.00 budget`; O2: `$60.00 of $50.00 budget`). No budget → `subtitle: "{spent} · No budget set — add one in Settings"` (O3: `$7.50 · No budget set — add one in Settings`; O4 with no budget: `$0.00 · No budget set — add one in Settings`; O5 with no budget: `$3.00 + unpriced · No budget set — add one in Settings`). `detail` keeps `spent`. Overrides the subtitle texts in Q2.2/O1/O3. | WO3 + TA |
+| E27 | Make the E5 budget preview visible: in `App.OpenSettingsDialog` the preview callback is `s => { applier.Apply(s); _mainViewModel.ApplyAgentBudgets(s.AgentBudgets); }`, so typing moves the gauge and Discard (E19) restores it. `App.xaml.cs` at that call site is a WO3 file for this decision. | WO3 + TA |
+| E28 | The widget keeps the last selected **provider** tab: `ActiveProviderSource` returns `SelectedTab.ProviderId` only when that tab is in `ProviderTabs`; otherwise the last such id (initially the startup provider tab, Claude when startup is `opencode`/`all-agents`). Expose it from `MainWindowViewModel` as `ActiveProviderTabId` and use it at `App.xaml.cs:174`. | WO3 + TA |
+| E29 | `ApplyAgentBudgets` does nothing when the new budgets equal the stored ones (same keys case-insensitively and same values); unrelated settings changes therefore do not rebuild the OpenCode tab. | WO3 + TA |
+| E30 | Accepted as is: midnight-DST edge of E1 (Reviewer2 M1); OpenCode `Status` text (not bound in the UI). | — |
+| C27 | (R-014 test, flaky 3×) `MainWindowViewModelAllAgentsTests.RefreshCommand_PassesManualTrue_ForceOnlyAppliesWhenAllAgentsSelected` races: read 2 is signalled inside `RefreshAsync` before `_agentUsageTask` is replaced, so `await vm.AgentUsageTask` can await the old task. Fix in the test only: after the read-2 signal, wait (bounded, pump-safe like the existing wait) until `vm.AllAgentsTab.PricingText == "Prices: offline (built-in)"`, then assert `ReadCount == 2`. | TA |

@@ -52,6 +52,9 @@ public sealed class LiveSettingsApplier
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        _mainViewModel.ApplyAgentBudgets(
+            settings.AgentBudgets ?? new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase));
+
         var refreshInterval = TimeSpan.FromSeconds(settings.RefreshIntervalSeconds);
         if (_lastAppliedRefreshInterval != refreshInterval)
         {

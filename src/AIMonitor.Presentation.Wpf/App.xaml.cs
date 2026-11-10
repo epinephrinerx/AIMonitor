@@ -171,7 +171,7 @@ public partial class App : System.Windows.Application
         _mainViewModel.RequestExit += ShutdownApp;
         _mainViewModel.RequestConnect += OpenConnectDialog;
         _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
-        _widgetViewModel.ActiveProviderSource = () => _mainViewModel.SelectedTab?.ProviderId;
+        _widgetViewModel.ActiveProviderSource = () => _mainViewModel.ActiveProviderTabId;
         _widgetViewModel.RequestExpand += SwitchToDashboardMode;
         _widgetViewModel.RequestRefresh += async () => await _mainViewModel.RefreshAsync();
         _widgetViewModel.RequestQuit += ShutdownApp;
@@ -348,7 +348,16 @@ public partial class App : System.Windows.Application
                 _settingsSession.Current.DashboardHeight);
 
             var knownAgents = CollectKnownAgentNames();
-            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!, applier.Apply, knownAgents);
+            var vm = new SettingsViewModel(
+                _settingsSession,
+                _startupRegistrar!,
+                settings =>
+                {
+                    // E27: the preview moves the OpenCode gauge as budget rows change (E5).
+                    applier.Apply(settings);
+                    _mainViewModel?.ApplyAgentBudgets(settings.AgentBudgets);
+                },
+                knownAgents);
             var dialog = new SettingsDialog(vm)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
