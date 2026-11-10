@@ -225,9 +225,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedMetric;
         set
         {
-            if (value is not null && SetProperty(ref _selectedMetric, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedMetric, value))
             {
-                _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                RebuildOpenCodeTabForViewChange();
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                }
             }
         }
     }
@@ -238,9 +242,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedRange;
         set
         {
-            if (value is not null && SetProperty(ref _selectedRange, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedRange, value))
             {
-                _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                RebuildOpenCodeTabForViewChange();
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                }
             }
         }
     }
@@ -485,13 +493,27 @@ public sealed class MainWindowViewModel : ViewModelBase
             _agentBudgets,
             today,
             now,
-            TimeZoneInfo.Local);
+            TimeZoneInfo.Local,
+            ChartRangeDays,
+            _selectedMetric.Value);
         if (snapshot is not null)
         {
             OpenCodeTab.UpdateFromSnapshot(snapshot, now);
         }
 
         OpenCodeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(_lastAgentUsageReport, "opencode", today));
+    }
+
+    /// <summary>
+    /// Rebuilds the OpenCode tab from the cached ccusage pair when the chart range or metric changes
+    /// (F1). It never starts a ccusage read. The range/metric setters call this synchronously so the
+    /// chart is already correct before the follow-up settings save/refresh runs.
+    /// </summary>
+    private void RebuildOpenCodeTabForViewChange()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
+        UpdateOpenCodeTab(today, now);
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
