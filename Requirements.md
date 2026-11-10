@@ -204,12 +204,13 @@
 **ตรวจรับเมื่อ:**
 - [ ] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน
 - [ ] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows
-- [ ] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง
+- [x] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง — ตรวจแล้ว 2026-11-10 ที่ `dde0519` (ดูความคืบหน้าบรรทัดวันเดียวกัน)
 - [ ] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ
 - [ ] ผู้ใช้ตรวจรับ R-004 และ installer upgrade ใน disposable Windows environment
 
 **ความคืบหน้า:**
 - 2026-10-14 — Baseline `4681919`: build 0 warnings/errors, 1,310 tests ผ่าน, format ผ่าน; commits มี widget resize, theme, dashboard, charts, widget behavior, tray, Settings/Connections/About (เฟส 5–11b), update flow และ packaging naming ถึง 2026-10-07 ส่วนรายงานรีวิวที่เก็บใน repo มีถึง R-002 เฟส 4
+- 2026-11-10 — ตรวจซ้ำที่ `dde0519` (หลัง R-014–R-017): build 0 warnings และ tests 2,330/2,330 ผ่าน และ format สะอาด (รันที่ merge `b09ade5`; `dde0519` แก้แค่ `Requirements.md`); `pwsh -File scripts/verify_packages.ps1` → no vulnerable packages; `dotnet publish src/AIMonitor.Presentation.Wpf/AIMonitor.Presentation.Wpf.csproj -p:PublishProfile=win-x64-self-contained -o publish/win-x64` ผ่าน (exe 78 MB); `artifacts/tools/inno/compiler/ISCC.exe -DAppVersion=2.0.2 installer/AIMonitor2.iss` ผ่าน → `installer_out/AIUsageMonitor Setup 2.0.2.exe` (73 MB). รันทีละขั้นแทน `build_installer.ps1` เพราะขั้นแรกของสคริปต์ build Debug แบบ `--no-incremental` ซึ่งชนกับแอป Debug ที่เปิดให้ผู้ใช้ตรวจรับอยู่; `verify_packages.ps1` ต้องใช้ PowerShell 7 (`-Depth`) เหมือน CI. ข้อควรระวัง: `VersionPrefix` ยังเป็น 2.0.2 ไฟล์ setup 2.0.2 ในเครื่องจึงถูกแทนด้วย build ที่มี R-014–R-017 แล้ว ต้อง bump version ก่อน release
 
 ## R-006 · แก้ OpenAI API Key ดึงข้อมูลไม่ได้ และ Gemini เชื่อมต่อไม่ได้
 
