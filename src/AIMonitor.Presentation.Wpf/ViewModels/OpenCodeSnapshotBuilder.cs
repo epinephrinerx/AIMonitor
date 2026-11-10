@@ -24,7 +24,9 @@ public static class OpenCodeSnapshotBuilder
         IReadOnlyDictionary<string, decimal> budgets,
         DateOnly today,
         DateTimeOffset now,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        int rangeDays = 14,
+        string metric = OpenCodeHistoryBuilder.TotalTokens)
     {
         ArgumentNullException.ThrowIfNull(budgets);
         ArgumentNullException.ThrowIfNull(zone);
@@ -70,6 +72,7 @@ public static class OpenCodeSnapshotBuilder
             providerId: ProviderId,
             configured: true,
             meters: [meter],
+            history: OpenCodeHistoryBuilder.Build(lastGood, today, rangeDays, metric),
             fetchedAt: now);
     }
 

@@ -65,6 +65,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private IReadOnlyList<MeterDisplayItem> _meters = [];
     private IReadOnlyList<MeterSection> _meterSections = [];
     private IReadOnlyList<UsageHistoryBucket> _chartBuckets = [];
+    private IReadOnlyList<DailyCost> _chartCosts = [];
     private IReadOnlyList<string> _chartSeries = [];
     private IReadOnlyList<UsageHistoryBreakdown> _modelRows = [];
     private IReadOnlyList<UsageHistoryBreakdown> _projectRows = [];
@@ -248,6 +249,13 @@ public sealed class ProviderTabViewModel : ViewModelBase
     {
         get => _chartSeries;
         private set => SetProperty(ref _chartSeries, value);
+    }
+
+    /// <summary>Optional priced costs aligned with <see cref="ChartBuckets"/> by day (same order).</summary>
+    public IReadOnlyList<DailyCost> ChartCosts
+    {
+        get => _chartCosts;
+        private set => SetProperty(ref _chartCosts, value);
     }
 
     public string ChartMetric
@@ -614,7 +622,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
         if (history is not null && history.Buckets.Count > 0)
         {
             var suffix = $" · last {history.Days} days";
-            ChartBuckets = history.Buckets.OrderBy(b => b.Day).TakeLast(history.Days).ToList();
+            var chartBuckets = history.Buckets.OrderBy(b => b.Day).TakeLast(history.Days).ToList();
+            ChartBuckets = chartBuckets;
+            ChartCosts = AlignCosts(history.DailyCosts, chartBuckets);
             ChartSeries = history.Series;
             ChartMetric = history.Metric;
             ChartTitle = "Usage per day" + suffix;
@@ -627,6 +637,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
         else
         {
             ChartBuckets = [];
+            ChartCosts = [];
             ChartSeries = [];
             ModelRows = [];
             ProjectRows = [];
@@ -681,6 +692,33 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             StatsSummary = "";
         }
+    }
+
+    private static IReadOnlyList<DailyCost> AlignCosts(
+        IReadOnlyList<DailyCost> costs,
+        IReadOnlyList<UsageHistoryBucket> buckets)
+    {
+        if (costs.Count == 0)
+        {
+            return [];
+        }
+
+        var byDay = new Dictionary<DateOnly, DailyCost>();
+        foreach (var cost in costs)
+        {
+            byDay[cost.Day] = cost;
+        }
+
+        var aligned = new List<DailyCost>(buckets.Count);
+        foreach (var bucket in buckets)
+        {
+            if (byDay.TryGetValue(bucket.Day, out var cost))
+            {
+                aligned.Add(cost);
+            }
+        }
+
+        return aligned;
     }
 
     private static bool IsSupplementaryStat(Stat s)
