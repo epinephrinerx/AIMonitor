@@ -646,9 +646,6 @@ public sealed class ProviderTabViewModel : ViewModelBase
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
-        _baseShowSupplementary = (isClaude || isOpenAi)
-            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
-
         if (isClaude || isOpenAi)
         {
             var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
@@ -659,6 +656,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             Supplementary = null;
         }
+
+        // C26: set after the section is assigned, so a BuildSupplementary exception cannot leave the
+        // base flag true while the section is still null.
+        _baseShowSupplementary = (isClaude || isOpenAi)
+            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
 
         ApplyAgentUsage();
 
