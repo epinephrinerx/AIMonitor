@@ -462,7 +462,9 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-11-09 — P2a (ราคา Claude ทางการ) merge `760bb1c`
 - 2026-11-09 — P2b (ตัวอ่าน transcript: หลาย root, สแกนทุกชั้น, dedup แบบ ccusage, advisor iterations) merge `441ba7a`; A10 ผ่าน 29/29 วัน; หน่วยความจำ seen-set 94 MB ที่ 400k records
 - 2026-11-09 — P3 (tab "All agents") merge `c168ad8`; P4 (แถว ccusage ใน tab เดิม) merge `0a21583`; ไม่ได้ push
-- งานติดตาม: เทสต์ที่ Inspector B ของ P4 แนะนำ (stat tile "Plan" ใน section ccusage-only, `HasResetInfo` ใน `IsAgentUsageOnly`, regression ไม่มี summary ทั้งสาม tab); ลำดับไฟล์ตัวพิมพ์ผสม (P2b); `CcUsageRunnerTests.DeadlineFiredWhileProcessExited…` flaky เมื่อรันขนาน; path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); UI ไม่ตอบสนองชั่วคราวหนึ่งครั้งราววินาทีที่ 120 ใน smoke test
+- 2026-11-10 — งานติดตาม merge `783100e`: แก้บั๊ก runner คืน Success เมื่อ deadline หมดพร้อม process จบ (R12/R14, เดิม 2/30 รันขนานล้ม หลังแก้ 30/30 ผ่าน), เทสต์ R13 แบบ deterministic, ลบ branch ที่เข้าไม่ถึง (C24/C26), เทสต์ช่องว่าง C25 ครบ; 2,013 tests ผ่าน; UI ค้างไม่เกิดซ้ำใน 4 นาทีที่ตรวจทุกวินาที
+- งานติดตามที่เหลือ: path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); `RefreshCommand_PassesManualTrue…` ล้มหนึ่งครั้งตอนเครื่องโหลดหนัก (รันซ้ำ 6 รอบผ่าน)
+- (เดิม) งานติดตาม: เทสต์ที่ Inspector B ของ P4 แนะนำ (stat tile "Plan" ใน section ccusage-only, `HasResetInfo` ใน `IsAgentUsageOnly`, regression ไม่มี summary ทั้งสาม tab); ลำดับไฟล์ตัวพิมพ์ผสม (P2b); `CcUsageRunnerTests.DeadlineFiredWhileProcessExited…` flaky เมื่อรันขนาน; path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); UI ไม่ตอบสนองชั่วคราวหนึ่งครั้งราววินาทีที่ 120 ใน smoke test
 
 ## R-013 · แบ่ง gauge ของ AGY เป็นกลุ่ม Gemini และ Claude/GPT และเปลี่ยนชื่อเป็น Gemini / AGY
 
