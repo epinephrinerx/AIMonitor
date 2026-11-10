@@ -426,7 +426,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (เริ่ม 2026-11-10, spec `Docs/SPEC_R016.md`) |
+| สถานะ | 🧪 รอตรวจรับ (merge b09ade5, 2026-11-10) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | module ใหม่ใน Application/Presentation ที่สร้างรายการ agent จาก ccusage · tab ใหม่ "Overview" · Settings (งบต่อ agent ใช้ร่วมกับ R-015) |
 | เกี่ยวกับ | [[R-014]] · [[R-015]] · [[R-004]] |
@@ -452,8 +452,11 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **ตรวจรับเมื่อ:**
 - [ ] tab Overview แสดง gauge ครบทุก agent ที่ `ccusage daily --json --by-agent` ของเครื่องเดียวกันมีในเดือนนี้ และค่าใช้จ่ายตรงกัน
 - [ ] ตั้งงบให้ agent หนึ่งแล้ว % ตรงกับ ค่าใช้จ่ายเดือนนี้ ÷ งบ · agent ที่ไม่ตั้งงบไม่แสดง %
-- [ ] เทสต์ด้วย JSON สังเคราะห์ที่มี agent ชื่อใหม่ → มี gauge ของ agent นั้นโดยไม่แก้โค้ด
-- [ ] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม
+- [x] เทสต์ด้วย JSON สังเคราะห์ที่มี agent ชื่อใหม่ → มี gauge ของ agent นั้นโดยไม่แก้โค้ด — ทดสอบด้วย oracle O4 (`newagent` ได้ gauge 32% จากงบ "NewAgent" $10) ใน `OverviewSnapshotBuilderTests`
+- [ ] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม — ส่วนตรรกะทดสอบแล้ว (O7/I7 ข้อความ error แบบ R-014, I3 "Checking ccusage...", เทสต์ลำดับแท็บและ `ProviderTabs` เดิม) แต่หน้าตาจริงยังต้องให้คุณดู
+- [ ] (I21) Overview ที่มี agent ≥4 ตัว แสดง gauge ไม่เกิน 3 คอลัมน์ และมีช่องว่างระหว่างแถว · การ์ดในแท็บอื่นหน้าตาเดิม
+
+**ความคืบหน้า (2026-11-10):** spec `Docs/SPEC_R016.md` (H1.1–H1.3, O1–O11, I1–I21) · โค้ด 5167681 + c02da4e (I10–I16) + efa9051 (I17 ข้อความว่างเมื่อมี gauge, I18 ระยะห่างแถว) · เทสต์ 118919c / 038a1dd / 579bcc7 · Inspector A: blocker 1 major 4 → I1–I8 · Reviewer1 อนุมัติแบบมี minor → I11–I16 · Reviewer2 ขอแก้ → I17–I18 (Test Author เจอ I17 เองด้วย) · Inspector B → I19–I21 (mutant ของ Codex เป็นการวิเคราะห์ เพราะ sandbox restore ไม่ได้; mutant ที่รันจริง 3 ตัวโดย Test Author) · merge b09ade5: build 0 warning, เทสต์ 2,330/2,330, format สะอาด · ข้อค้าง: ความเสี่ยงเทสต์ wiring คร่อมเที่ยงคืน (I8)
 ## R-014 · ใช้ ccusage เป็นแหล่งข้อมูล usage/cost ของทุก agent และปรับตัวอ่าน transcript ของเราให้ตรงกัน
 
 | | |
