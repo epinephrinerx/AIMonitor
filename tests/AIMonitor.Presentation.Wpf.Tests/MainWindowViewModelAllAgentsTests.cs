@@ -48,20 +48,21 @@ public sealed class MainWindowViewModelAllAgentsTests
     public void Tabs_ExposesThreeProviderTabsThenAllAgentsTab_ProviderTabsUnchanged()
     {
         // Decision C1: ProviderTabs stays provider-only (widget, tray). E25 (R-015): the tab list
-        // grew to [Claude, OpenAI, Agy, OpenCode, AllAgents] — the OpenCode tab sits before
-        // AllAgentsTab while ProviderTabs is unchanged. Spec P3.2: TabTitle "All agents",
+        // grew to [Claude, OpenAI, Agy, OpenCode, AllAgents]; O9 (R-016): Overview inserts between
+        // OpenCode and AllAgents — ProviderTabs stays unchanged. Spec P3.2: TabTitle "All agents",
         // TabId "all-agents".
         var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
         using var session = new SettingsSession(new BlockingSettingsStore(), new AppSettings());
         var vm = new MainWindowViewModel(coordinator, session);
 
         Assert.Equal(3, vm.ProviderTabs.Count);
-        Assert.Equal(5, vm.Tabs.Count);
+        Assert.Equal(6, vm.Tabs.Count);
         Assert.Same(vm.ClaudeTab, vm.Tabs[0]);
         Assert.Same(vm.OpenAiTab, vm.Tabs[1]);
         Assert.Same(vm.AgyTab, vm.Tabs[2]);
         Assert.Same(vm.OpenCodeTab, vm.Tabs[3]); // R-015 Q2.1 / E25
-        Assert.Same(vm.AllAgentsTab, vm.Tabs[4]);
+        Assert.Same(vm.OverviewTab, vm.Tabs[4]); // R-016 O9
+        Assert.Same(vm.AllAgentsTab, vm.Tabs[5]);
         Assert.Equal("All agents", vm.AllAgentsTab.TabTitle);
         Assert.Equal("all-agents", vm.AllAgentsTab.TabId);
         Assert.False(vm.IsAllAgentsSelected);
