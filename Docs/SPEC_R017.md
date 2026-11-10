@@ -121,3 +121,13 @@ Fixture (today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10). `r
 | F16 | (R2 m4) `OpenCodeHistoryBuilder` uses the existing metric constants (`ChartFormat.ValueMetric`, `DashboardOptions`/`UsageMetric` names) instead of new duplicates. | WO3 |
 | F17 | (CO, after WO3 fix dfe5e62) Remove the 6-argument `OpenCodeSnapshotBuilder.Build` shim: it restores the defaults F15 removed. The R-015 test helper `OpenCodeSnapshotBuilderTests.cs:57` passes `14, UsageMetric.TotalTokens` explicitly (Test Author). The shim removal is done by WO3 on the integrated branch after that helper is updated; the build must still pass. | TA, then WO3 |
 | — | Kept: the `index` parameter of the 5-argument `TooltipText` (F4); the empty-window chart card (H6, R1 m7) is the intended empty state. | — |
+
+## Coding Owner decisions after Inspector B (Codex GPT-6-Sol, 2026-11-10, at 42b8f04)
+
+| Id | Decision | Owner |
+|---|---|---|
+| F18 | (IB major 1) A chart test must fail when the cost polyline is not drawn: render with ≥2 priced days and assert ink-coloured pixels in a small neighbourhood (e.g. 3×3) around the midpoint of a segment between two adjacent day-column centres, away from any dot; the same probe finds no ink with `Costs` empty. Tolerate anti-aliasing (colour distance threshold), no exact-pixel equality. | TA |
+| F19 | (IB major 2) Tests for F14: an unpriced day's dot centre is the card background colour and its ring is ink; a priced dot centre is ink; the "Cost ($)" legend swatch's ink pixels are wider than tall. Run in both light and dark themes. | TA |
+| F20 | (IB minor 3) Keep the agent case-insensitivity test, but its comment states it covers domain normalisation (`AgentUsage` lower-cases the agent); the builder's own comparison is an equivalent mutant through the public path. No production change. | TA |
+| F21 | (IB minor 4) Wiring tests must not read the live date twice: capture one local day per test. If `MainWindowViewModel` takes a clock/`TimeProvider`, inject a fixed one; if it has none, capture once, note the residual midnight risk in the report, and do not change production code. | TA |
+| F22 | If F18/F19 cannot be pinned without a production seam, stop and report the seam needed; do not change `src/`. | TA |
