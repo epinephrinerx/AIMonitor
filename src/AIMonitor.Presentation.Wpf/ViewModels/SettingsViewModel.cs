@@ -33,6 +33,9 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool _discarded;
     private bool _saved;
     private bool _isSaving;
+    private bool _hasBudgetError;
+
+    private readonly List<AgentBudgetRowViewModel> _budgetRows;
 
     public bool IsSaving
     {
@@ -43,7 +46,8 @@ public sealed class SettingsViewModel : ViewModelBase
     public SettingsViewModel(
         SettingsSession session,
         IStartupRegistrar startupRegistrar,
-        Action<AppSettings>? applyPreview = null)
+        Action<AppSettings>? applyPreview = null,
+        IReadOnlyList<string>? knownAgents = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _startupRegistrar = startupRegistrar ?? throw new ArgumentNullException(nameof(startupRegistrar));
@@ -69,7 +73,12 @@ public sealed class SettingsViewModel : ViewModelBase
         _chartRangeDays = _entrySettings.ChartRangeDays;
         _selectedWindowSize = WindowSizeOption.FromSize(_entrySettings.DashboardWidth, _entrySettings.DashboardHeight);
 
-        SaveCommand = new RelayCommand(async () => await ExecuteSaveCommandAsync(), () => !HasIntervalError);
+        _budgetRows = CreateBudgetRows(knownAgents);
+        _hasBudgetError = _budgetRows.Any(static r => r.HasError);
+
+        SaveCommand = new RelayCommand(
+            async () => await ExecuteSaveCommandAsync(),
+            () => !HasIntervalError && !HasBudgetError);
         CancelCommand = new RelayCommand(Cancel);
     }
 
@@ -145,8 +154,14 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public bool HasIntervalError => _refreshIntervalError.Length > 0;
 
+    /// <summary>True when any budget row is invalid.</summary>
+    public bool HasBudgetError => _hasBudgetError;
+
     /// <summary>"Monitor this service" per provider; a switched-off service is skipped by the refresh.</summary>
     public IReadOnlyList<ProviderToggle> Providers { get; }
+
+    /// <summary>Editable monthly budget rows, ordered with OpenCode first.</summary>
+    public IReadOnlyList<AgentBudgetRowViewModel> BudgetRows => _budgetRows;
 
     internal static string ValidateInterval(string text)
     {
@@ -171,6 +186,61 @@ public sealed class SettingsViewModel : ViewModelBase
         _refreshIntervalText = text;
         OnPropertyChanged(nameof(RefreshIntervalText));
         RefreshIntervalError = ValidateInterval(text);
+    }
+
+    private List<AgentBudgetRowViewModel> CreateBudgetRows(IReadOnlyList<string>? knownAgents)
+    {
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "opencode" };
+        foreach (var key in _entrySettings.AgentBudgets.Keys)
+        {
+            agents.Add(key);
+        }
+
+        if (knownAgents is not null)
+        {
+            foreach (var agent in knownAgents)
+            {
+                agents.Add(agent);
+            }
+        }
+
+        return agents
+            .Select(a => (Agent: a, DisplayName: AgentUsagePresenter.AgentDisplayName(a)))
+            .OrderBy(a => string.Equals(a.Agent, "opencode", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(a => a.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Select(a => new AgentBudgetRowViewModel(
+                a.Agent,
+                a.DisplayName,
+                _entrySettings.AgentBudgets.TryGetValue(a.Agent, out var value)
+                    ? value.ToString("0.00", CultureInfo.InvariantCulture)
+                    : null,
+                OnBudgetRowChanged))
+            .ToList();
+    }
+
+    private void OnBudgetRowChanged()
+    {
+        var hasError = _budgetRows.Any(static r => r.HasError);
+        if (SetProperty(ref _hasBudgetError, hasError, nameof(HasBudgetError)))
+        {
+            (SaveCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+
+        ApplyPreview();
+    }
+
+    private IReadOnlyDictionary<string, decimal> BuildBudgetsFromRows()
+    {
+        var budgets = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in _budgetRows)
+        {
+            if (row.TryGetValue(out var value))
+            {
+                budgets[row.Agent] = value;
+            }
+        }
+
+        return budgets;
     }
 
     public double WidgetOpacity
@@ -236,7 +306,8 @@ public sealed class SettingsViewModel : ViewModelBase
             WidgetOpacity = WidgetOpacity,
             WidgetAlwaysOnTop = WidgetAlwaysOnTop,
             DashboardWidth = SelectedWindowSize.Width,
-            DashboardHeight = SelectedWindowSize.Height
+            DashboardHeight = SelectedWindowSize.Height,
+            AgentBudgets = BuildBudgetsFromRows()
         });
     }
 
@@ -272,7 +343,8 @@ public sealed class SettingsViewModel : ViewModelBase
                 WidgetAlwaysOnTop = WidgetAlwaysOnTop,
                 ChartRangeDays = ChartRangeDays,
                 DashboardWidth = SelectedWindowSize.Width,
-                DashboardHeight = SelectedWindowSize.Height
+                DashboardHeight = SelectedWindowSize.Height,
+                AgentBudgets = BuildBudgetsFromRows()
             }).ConfigureAwait(true);
 
             _saved = true;

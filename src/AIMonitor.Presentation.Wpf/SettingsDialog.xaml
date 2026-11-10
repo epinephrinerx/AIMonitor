@@ -113,6 +113,40 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Monthly budgets (ccusage) -->
+                <Border Style="{StaticResource GroupCard}">
+                    <StackPanel>
+                        <TextBlock Text="Monthly budgets (ccusage)" Style="{StaticResource GroupTitle}" />
+                        <TextBlock Text="Set a monthly USD budget per agent. The OpenCode tab uses this to show spending as a percentage."
+                                   Style="{StaticResource Hint}" Margin="0,0,0,10" />
+                        <ItemsControl x:Name="BudgetRows" ItemsSource="{Binding BudgetRows}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="{Binding DisplayName}" Style="{StaticResource FieldLabel}" Margin="0,0,0,2" />
+                                        <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="120" HorizontalAlignment="Left" Padding="4"
+                                                 ToolTip="Leave empty for no budget, or enter an amount in USD." />
+                                        <TextBlock Text="{Binding Error}" TextWrapping="Wrap" FontSize="11"
+                                                   Margin="0,4,0,0" Foreground="{DynamicResource SeverityCriticalBrush}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasError}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
                 <!-- Widget mode -->
                 <Border Style="{StaticResource GroupCard}" Margin="0">
                     <StackPanel>
