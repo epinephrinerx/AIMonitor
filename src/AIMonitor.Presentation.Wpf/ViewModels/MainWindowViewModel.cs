@@ -11,6 +11,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly LatestRefreshCoordinator _refreshCoordinator;
     private readonly SettingsSession _settingsSession;
+    // F23: SettingsSession.Changed may fire on a thread-pool thread; sync from this context.
+    private readonly SynchronizationContext? _uiContext;
     private readonly CachedAgentUsageSource? _agentUsageSource;
     private readonly AgentUsageRefresher? _agentUsageRefresher;
     private ITrayReadingsSink? _traySink;
@@ -44,6 +46,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
         _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
+        _uiContext = SynchronizationContext.Current;
         _traySink = trayHost;
         _agentUsageSource = agentUsage;
 
@@ -303,6 +306,26 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private void OnSettingsChanged(AppSettings settings)
+    {
+        // F23: SettingsSession.Changed can fire on a thread-pool thread (UpdateAsync continues after
+        // ConfigureAwait(false)), so the _syncingFromSettings sync below — and the OpenCode rebuild
+        // it may trigger — would run off the UI thread. Post (async, never Send) to the context
+        // captured in the constructor; run inline when already on it or when none was captured.
+        if (_uiContext is not null && !ReferenceEquals(SynchronizationContext.Current, _uiContext))
+        {
+            _uiContext.Post(_ => OnSettingsChangedCore(settings), null);
+            return;
+        }
+
+        OnSettingsChangedCore(settings);
+    }
+
+    /// <summary>
+    /// The settings sync body, carried by <see cref="OnSettingsChanged"/>'s Post exactly once per
+    /// raise: re-testing the context inside the posted callback would loop forever on hosts whose
+    /// context does not set <see cref="SynchronizationContext.Current"/> during posted callbacks.
+    /// </summary>
+    private void OnSettingsChangedCore(AppSettings settings)
     {
         OnPropertyChanged(nameof(IsThemeSystem));
         OnPropertyChanged(nameof(IsThemeLight));
