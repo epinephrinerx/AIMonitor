@@ -6,7 +6,9 @@ using AIMonitor.Presentation.Wpf.ViewModels;
 namespace AIMonitor.Presentation.Wpf.Tests;
 
 /// <summary>
-/// R-015 Q2.2 — <c>OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, now, zone)</c>
+/// R-015 Q2.2 — <c>OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, now, zone,
+/// rangeDays, metric)</c> (the two new parameters have no defaults since F15; this helper passes
+/// the historical 14 / "Total tokens" explicitly per F17)
 /// written from Docs/SPEC_R015.md only (§5.6): the three-state table, the meter fields, oracles
 /// O1/O2/O3/O4/O5/O7/E12 (subtitle and detail texts are pinned by E26: spent goes into the subtitle,
 /// <c>detail</c> keeps the same spent text; O8 is superseded by E10) and decisions E1 (resetsAt day 1
@@ -48,13 +50,16 @@ public sealed class OpenCodeSnapshotBuilderTests
     private static AgentUsage OpenCode(decimal cost) => Usage("opencode", ("glm-4.6", cost));
 
     // Build returns ProviderSnapshot? (E23). The raw call, for the one case that expects null.
+    // F17 (R-017 after G1 review): the R-015 6-argument call site passes the new parameters
+    // explicitly — the old defaults 14 / "Total tokens" — so WO3 can delete the 6-argument shim
+    // without touching this file.
     private static ProviderSnapshot? BuildRaw(
         AgentUsageReport? lastGood,
         AgentUsageUnavailableException? lastError,
         IReadOnlyDictionary<string, decimal> budgets,
         DateOnly today,
         TimeZoneInfo? zone = null) =>
-        OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, Now, zone ?? TimeZoneInfo.Utc);
+        OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, Now, zone ?? TimeZoneInfo.Utc, 14, UsageMetric.TotalTokens);
 
     // Every state that has something to show: unwrap once here so the tests read against a
     // non-null snapshot (the repo style is Assert.NotNull + `!`, CS8602 under warnings-as-errors).

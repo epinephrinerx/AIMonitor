@@ -56,7 +56,7 @@ public sealed class ProviderTabChartCostsTests
     {
         // F7: "ChartCosts = history.DailyCosts when there is history" — aligned with ChartBuckets by
         // Day, same order (G1.3).
-        var costs = new[] { (D8, 0.60, false), (D9, 0.0, false), (D10, 1.25, true) };
+        var costs = new[] { (Day: D8, PricedUsd: 0.60, Unpriced: false), (Day: D9, PricedUsd: 0.0, Unpriced: false), (Day: D10, PricedUsd: 1.25, Unpriced: true) };
         var history = History(3, costs);
 
         var tab = OpenCodeTabWith(history);

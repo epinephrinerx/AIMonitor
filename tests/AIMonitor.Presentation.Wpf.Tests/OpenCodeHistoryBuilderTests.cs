@@ -14,8 +14,9 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// window day — PricedUsd the sum of priced opencode CostUsd that day, HasUnpricedModels any
 /// opencode model that day with CostUsd null; unknown metric → "Total tokens"; no usage in the
 /// window still returns the history). Every expected number is hand-derived from the oracle
-/// fixture: today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10. The implementation is
-/// written in parallel; these tests compile only after it merges.
+/// fixture: today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10. The G1
+/// implementation has since merged into this branch (041433a), so these tests compile and run
+/// against it.
 /// </summary>
 public sealed class OpenCodeHistoryBuilderTests
 {
@@ -67,7 +68,7 @@ public sealed class OpenCodeHistoryBuilderTests
     private static UsageHistory Build(
         AgentUsageReport report,
         int rangeDays = 7,
-        string metric = "Total tokens",
+        string metric = UsageMetric.TotalTokens,
         DateOnly? today = null)
     {
         var history = OpenCodeHistoryBuilder.Build(
@@ -127,18 +128,18 @@ public sealed class OpenCodeHistoryBuilderTests
     [Fact]
     public void Build_H1_TotalTokens_WindowBucketsSeriesAndByModel()
     {
-        var h = Build(OracleReport(), metric: "Total tokens");
+        var h = Build(OracleReport(), metric: UsageMetric.TotalTokens);
 
-        Assert.Equal("Total tokens", h.Metric); // G1.2: Metric as normalised — passes through
+        Assert.Equal(UsageMetric.TotalTokens, h.Metric); // G1.2: Metric as normalised — passes through
         AssertOracleH1(h);
     }
 
     [Fact]
     public void Build_H2_OutputTokens_SwitchesTheValueSource()
     {
-        var h = Build(OracleReport(), metric: "Output tokens");
+        var h = Build(OracleReport(), metric: UsageMetric.OutputTokens);
 
-        Assert.Equal("Output tokens", h.Metric);
+        Assert.Equal(UsageMetric.OutputTokens, h.Metric);
         var byDay = h.Buckets.ToDictionary(b => b.Day);
         Assert.Equal(
             new Dictionary<string, double> { [Kimi] = 50, [Glm] = 40 },
@@ -155,9 +156,9 @@ public sealed class OpenCodeHistoryBuilderTests
     [Fact]
     public void Build_H3_EquivalentValue_PricedCostsOnly_UnpricedModelContributesNothing()
     {
-        var h = Build(OracleReport(), metric: "Equivalent value");
+        var h = Build(OracleReport(), metric: UsageMetric.EquivalentValue);
 
-        Assert.Equal("Equivalent value", h.Metric);
+        Assert.Equal(UsageMetric.EquivalentValue, h.Metric);
         var byDay = h.Buckets.ToDictionary(b => b.Day);
         Assert.Equal(
             new Dictionary<string, double> { [Kimi] = 0.50, [Glm] = 0.10 },
@@ -177,7 +178,7 @@ public sealed class OpenCodeHistoryBuilderTests
         // H4 values, asserted under "Equivalent value" — G1.2 defines DailyCosts once (sum of priced
         // CostUsd per day + any-unpriced flag), not per metric. Full H4 sweep for "Total tokens"
         // lives in AssertOracleH1 (Build_H1).
-        var h = Build(OracleReport(), metric: "Equivalent value");
+        var h = Build(OracleReport(), metric: UsageMetric.EquivalentValue);
 
         Assert.Equal(7, h.DailyCosts.Count);
         Assert.Equal(new DateOnly(2026, 11, 4), h.DailyCosts[0].Day); // oldest first
@@ -194,7 +195,7 @@ public sealed class OpenCodeHistoryBuilderTests
     {
         var h = Build(OracleReport(), metric: "Bogus");
 
-        Assert.Equal("Total tokens", h.Metric); // H5: Metric is the NORMALISED name
+        Assert.Equal(UsageMetric.TotalTokens, h.Metric); // H5: Metric is the NORMALISED name
         AssertOracleH1(h);                      // H5: "same as H1"
     }
 
@@ -210,7 +211,7 @@ public sealed class OpenCodeHistoryBuilderTests
             (new DateOnly(2026, 11, 8), [Agent("claude", Model(ClaudeOpus, 5000, 0, null))]),
             (new DateOnly(2026, 11, 9), [Agent("claude", Model(ClaudeOpus, 5000, 0, null))]));
 
-        var h = Build(report, metric: "Total tokens");
+        var h = Build(report, metric: UsageMetric.TotalTokens);
 
         Assert.Equal(7, h.Days);
         Assert.Equal(Enumerable.Range(4, 7).Select(d => new DateOnly(2026, 11, d)), h.Buckets.Select(b => b.Day));
@@ -225,7 +226,7 @@ public sealed class OpenCodeHistoryBuilderTests
     [Fact]
     public void Build_H7_NullReport_ReturnsNull()
     {
-        Assert.Null(OpenCodeHistoryBuilder.Build(report: null!, today: Today, rangeDays: 7, metric: "Total tokens"));
+        Assert.Null(OpenCodeHistoryBuilder.Build(report: null!, today: Today, rangeDays: 7, metric: UsageMetric.TotalTokens));
     }
 
     [Fact]
@@ -260,7 +261,7 @@ public sealed class OpenCodeHistoryBuilderTests
                     Model("glm", 500, 5, 0.50m),
                     Model("kimi", 500, 5, 0.50m))]));
 
-        var h = Build(report, metric: "Total tokens");
+        var h = Build(report, metric: UsageMetric.TotalTokens);
 
         Assert.Equal(["Beta", "alpha", "glm", "kimi"], h.Series);
         Assert.Equal(
@@ -287,9 +288,9 @@ public sealed class OpenCodeHistoryBuilderTests
         Assert.DoesNotContain(new DateOnly(2026, 11, 3), h.Buckets.Select(b => b.Day));
         Assert.Equal([Glm], h.Series);                                 // kimi (only on 11-03) is out
         Assert.Equal([new UsageHistoryBreakdown(Glm, 111)], h.ByModel);
-        Assert.All(h.DailyCosts, c => Assert.Equal(0.0, c.PricedUsd)); // the 11-03 $7.77 is out too
         Assert.Equal(new DateOnly(2026, 11, 4), h.DailyCosts[0].Day);
-        Assert.Equal(0.11, h.DailyCosts[0].PricedUsd, 10);
+        Assert.Equal(0.11, h.DailyCosts[0].PricedUsd, 10);              // the first window day is in
+        Assert.All(h.DailyCosts.Skip(1), c => Assert.Equal((0.0, false), (c.PricedUsd, c.HasUnpricedModels))); // the 11-03 $7.77 is out
     }
 
     [Fact]
@@ -356,7 +357,7 @@ public sealed class OpenCodeHistoryBuilderTests
             (new DateOnly(2026, 11, 8), [Agent("opencode", Model(Kimi, 1000, 50, 0.50m), Model("zeta", 0, 0, 0.00m))]),
             (new DateOnly(2026, 11, 10), [Agent("opencode", Model("zeta", 500, 5, 0.30m))]));
 
-        var h = Build(report, metric: "Total tokens");
+        var h = Build(report, metric: UsageMetric.TotalTokens);
 
         Assert.Equal(new Dictionary<string, double> { [Kimi] = 1000 }, h.Buckets[4].PerModel); // 11-08: zeta (0) left out
         Assert.Equal(new Dictionary<string, double> { ["zeta"] = 500 }, h.Buckets[6].PerModel);
@@ -374,7 +375,7 @@ public sealed class OpenCodeHistoryBuilderTests
         var report = Report(
             (new DateOnly(2026, 11, 10), [Agent("opencode", Model("freeby", 900, 90, 0.00m))]));
 
-        var h = Build(report, metric: "Equivalent value");
+        var h = Build(report, metric: UsageMetric.EquivalentValue);
 
         Assert.Empty(h.Buckets[6].PerModel);
         Assert.Empty(h.Series);
@@ -391,7 +392,7 @@ public sealed class OpenCodeHistoryBuilderTests
         var report = Report(
             (new DateOnly(2026, 11, 10), [Agent("opencode", new ModelUsage("ghost", new TokenCounts(0, 0, 0, 0, 0), null))]));
 
-        var h = Build(report, metric: "Total tokens");
+        var h = Build(report, metric: UsageMetric.TotalTokens);
 
         Assert.Empty(h.Buckets[6].PerModel);
         Assert.Empty(h.Series);

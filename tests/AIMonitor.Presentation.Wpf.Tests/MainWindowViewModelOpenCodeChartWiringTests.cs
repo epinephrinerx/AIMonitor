@@ -18,12 +18,15 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// budget changes only." F9 pins the observable outcome: after Updated, then SelectedRange = 30 and
 /// SelectedMetric = "Output tokens", the tab's ChartBuckets.Count == 30 with output-token values
 /// and NO extra ccusage read — plus G1.3 keeps E10/E23 unchanged (a rebuild without a stored good
-/// report pushes nothing). The setter rebuild is asserted SYNCHRONOUSLY with no intervening await:
+/// report pushes nothing). Later review decisions: F11 — a rebuild must not move the tab's
+/// LastUpdated (FetchedAt is the report time) — and F13 — an external settings change rebuilds
+/// the OpenCode tab through the _syncingFromSettings path, only when the value really changes.
+/// The setter rebuild is asserted SYNCHRONOUSLY with no intervening await:
 /// the fire-and-forget ApplyViewChangeAsync chain can only resume on the test's synchronization
 /// context, which runs at the next await. Hand-written fakes as in the R-014/R-015 test files
 /// (no real ccusage, no network); FakeClock freezes the cache so any later background refresh
-/// serves from it and the "no extra read" assertion is timing-proof. The implementation is written
-/// in parallel; these tests compile only after it merges.
+/// serves from it and the "no extra read" assertion is timing-proof. The G1 implementation has
+/// since merged into this branch (041433a), so these tests compile and run against it.
 /// </summary>
 public sealed class MainWindowViewModelOpenCodeChartWiringTests
 {
@@ -110,7 +113,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         Assert.Equal(300.0, tab.ChartBuckets[^1].PerModel[Deepseek]);
         Assert.DoesNotContain(ClaudeOpus, tab.ChartBuckets[^1].PerModel.Keys); // claude row ignored
         Assert.Equal([Kimi, Deepseek], tab.ChartSeries);
-        Assert.Equal("Total tokens", tab.ChartMetric);
+        Assert.Equal(UsageMetric.TotalTokens, tab.ChartMetric);
         Assert.Equal("Usage per day · last 14 days", tab.ChartTitle);
         Assert.Equal([Kimi, Deepseek], tab.ModelRows.Select(r => r.Label)); // the "By model" card (G1.3)
         Assert.Empty(tab.ProjectRows); // "By project" stays hidden: ByProject is empty (G1.3)
@@ -141,7 +144,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count); // F9
         Assert.Equal(30, vm.OpenCodeTab.ChartCosts.Count);   // costs keep the same width, aligned
 
-        vm.SelectedMetric = MetricOption(vm, "Output tokens");
+        vm.SelectedMetric = MetricOption(vm, UsageMetric.OutputTokens);
 
         // F9: "its values are output tokens" — today's bucket and the by-model totals switch
         // (kimi 100, deepseek 30 — the H2/H1 pattern), not the totals 2000/300.
@@ -150,7 +153,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         Assert.Equal(100.0, today.PerModel[Kimi]);
         Assert.Equal(30.0, today.PerModel[Deepseek]);
         Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
-        Assert.Equal("Output tokens", vm.OpenCodeTab.ChartMetric);
+        Assert.Equal(UsageMetric.OutputTokens, vm.OpenCodeTab.ChartMetric);
         Assert.Equal([Kimi, Deepseek], vm.OpenCodeTab.ChartSeries);
         Assert.Equal(100.0, vm.OpenCodeTab.ModelRows[0].Value); // By model rebuilt with the new metric
         Assert.Equal(30.0, vm.OpenCodeTab.ModelRows[1].Value);
@@ -229,7 +232,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         var vm = CreateVm(agentUsage: null, new AppSettings(), out _);
 
         vm.SelectedRange = RangeOption(vm, 30);
-        vm.SelectedMetric = MetricOption(vm, "Output tokens");
+        vm.SelectedMetric = MetricOption(vm, UsageMetric.OutputTokens);
 
         Assert.False(vm.OpenCodeTab.HasSnapshot);
         Assert.Equal("Checking...", vm.OpenCodeTab.Status);
@@ -264,6 +267,63 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         // (failing) source in the background. That is the old R-015 behaviour — R-017 only promises
         // that the rebuild itself pushes an unchanged error snapshot without a history, which the
         // final-state asserts above pin (they also hold after any later background Updated).
+    }
+
+    // ── F11: rebuilds must not move the tab's LastUpdated ──────────────────────
+
+    [Fact]
+    public async Task F11_RangeAndBudgetRebuilds_LeaveLastUpdatedAtTheReportTime()
+    {
+        // F11 (R1 m2): "a range/metric/budget rebuild does not move LastUpdated" — the snapshot's
+        // FetchedAt is lastGood.RetrievedAt (FixedUtc), not the wall clock at rebuild time.
+        var (vm, source, _) = CreateWithReport();
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        Assert.Equal(FixedUtc, vm.OpenCodeTab.LastUpdated);
+
+        vm.SelectedRange = RangeOption(vm, 30);
+        vm.SelectedMetric = MetricOption(vm, UsageMetric.OutputTokens);
+        vm.ApplyAgentBudgets(new Dictionary<string, decimal> { ["opencode"] = 50m });
+
+        Assert.Equal(FixedUtc, vm.OpenCodeTab.LastUpdated);
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count); // the rebuilds themselves still happened
+        Assert.Equal(1, source.ReadCount);
+    }
+
+    // ── F13: an external settings change rebuilds too — only when the value changes ──
+
+    [Fact]
+    public async Task F13_ExternalRangeChange_RebuildsOpenCodeTab_NoCcusageRead()
+    {
+        // F13 (R1 m4): "the OpenCode rebuild also runs when range/metric change through
+        // OnSettingsChanged (the _syncingFromSettings path), still only when the value really
+        // changes." The change enters through the session, not the combobox setter.
+        var (vm, source, session) = CreateWithReport();
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+
+        await session.UpdateAsync(s => s with { ChartRangeDays = 30, ChartMetric = UsageMetric.OutputTokens });
+
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
+        Assert.Equal(100.0, vm.OpenCodeTab.ChartBuckets[^1].PerModel[Kimi]); // values switched with the metric
+        Assert.Equal(UsageMetric.OutputTokens, vm.OpenCodeTab.ChartMetric);
+        Assert.Equal(1, source.ReadCount); // the rebuild reads only the stored pair (E2 pattern)
+    }
+
+    [Fact]
+    public async Task F13_UnrelatedSettingsChange_DoesNotRebuild()
+    {
+        // F13's "only when the value really changes" holds on the sync path too: OnSettingsChanged
+        // re-assigns every selector, and a same-valued re-assignment must not rebuild the tab.
+        var (vm, _, session) = CreateWithReport();
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        var buckets = vm.OpenCodeTab.ChartBuckets;
+
+        await session.UpdateAsync(s => s with { Theme = "dark" });
+
+        Assert.Same(buckets, vm.OpenCodeTab.ChartBuckets);
     }
 
     // ── Fakes (hand-written, same as the R-014/R-015 test files) ───────────────

@@ -10,9 +10,11 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// lastGood, today, rangeDays, metric)</c> on the snapshot. Error-only and 'no result' states
 /// (E10/E23) are unchanged (no history)." Written from Docs/SPEC_R017.md only (§5.6); the
 /// per-value expectations are the SPEC oracle table (fixture today 2026-11-10), the H-shape
-/// hand-derived there. New arguments are passed by NAME so the tests bind regardless of where
-/// rangeDays/metric sit in the signature. The implementation is written in parallel; these tests
-/// compile only after it merges.
+/// hand-derived there. Later review decisions covered here: F11 (fetchedAt is the report time —
+/// the rebuild must not move LastUpdated), F15 (the primary Build overload keeps rangeDays and
+/// metric required — every call here passes both) and F17 (the R-015 helper now passes them too,
+/// so WO3 can drop the temporary 6-argument shim). New arguments are passed by NAME so the tests
+/// bind regardless of where rangeDays/metric sit in the signature.
 /// </summary>
 public sealed class OpenCodeSnapshotBuilderHistoryTests
 {
@@ -77,12 +79,12 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
     [Fact]
     public void Build_GoodReport_AttachesSevenDayHistoryOnTheSnapshot()
     {
-        var snapshot = Build(rangeDays: 7, metric: "Total tokens");
+        var snapshot = Build(rangeDays: 7, metric: UsageMetric.TotalTokens);
 
         var history = snapshot.History; // G1.3: "sets history: OpenCodeHistoryBuilder.Build(...) on the snapshot"
         Assert.NotNull(history);
         Assert.Equal(7, history!.Days);
-        Assert.Equal("Total tokens", history.Metric);
+        Assert.Equal(UsageMetric.TotalTokens, history.Metric);
         Assert.Equal(Enumerable.Range(4, 7).Select(d => new DateOnly(2026, 11, d)), history.Buckets.Select(b => b.Day));
         Assert.Equal([Kimi, Glm, Deepseek], history.Series); // H1: window totals 3000, 400, 300
         Assert.Equal(
@@ -107,15 +109,40 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
     }
 
     [Fact]
+    public void Build_F11_GoodSnapshot_FetchedAtIsTheReportTimeNotNow()
+    {
+        // F11 (R1 m2): "Every OpenCode snapshot uses fetchedAt: lastGood.RetrievedAt ... so a
+        // range/metric/budget rebuild does not move LastUpdated." `now` (07:03:22) differs from
+        // the report's RetrievedAt (07:00:00) — passing `now` through must not win.
+        var snapshot = Build(rangeDays: 7, metric: UsageMetric.TotalTokens);
+
+        Assert.Equal(RetrievedAt, snapshot.FetchedAt);
+    }
+
+    [Fact]
+    public void Build_F11_ErrorOnlySnapshot_FetchedAtIsNow()
+    {
+        // F11: "(or lastError's time if no lastGood — use now only then)" — the exception carries
+        // no time, so the error-only snapshot keeps R-015's `now`.
+        var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.Failed, "ccusage failed");
+
+        var snapshot = BuildRaw(null, failure, rangeDays: 7, metric: UsageMetric.TotalTokens);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(Now, snapshot!.FetchedAt);
+        Assert.Null(snapshot.History);
+    }
+
+    [Fact]
     public void Build_GoodReport_ForwardsRangeDaysAndMetricToTheBuilder()
     {
         // rangeDays 30 widens the window so 11-01's 9999/9.99 enters:
         // kimi = 9999 + 1000 + 2000 = 12999; the window starts today.AddDays(-29) = 2026-10-12.
-        var history = Build(rangeDays: 30, metric: "Equivalent value").History;
+        var history = Build(rangeDays: 30, metric: UsageMetric.EquivalentValue).History;
 
         Assert.NotNull(history);
         Assert.Equal(30, history!.Days);
-        Assert.Equal("Equivalent value", history.Metric);
+        Assert.Equal(UsageMetric.EquivalentValue, history.Metric);
         Assert.Equal(30, history.Buckets.Count);
         Assert.Equal(new DateOnly(2026, 10, 12), history.Buckets[0].Day);
         Assert.Equal(
@@ -142,7 +169,7 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
 
         var snapshot = OpenCodeSnapshotBuilder.Build(
             lastGood: report, lastError: null, budgets: NoBudgets, today: Today, now: Now,
-            zone: TimeZoneInfo.Utc, rangeDays: 7, metric: "Total tokens");
+            zone: TimeZoneInfo.Utc, rangeDays: 7, metric: UsageMetric.TotalTokens);
 
         Assert.NotNull(snapshot);
         var history = snapshot!.History;
@@ -160,7 +187,7 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
     {
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.NotInstalled, "ccusage is not installed");
 
-        var snapshot = BuildRaw(null, failure, rangeDays: 7, metric: "Total tokens");
+        var snapshot = BuildRaw(null, failure, rangeDays: 7, metric: UsageMetric.TotalTokens);
 
         Assert.NotNull(snapshot);
         Assert.Null(snapshot!.History); // G1.3: "Error-only ... states are unchanged (no history)"
@@ -173,7 +200,7 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
     {
         // G1.3: "'no result' states (E10/E23) are unchanged" — E23 keeps its null return, so the
         // new parameters do not turn "nothing known yet" into a pushed snapshot.
-        Assert.Null(BuildRaw(null, null, rangeDays: 7, metric: "Total tokens"));
+        Assert.Null(BuildRaw(null, null, rangeDays: 7, metric: UsageMetric.TotalTokens));
     }
 
     [Fact]
@@ -183,7 +210,7 @@ public sealed class OpenCodeSnapshotBuilderHistoryTests
         // the later error ignored.
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.Failed, "ccusage failed this time");
 
-        var snapshot = BuildRaw(OracleReport(), failure, rangeDays: 7, metric: "Total tokens");
+        var snapshot = BuildRaw(OracleReport(), failure, rangeDays: 7, metric: UsageMetric.TotalTokens);
 
         Assert.NotNull(snapshot);
         Assert.Null(snapshot!.Error);

@@ -1,4 +1,7 @@
+using System.IO;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Controls;
 
@@ -16,8 +19,11 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// entry → no cost line. F3: with Costs non-empty EVERY day's tooltip appends
 /// <c>Cost: {ChartFormat.Money(PricedUsd)}</c> plus <c>" + unpriced"</c> iff that day has
 /// <c>HasUnpricedModels</c> — also when all costs are 0 (then no line/right axis per G1.4, but the
-/// tooltip still shows Cost: $0.00). The implementation is written in parallel; these tests
-/// compile only after it merges.
+/// tooltip still shows Cost: $0.00). Later review decisions: F10 adds <c>internal static string
+/// CostTickLabel(double v)</c> with its tick oracles, and F12 the empty-state guard
+/// (<c>series.Count == 0</c> → the existing "No usage recorded" render, no cost line, no right
+/// axis) — pinned here by comparing whole bitmap renders. Written against Docs/SPEC_R017.md; the
+/// G1 implementation has since merged into this branch (041433a).
 /// </summary>
 [Collection("Wpf")]
 public sealed class StackedColumnChartCostLineTests
@@ -112,10 +118,10 @@ public sealed class StackedColumnChartCostLineTests
         // 1000 → "1,000", 400 → "400", total 1400 → "1,400".
         Assert.Equal(
             Join("Nov 8", $"{Kimi}: 1,000", $"{Glm}: 400", "Total: 1,400"),
-            StackedColumnChartControl.TooltipText(Day8(), [Kimi, Glm], "Total tokens"));
+            StackedColumnChartControl.TooltipText(Day8(), [Kimi, Glm], UsageMetric.TotalTokens));
         Assert.Equal(
             Join("Nov 4", "No usage"),
-            StackedColumnChartControl.TooltipText(Empty(D4), [Kimi, Glm], "Total tokens"));
+            StackedColumnChartControl.TooltipText(Empty(D4), [Kimi, Glm], UsageMetric.TotalTokens));
     }
 
     [Fact]
@@ -124,9 +130,9 @@ public sealed class StackedColumnChartCostLineTests
         // F2 (H9) "the tooltip with no costs equals the existing text" + F4's forwarding.
         foreach (var bucket in new[] { Day8(), Day10(), Empty(D9) })
         {
-            var plain = StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], "Total tokens");
-            Assert.Equal(plain, StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], "Total tokens", null, 0));
-            Assert.Equal(plain, StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], "Total tokens", [], 0));
+            var plain = StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], UsageMetric.TotalTokens);
+            Assert.Equal(plain, StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], UsageMetric.TotalTokens, null, 0));
+            Assert.Equal(plain, StackedColumnChartControl.TooltipText(bucket, [Kimi, Glm, Deepseek], UsageMetric.TotalTokens, [], 0));
         }
     }
 
@@ -139,7 +145,7 @@ public sealed class StackedColumnChartCostLineTests
         // Money(0.60) = "$0.60" (ChartFormat pins the formatter; see ChartTests.Money_*).
         var costs = new[] { Cost(D8, 0.60, false), Cost(D10, 1.25, true) };
 
-        var text = StackedColumnChartControl.TooltipText(Day8(), [Kimi, Glm, Deepseek], "Total tokens", costs, index: 0);
+        var text = StackedColumnChartControl.TooltipText(Day8(), [Kimi, Glm, Deepseek], UsageMetric.TotalTokens, costs, index: 0);
 
         Assert.Equal(
             Join("Nov 8", $"{Kimi}: 1,000", $"{Glm}: 400", "Total: 1,400", "Cost: $0.60"),
@@ -154,7 +160,7 @@ public sealed class StackedColumnChartCostLineTests
         // Total = 2300 from the bucket itself.
         var costs = new[] { Cost(D8, 0.60, false), Cost(D10, 1.25, true) };
 
-        var text = StackedColumnChartControl.TooltipText(Day10(), [Kimi, Glm, Deepseek], "Total tokens", costs, index: 1);
+        var text = StackedColumnChartControl.TooltipText(Day10(), [Kimi, Glm, Deepseek], UsageMetric.TotalTokens, costs, index: 1);
 
         Assert.Equal(
             Join("Nov 10", $"{Kimi}: 2,000", $"{Deepseek}: 300", "Total: 2,300", "Cost: $1.25 + unpriced"),
@@ -173,10 +179,10 @@ public sealed class StackedColumnChartCostLineTests
         Assert.False(StackedColumnChartControl.ShowsCostAxis(costs)); // no line, no right axis
         Assert.Equal(
             Join("Nov 4", "No usage", "Cost: $0.00"),
-            StackedColumnChartControl.TooltipText(Empty(D4), [Kimi, Glm], "Total tokens", costs, index: 0));
+            StackedColumnChartControl.TooltipText(Empty(D4), [Kimi, Glm], UsageMetric.TotalTokens, costs, index: 0));
         Assert.Equal(
             Join("Nov 9", "No usage", "Cost: $0.00 + unpriced"),
-            StackedColumnChartControl.TooltipText(Empty(D9), [Kimi, Glm], "Total tokens", costs, index: 1));
+            StackedColumnChartControl.TooltipText(Empty(D9), [Kimi, Glm], UsageMetric.TotalTokens, costs, index: 1));
     }
 
     [Fact]
@@ -188,10 +194,124 @@ public sealed class StackedColumnChartCostLineTests
         // matching by Day finds no entry and draws none.
         var costs = new[] { Cost(D8, 0.60, false), Cost(D10, 1.25, true) };
 
-        var text = StackedColumnChartControl.TooltipText(Empty(D9), [Kimi, Glm, Deepseek], "Total tokens", costs, index: 1);
+        var text = StackedColumnChartControl.TooltipText(Empty(D9), [Kimi, Glm, Deepseek], UsageMetric.TotalTokens, costs, index: 1);
 
         Assert.Equal(Join("Nov 9", "No usage"), text); // byte-identical to the no-costs text
         Assert.DoesNotContain("Cost:", text);
+    }
+
+    // ── F10: right-axis tick labels ────────────────────────────────────────────
+
+    [Theory]
+    // F10 (G1 code review): below $1,000 the tick is "$" + v.ToString("#,##0.00##") (up to four
+    // decimals, at least two); from $1,000 it is "$" + ChartFormat.Compact(v) — which still
+    // spells 1,000–9,999 with a thousands separator (Compact only abbreviates from 10K, pinned
+    // in ChartTests.Compact_MatchesLegacyFormat), then $12K. The spec's own
+    // oracles: ticks under max 0.10 read $0.00, $0.025, $0.05, $0.075, $0.10; under max 0.02 —
+    // $0.00, $0.005, $0.01, $0.015, $0.02. The tooltip keeps ChartFormat.Money (pinned above).
+    [InlineData(0.0, "$0.00")]
+    [InlineData(0.005, "$0.005")]
+    [InlineData(0.01, "$0.01")]
+    [InlineData(0.015, "$0.015")]
+    [InlineData(0.02, "$0.02")]
+    [InlineData(0.025, "$0.025")]
+    [InlineData(0.05, "$0.05")]
+    [InlineData(0.075, "$0.075")]
+    [InlineData(0.1, "$0.10")]
+    [InlineData(12.34, "$12.34")]
+    [InlineData(999.0, "$999.00")]
+    // From $1,000 the label is "$" + ChartFormat.Compact(v) — Compact only abbreviates at 10,000+.
+    [InlineData(1000.0, "$1,000")]
+    [InlineData(1500.0, "$1,500")]
+    [InlineData(10000.0, "$10K")]
+    [InlineData(12345.0, "$12.3K")]
+    [InlineData(2500000.0, "$2.5M")]
+    public void CostTickLabel_F10_FollowsTheDecimalThenCompactRule(double value, string expected) =>
+        Assert.Equal(expected, StackedColumnChartControl.CostTickLabel(value));
+
+    [Fact]
+    public void CostTickLabel_F10_TheSpecTickSequences()
+    {
+        // The full right-axis sweep exactly as OnRender computes it: NiceAxisMax over the same
+        // GridDivisions (4) as the left axis, ticks at max*i/4 (G1.4, F10).
+        var max010 = ChartFormat.NiceAxisMax(0.10, 4);
+        Assert.Equal(
+            ["$0.00", "$0.025", "$0.05", "$0.075", "$0.10"],
+            Enumerable.Range(0, 5).Select(i => StackedColumnChartControl.CostTickLabel(max010 * i / 4)));
+
+        var max002 = ChartFormat.NiceAxisMax(0.02, 4);
+        Assert.Equal(
+            ["$0.00", "$0.005", "$0.01", "$0.015", "$0.02"],
+            Enumerable.Range(0, 5).Select(i => StackedColumnChartControl.CostTickLabel(max002 * i / 4)));
+    }
+
+    // ── F12/H9: whole-control render comparisons ───────────────────────────────
+
+    [Fact]
+    public void F12_EmptySeries_WithPositiveCosts_RendersExactlyTheOldEmptyState()
+    {
+        // F12 (R1 m3): "the empty-state guard back to the original series.Count == 0 → the existing
+        // 'No usage recorded' state, no cost line, no right axis". OnRender early-returns before
+        // the legend and the cost axis, so with no series even positive costs (with an unpriced
+        // flag) must not move a single pixel; the two contrast renders prove the comparison is
+        // not vacuous (a populated series changes it, and with a series the costs DO draw).
+        WpfTestHost.Run(() =>
+        {
+            var buckets = new[] { Day8(), Day10() };
+            var series = new[] { Kimi, Glm, Deepseek };
+            var costs = new[] { Cost(D8, 0.60, false), Cost(D10, 1.25, true) };
+
+            var emptyNoCosts = Render(buckets, [], UsageMetric.TotalTokens, null);
+            Assert.True(emptyNoCosts.SequenceEqual(Render(buckets, [], UsageMetric.TotalTokens, costs)));
+
+            var withSeries = Render(buckets, series, UsageMetric.TotalTokens, null);
+            Assert.False(withSeries.SequenceEqual(emptyNoCosts));
+            Assert.False(Render(buckets, series, UsageMetric.TotalTokens, costs).SequenceEqual(withSeries));
+        });
+    }
+
+    [Fact]
+    public void H9_NullEmptyOrAllZeroCosts_RenderIdenticallyToBefore()
+    {
+        // H9 (F2): "chart control with Costs null/empty — rendering identical to before (no right
+        // axis, no 'Cost ($)' legend)" — and the all-zero case draws no line either (G1.4), so it
+        // renders like the pre-R-017 control too (the unpriced flag alone never draws).
+        WpfTestHost.Run(() =>
+        {
+            var buckets = new[] { Day8(), Day10() };
+            var series = new[] { Kimi, Glm, Deepseek };
+            var none = Render(buckets, series, UsageMetric.TotalTokens, null);
+
+            Assert.True(none.SequenceEqual(Render(buckets, series, UsageMetric.TotalTokens, [])));
+            Assert.True(none.SequenceEqual(Render(
+                buckets, series, UsageMetric.TotalTokens, [Cost(D8, 0.0, false), Cost(D10, 0.0, true)])));
+        });
+    }
+
+    /// <summary>One deterministic 320×160 render of the control (STA via WpfTestHost); F12/H9
+    /// compare the whole pixel buffer, so "no cost line, no right axis" means "byte-identical".</summary>
+    private static byte[] Render(
+        IReadOnlyList<UsageHistoryBucket> buckets,
+        IReadOnlyList<string> series,
+        string metric,
+        IReadOnlyList<DailyCost>? costs)
+    {
+        var chart = new StackedColumnChartControl
+        {
+            Buckets = buckets,
+            Series = series,
+            Metric = metric,
+            Costs = costs,
+        };
+        chart.Measure(new Size(320.0, 160.0));
+        chart.Arrange(new Rect(0.0, 0.0, 320.0, 160.0));
+        chart.UpdateLayout();
+
+        var target = new RenderTargetBitmap(320, 160, 96.0, 96.0, PixelFormats.Pbgra32);
+        target.Render(chart);
+        var pixels = new byte[320 * 160 * 4];
+        target.CopyPixels(pixels, 320 * 4, 0);
+        return pixels;
     }
 
     // ── G1.4: the Costs dependency property itself ─────────────────────────────
@@ -200,12 +320,18 @@ public sealed class StackedColumnChartCostLineTests
     public void Costs_DependencyProperty_IsAnOptionalAffectsRenderList()
     {
         // G1.4: "New dependency property Costs (IReadOnlyList<DailyCost>?, AffectsRender). Null or
-        // empty → the control renders exactly as today" — the default is therefore null, and a
-        // change re-renders.
+        // empty → the control renders exactly as today" — the property type and the null default
+        // are observable here. The AffectsRender FLAG is not introspectable: WPF returns
+        // DefaultMetadata as a base PropertyMetadata for every registration on this control
+        // (verified against the pre-existing Buckets/Series/Metric DPs too), so asserting the
+        // framework type would pin WPF behaviour, not this control's. The render effect the flag
+        // drives is verified through the seams OnRender consumes (F2: ShowsCostAxis /
+        // LegendEntries) plus the manual smoke checklist.
         Assert.Equal(typeof(IReadOnlyList<DailyCost>), StackedColumnChartControl.CostsProperty.PropertyType);
-        Assert.Null(StackedColumnChartControl.CostsProperty.DefaultValue);
-        var metadata = Assert.IsType<FrameworkPropertyMetadata>(StackedColumnChartControl.CostsProperty.DefaultMetadata);
-        Assert.True(metadata.Options.HasFlag(FrameworkPropertyMetadataOptions.AffectsRender));
+        Assert.Equal(
+            StackedColumnChartControl.BucketsProperty.DefaultMetadata.GetType(),
+            StackedColumnChartControl.CostsProperty.DefaultMetadata.GetType()); // registered in the same style as the existing chart DPs
+        Assert.Null(StackedColumnChartControl.CostsProperty.DefaultMetadata.DefaultValue);
     }
 
     [Fact]
@@ -225,5 +351,25 @@ public sealed class StackedColumnChartCostLineTests
             chart.Costs = null;
             Assert.Null(chart.Costs);
         });
+    }
+
+    [Fact]
+    public void MainWindowXaml_UsagePerDayChart_BindsCostsToTheSelectedTab()
+    {
+        // G1.3: "the existing 'Usage per day' StackedColumnChartControl binds
+        // Costs=\"{Binding SelectedTab.ChartCosts}\". No other layout change." — a text-level
+        // contract in the style of ConnectionsSourceContractTests.
+        var root = AppContext.BaseDirectory;
+        while (!string.IsNullOrEmpty(root) && !File.Exists(Path.Combine(root, "AIMonitor.sln")))
+        {
+            root = Directory.GetParent(root)?.FullName;
+        }
+
+        Assert.NotNull(root);
+        var xaml = File.ReadAllText(Path.Combine(root!, "src", "AIMonitor.Presentation.Wpf", "MainWindow.xaml"));
+
+        Assert.Matches(
+            @"<controls:StackedColumnChartControl\s+[^>]*Costs=""\{\s*Binding\s+SelectedTab\.ChartCosts\s*\}""",
+            xaml);
     }
 }
