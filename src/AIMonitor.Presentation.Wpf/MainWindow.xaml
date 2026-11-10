@@ -205,6 +205,22 @@
                     </StackPanel>
                 </Border>
 
+                <!-- R-016 I3: Overview empty-state text (Checking ccusage…, No agent usage recorded,
+                     or Waiting for this month's ccusage data). Collapsed when EmptyMessage is null. -->
+                <TextBlock x:Name="OverviewEmptyMessage" Text="{Binding SelectedTab.EmptyMessage}" TextWrapping="Wrap"
+                           Margin="4,8,4,12" FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasEmptyMessage}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <!-- Gauges: one row of equal-width cards per section (AGY: Gemini, Claude / GPT);
                      every row shares one column count so cards line up -->
                 <ItemsControl x:Name="GaugeRow" ItemsSource="{Binding SelectedTab.MeterSections}" Margin="0,0,0,12">

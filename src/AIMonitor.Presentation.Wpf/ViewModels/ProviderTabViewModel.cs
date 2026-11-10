@@ -79,6 +79,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statsSummary = "";
     private string _accountInfo = "";
     private string _errorMessage = "";
+    private string? _emptyMessage;
+    private int _meterColumns;
+    private int _meterColumnsCap = int.MaxValue;
     private IReadOnlyList<StatTile> _statTiles = [];
     private SupplementaryDetailsViewModel? _supplementary;
     private bool _showSupplementary;
@@ -223,10 +226,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
-    private static IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
+    private IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
     {
         var groups = meters.GroupBy(m => m.Section, StringComparer.Ordinal).ToList();
-        var columns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var rawColumns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var columns = Math.Min(rawColumns, _meterColumnsCap);
+        MeterColumns = columns;
         return groups.Select(g => new MeterSection(g.Key, g.ToList(), columns)).ToList();
     }
 
@@ -370,6 +375,45 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasError));
             }
         }
+    }
+
+    /// <summary>
+    /// Text shown in the provider area when there are no meters (R-016 I3). Null for every tab
+    /// except the Overview, which uses it for "Checking ccusage…", "No agent usage recorded this
+    /// month" and the rollover "Waiting for this month's ccusage data" (I4).
+    /// </summary>
+    public string? EmptyMessage
+    {
+        get => _emptyMessage;
+        set
+        {
+            if (SetProperty(ref _emptyMessage, value))
+            {
+                OnPropertyChanged(nameof(HasEmptyMessage));
+            }
+        }
+    }
+
+    public bool HasEmptyMessage => !string.IsNullOrEmpty(_emptyMessage);
+
+    /// <summary>
+    /// Gauge-column cap used by <see cref="BuildSections"/>. Overview uses 3 (I5); every other tab
+    /// keeps the existing uncapped behaviour. Set before the first snapshot is applied.
+    /// </summary>
+    public void SetMeterColumnsCap(int cap)
+    {
+        if (cap < 1) throw new ArgumentOutOfRangeException(nameof(cap));
+        _meterColumnsCap = cap;
+    }
+
+    /// <summary>
+    /// Effective column count across <see cref="MeterSections"/>; exposed so tests can assert the
+    /// Overview cap without rendering (I5). Equals the shared per-section column count.
+    /// </summary>
+    public int MeterColumns
+    {
+        get => _meterColumns;
+        private set => SetProperty(ref _meterColumns, value);
     }
 
     /// <summary>
@@ -651,14 +695,28 @@ public sealed class ProviderTabViewModel : ViewModelBase
         LastUpdated = snapshot.FetchedAt;
         IsConfigured = configuredNow;
         HasSnapshot = true;
-        // Every other provider keeps R-004's setup card. Only the OpenCode tab never shows it, so an
-        // error-only snapshot shows the error banner instead (E10), and a configured snapshot with no
-        // meters does not draw an empty gauge card.
+        // Every other provider keeps R-004's setup card. Only the OpenCode tab and the Overview
+        // tab never show it, so an error-only snapshot shows the error banner instead (E10, R-016
+        // I3), and a configured snapshot with no meters does not draw an empty gauge card.
         var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
-        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode;
+        var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
+
+        // R-016 I3/I4: the Overview tab shows an empty-state message when no meters are present
+        // and no error banner applies. Other tabs keep EmptyMessage null.
+        if (isOverview && meterList.Count == 0 && snapshot.Error is null)
+        {
+            EmptyMessage = IsOverviewStale(snapshot.FetchedAt, reference)
+                ? "Waiting for this month's ccusage data"
+                : "No agent usage recorded this month";
+        }
+        else
+        {
+            EmptyMessage = null;
+        }
 
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
@@ -984,5 +1042,22 @@ public sealed class ProviderTabViewModel : ViewModelBase
         return display.Countdown == "now"
             ? "Resetting now"
             : $"Resets in {display.Countdown} · {display.LocalTime}";
+    }
+
+    /// <summary>
+    /// R-016 I4: the Overview's "no meters" message changes to a rollover wording when the last
+    /// successful ccusage read was taken in a different local month from <paramref name="now"/>.
+    /// The display changes only at a rebuild (ccusage update, budget change), not at midnight.
+    /// </summary>
+    private static bool IsOverviewStale(DateTimeOffset? fetchedAt, DateTimeOffset now)
+    {
+        if (fetchedAt is null)
+        {
+            return false;
+        }
+
+        var fetchedLocal = TimeZoneInfo.ConvertTime(fetchedAt.Value, TimeZoneInfo.Local);
+        var nowLocal = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local);
+        return fetchedLocal.Year != nowLocal.Year || fetchedLocal.Month != nowLocal.Month;
     }
 }

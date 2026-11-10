@@ -54,10 +54,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
         AgyTab = new ProviderTabViewModel("agy", "Gemini / AGY");
         OpenCodeTab = new ProviderTabViewModel(OpenCodeSnapshotBuilder.ProviderId, "OpenCode");
+        OverviewTab = new ProviderTabViewModel(OverviewSnapshotBuilder.ProviderId, "Overview");
+        OverviewTab.SetMeterColumnsCap(3); // I5
+        OverviewTab.EmptyMessage = "Checking ccusage\u2026"; // I3 state 1 initial
         AllAgentsTab = new AllAgentsTabViewModel();
 
         ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
-        Tabs = [ClaudeTab, OpenAiTab, AgyTab, OpenCodeTab, AllAgentsTab];
+        Tabs = [ClaudeTab, OpenAiTab, AgyTab, OpenCodeTab, OverviewTab, AllAgentsTab];
 
         var settings = _settingsSession.Current;
         _agentBudgets = settings.AgentBudgets ?? new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -126,6 +129,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ProviderTabViewModel OpenAiTab { get; }
     public ProviderTabViewModel AgyTab { get; }
     public ProviderTabViewModel OpenCodeTab { get; }
+    public ProviderTabViewModel OverviewTab { get; }
     public AllAgentsTabViewModel AllAgentsTab { get; }
     public IReadOnlyList<ProviderTabViewModel> ProviderTabs { get; }
     public IReadOnlyList<object> Tabs { get; }
@@ -440,6 +444,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         _lastAgentUsageReport = lastGood;
         _lastAgentUsageError = lastError;
 
+        // I8: capture now once and derive today in the local zone; the same pair is passed to
+        // every ccusage-backed builder in this rebuild.
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
@@ -447,6 +453,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
         AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
         UpdateOpenCodeTab(today, now);
+        UpdateOverviewTab(today, now);
     }
 
     /// <summary>
@@ -465,9 +472,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         _agentBudgets = budgets;
 
+        // I8: one now/today pair shared by both ccusage-backed builders.
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         UpdateOpenCodeTab(today, now);
+        UpdateOverviewTab(today, now);
     }
 
     /// <summary>Same keys (case-insensitive) and same values (E29).</summary>
@@ -528,15 +537,36 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Rebuilds the Overview tab from the cached ccusage pair (R-016 H1.2). Called alongside
+    /// <see cref="UpdateOpenCodeTab"/> at every rebuild point; never starts a ccusage read.
+    /// </summary>
+    private void UpdateOverviewTab(DateOnly today, DateTimeOffset now)
+    {
+        var snapshot = OverviewSnapshotBuilder.Build(
+            _lastAgentUsageReport,
+            _lastAgentUsageError,
+            _agentBudgets,
+            today,
+            now,
+            TimeZoneInfo.Local);
+        if (snapshot is not null)
+        {
+            OverviewTab.UpdateFromSnapshot(snapshot, now);
+        }
+    }
+
+    /// <summary>
     /// Rebuilds the OpenCode tab from the cached ccusage pair when the chart range or metric changes
     /// (F1). It never starts a ccusage read. The range/metric setters call this synchronously so the
     /// chart is already correct before the follow-up settings save/refresh runs.
     /// </summary>
     private void RebuildOpenCodeTabForViewChange()
     {
+        // I8: one now/today pair shared by both ccusage-backed builders.
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         UpdateOpenCodeTab(today, now);
+        UpdateOverviewTab(today, now);
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
