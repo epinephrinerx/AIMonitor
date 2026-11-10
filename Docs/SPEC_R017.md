@@ -119,4 +119,5 @@ Fixture (today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10). `r
 | F14 | (R1 m5, R2 m3) Hollow dots are filled with the card background brush so the line does not show through; the legend swatch for "Cost ($)" is a short horizontal line, not a square; one frozen `Pen` per render for line and dots. | WO3 |
 | F15 | (R1 m6) `OpenCodeSnapshotBuilder.Build`'s `rangeDays` and `metric` parameters have no default values. | WO3 + TA |
 | F16 | (R2 m4) `OpenCodeHistoryBuilder` uses the existing metric constants (`ChartFormat.ValueMetric`, `DashboardOptions`/`UsageMetric` names) instead of new duplicates. | WO3 |
+| F17 | (CO, after WO3 fix dfe5e62) Remove the 6-argument `OpenCodeSnapshotBuilder.Build` shim: it restores the defaults F15 removed. The R-015 test helper `OpenCodeSnapshotBuilderTests.cs:57` passes `14, UsageMetric.TotalTokens` explicitly (Test Author). The shim removal is done by WO3 on the integrated branch after that helper is updated; the build must still pass. | TA, then WO3 |
 | — | Kept: the `index` parameter of the 5-argument `TooltipText` (F4); the empty-window chart card (H6, R1 m7) is the intended empty state. | — |
