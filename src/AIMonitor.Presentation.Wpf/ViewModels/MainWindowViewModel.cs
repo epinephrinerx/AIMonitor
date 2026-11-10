@@ -11,6 +11,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly LatestRefreshCoordinator _refreshCoordinator;
     private readonly SettingsSession _settingsSession;
+    // F23: SettingsSession.Changed may fire on a thread-pool thread; sync from this context.
+    private readonly SynchronizationContext? _uiContext;
     private readonly CachedAgentUsageSource? _agentUsageSource;
     private readonly AgentUsageRefresher? _agentUsageRefresher;
     private ITrayReadingsSink? _traySink;
@@ -44,6 +46,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
         _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
+        _uiContext = SynchronizationContext.Current;
         _traySink = trayHost;
         _agentUsageSource = agentUsage;
 
@@ -225,9 +228,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedMetric;
         set
         {
-            if (value is not null && SetProperty(ref _selectedMetric, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedMetric, value))
             {
-                _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                RebuildOpenCodeTabForViewChange();
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
+                }
             }
         }
     }
@@ -238,9 +245,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _selectedRange;
         set
         {
-            if (value is not null && SetProperty(ref _selectedRange, value) && !_syncingFromSettings)
+            if (value is not null && SetProperty(ref _selectedRange, value))
             {
-                _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                RebuildOpenCodeTabForViewChange();
+                if (!_syncingFromSettings)
+                {
+                    _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
+                }
             }
         }
     }
@@ -295,6 +306,26 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private void OnSettingsChanged(AppSettings settings)
+    {
+        // F23: SettingsSession.Changed can fire on a thread-pool thread (UpdateAsync continues after
+        // ConfigureAwait(false)), so the _syncingFromSettings sync below — and the OpenCode rebuild
+        // it may trigger — would run off the UI thread. Post (async, never Send) to the context
+        // captured in the constructor; run inline when already on it or when none was captured.
+        if (_uiContext is not null && !ReferenceEquals(SynchronizationContext.Current, _uiContext))
+        {
+            _uiContext.Post(_ => OnSettingsChangedCore(settings), null);
+            return;
+        }
+
+        OnSettingsChangedCore(settings);
+    }
+
+    /// <summary>
+    /// The settings sync body, carried by <see cref="OnSettingsChanged"/>'s Post exactly once per
+    /// raise: re-testing the context inside the posted callback would loop forever on hosts whose
+    /// context does not set <see cref="SynchronizationContext.Current"/> during posted callbacks.
+    /// </summary>
+    private void OnSettingsChangedCore(AppSettings settings)
     {
         OnPropertyChanged(nameof(IsThemeSystem));
         OnPropertyChanged(nameof(IsThemeLight));
@@ -485,13 +516,27 @@ public sealed class MainWindowViewModel : ViewModelBase
             _agentBudgets,
             today,
             now,
-            TimeZoneInfo.Local);
+            TimeZoneInfo.Local,
+            ChartRangeDays,
+            _selectedMetric.Value);
         if (snapshot is not null)
         {
             OpenCodeTab.UpdateFromSnapshot(snapshot, now);
         }
 
         OpenCodeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(_lastAgentUsageReport, "opencode", today));
+    }
+
+    /// <summary>
+    /// Rebuilds the OpenCode tab from the cached ccusage pair when the chart range or metric changes
+    /// (F1). It never starts a ccusage read. The range/metric setters call this synchronously so the
+    /// chart is already correct before the follow-up settings save/refresh runs.
+    /// </summary>
+    private void RebuildOpenCodeTabForViewChange()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
+        UpdateOpenCodeTab(today, now);
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>

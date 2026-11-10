@@ -30,6 +30,28 @@ public sealed record UsageHistoryBucket
     }
 }
 
+/// <summary>
+/// One day's priced cost for the optional chart cost line. <see cref="PricedUsd"/> only sums
+/// models whose price is known; <see cref="HasUnpricedModels"/> says that at least one of the day's
+/// models has no price, so the money value is incomplete rather than zero.
+/// </summary>
+public sealed record DailyCost
+{
+    public DateOnly Day { get; }
+
+    public double PricedUsd { get; }
+
+    public bool HasUnpricedModels { get; }
+
+    public DailyCost(DateOnly day, double pricedUsd, bool hasUnpricedModels)
+    {
+        UsageHistoryBucket.RequireFiniteNonNegative(pricedUsd, nameof(pricedUsd));
+        Day = day;
+        PricedUsd = pricedUsd;
+        HasUnpricedModels = hasUnpricedModels;
+    }
+}
+
 /// <summary>One entry in a by-model or by-project breakdown.</summary>
 public sealed record UsageHistoryBreakdown
 {
@@ -61,6 +83,9 @@ public sealed record UsageHistory
 
     public IReadOnlyList<UsageHistoryBreakdown> ByProject { get; }
 
+    /// <summary>Optional per-day priced costs for the chart's cost line; empty when not provided.</summary>
+    public IReadOnlyList<DailyCost> DailyCosts { get; }
+
     public int Days { get; }
 
     public string Metric { get; }
@@ -74,7 +99,8 @@ public sealed record UsageHistory
         IReadOnlyList<UsageHistoryBreakdown>? byProject = null,
         int days = 14,
         string metric = "Total tokens",
-        string projectLabel = "By project")
+        string projectLabel = "By project",
+        IReadOnlyList<DailyCost>? dailyCosts = null)
     {
         Buckets = DomainGuard.ToReadOnlyCopy(buckets);
         Series = DomainGuard.ToReadOnlyCopy(series);
@@ -85,6 +111,7 @@ public sealed record UsageHistory
 
         ByModel = DomainGuard.ToReadOnlyCopy(byModel);
         ByProject = DomainGuard.ToReadOnlyCopy(byProject);
+        DailyCosts = DomainGuard.ToReadOnlyCopy(dailyCosts);
 
         if (days <= 0)
         {

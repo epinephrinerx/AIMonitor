@@ -319,6 +319,7 @@
                         <controls:StackedColumnChartControl Buckets="{Binding SelectedTab.ChartBuckets}"
                                                             Series="{Binding SelectedTab.ChartSeries}"
                                                             Metric="{Binding SelectedTab.ChartMetric}"
+                                                            Costs="{Binding SelectedTab.ChartCosts}"
                                                             Height="260" />
                     </StackPanel>
                 </Border>

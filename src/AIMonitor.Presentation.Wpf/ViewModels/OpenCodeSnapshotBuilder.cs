@@ -24,7 +24,9 @@ public static class OpenCodeSnapshotBuilder
         IReadOnlyDictionary<string, decimal> budgets,
         DateOnly today,
         DateTimeOffset now,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        int rangeDays,
+        string metric)
     {
         ArgumentNullException.ThrowIfNull(budgets);
         ArgumentNullException.ThrowIfNull(zone);
@@ -70,7 +72,8 @@ public static class OpenCodeSnapshotBuilder
             providerId: ProviderId,
             configured: true,
             meters: [meter],
-            fetchedAt: now);
+            history: OpenCodeHistoryBuilder.Build(lastGood, today, rangeDays, metric),
+            fetchedAt: lastGood.RetrievedAt);
     }
 
     /// <summary>First day of the next local month at 00:00 in <paramref name="zone"/> (E1).</summary>
