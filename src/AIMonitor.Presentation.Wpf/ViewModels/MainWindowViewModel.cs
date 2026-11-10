@@ -55,8 +55,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         AgyTab = new ProviderTabViewModel("agy", "Gemini / AGY");
         OpenCodeTab = new ProviderTabViewModel(OpenCodeSnapshotBuilder.ProviderId, "OpenCode");
         OverviewTab = new ProviderTabViewModel(OverviewSnapshotBuilder.ProviderId, "Overview");
-        OverviewTab.SetMeterColumnsCap(3); // I5
-        OverviewTab.EmptyMessage = "Checking ccusage\u2026"; // I3 state 1 initial
         AllAgentsTab = new AllAgentsTabViewModel();
 
         ProviderTabs = [ClaudeTab, OpenAiTab, AgyTab];
@@ -553,6 +551,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             OverviewTab.UpdateFromSnapshot(snapshot, now);
         }
+
+        // I12: hand off the empty-state message from the builder.
+        var emptyMessage = OverviewSnapshotBuilder.EmptyMessage(
+            _lastAgentUsageReport,
+            _lastAgentUsageError,
+            today,
+            TimeZoneInfo.Local);
+        OverviewTab.UpdateOverviewEmptyMessage(emptyMessage);
     }
 
     /// <summary>
@@ -566,7 +572,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         UpdateOpenCodeTab(today, now);
-        UpdateOverviewTab(today, now);
+        // I15: do not rebuild Overview on chart range/metric changes.
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>

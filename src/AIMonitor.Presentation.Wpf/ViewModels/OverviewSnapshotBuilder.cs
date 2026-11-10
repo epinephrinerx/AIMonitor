@@ -89,6 +89,53 @@ public static class OverviewSnapshotBuilder
             fetchedAt: lastGood.RetrievedAt);
     }
 
+    /// <summary>
+    /// Computes the empty-state message for the Overview tab (I3/I4/I10/I12).
+    /// State 1 (no snapshot yet): "Checking ccusage...".
+    /// State 2 (error only): null (the error banner shows).
+    /// State 3 (snapshot exists): "Waiting for this month's ccusage data" when the report has no
+    /// Monthly entry for today's month AND the month of lastGood.RetrievedAt (in zone) differs from
+    /// today's month. Otherwise "No agent usage recorded this month" (including a current-month
+    /// entry with zero agents).
+    /// </summary>
+    public static string? EmptyMessage(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        DateOnly today,
+        TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+
+        if (lastGood is null)
+        {
+            // State 1: no snapshot yet, no error.
+            if (lastError is null)
+            {
+                return "Checking ccusage...";
+            }
+
+            // State 2: error only, the banner shows.
+            return null;
+        }
+
+        // State 3: we have a snapshot.
+        var hasCurrentMonth = lastGood.Monthly.Any(m => m.Year == today.Year && m.Month == today.Month);
+        if (hasCurrentMonth)
+        {
+            // Current month exists (even with zero agents).
+            return "No agent usage recorded this month";
+        }
+
+        // No current month entry - check if we're in rollover.
+        var fetchedLocal = TimeZoneInfo.ConvertTime(lastGood.RetrievedAt, zone);
+        if (fetchedLocal.Year != today.Year || fetchedLocal.Month != today.Month)
+        {
+            return "Waiting for this month's ccusage data";
+        }
+
+        return "No agent usage recorded this month";
+    }
+
     private static Meter BuildMeter(AgentBudgetReading reading, DateTimeOffset resetsAt)
     {
         var spent = ChartFormat.Money((double)reading.MonthCostUsd);

@@ -249,6 +249,16 @@
                                         <DataTemplate>
                                             <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                                     BorderThickness="1" CornerRadius="10" Padding="12,10">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <!-- I11: add a 12px top margin when the section wraps to more than one row. -->
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding DataContext.HasMultipleRows, RelativeSource={RelativeSource AncestorType=ItemsControl, AncestorLevel=1}}" Value="True">
+                                                                <Setter Property="Margin" Value="0,12,12,0" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <StackPanel>
                                                     <controls:GaugeControl Value="{Binding Value}" ValueText="{Binding ValueText}"
                                                                            Title="{Binding GaugeTitle}" Subtitle="{Binding Subtitle}"
