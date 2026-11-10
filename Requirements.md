@@ -354,7 +354,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (เริ่ม 2026-11-10) |
+| สถานะ | 🧪 รอคุณตรวจรับบนแอปจริง (2026-11-10; merge `d664012` แล้ว ยังไม่ push) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | tab ใหม่ "OpenCode" · Settings (งบรายเดือนต่อ agent) · `AppSettings` · ข้อมูล ccusage ของ R-014 |
 | เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-004]] |
@@ -378,11 +378,14 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่เปลี่ยน gauge ของ Claude / Codex / AGY ที่วัดโควต้าจริงอยู่แล้ว
 
 **ตรวจรับเมื่อ:**
-- [ ] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้
-- [ ] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X
-- [ ] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings
-- [ ] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014
-- [ ] tab อื่น tray และ widget หน้าตาเดิม
+- [ ] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้ — ตรวจแล้ว: เทสต์ลำดับ tab และ save/restore `ActiveProvider = "opencode"` ผ่าน (🧪 รอคุณดูบนแอป)
+- [ ] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X — ตรวจแล้ว: oracle O1/O2 (12.345÷50 = 24.69%, เกินงบ 120% สีวิกฤต) และ subtitle `$ใช้ไป of $งบ budget`; ยังไม่ได้เทียบกับ ccusage จริง (🧪 รอคุณตั้งงบใน Settings แล้วดู)
+- [ ] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings — ตรวจแล้ว: gauge `--` + `$7.50 · No budget set — add one in Settings` (E26) (🧪 รอคุณดูบนแอป)
+- [ ] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014 — ตรวจแล้ว: synthetic tests (error banner ไม่มีการ์ด setup, ไม่มี opencode เดือนนี้ → $0.00) (🧪)
+- [ ] tab อื่น tray และ widget หน้าตาเดิม — ตรวจแล้ว: ProviderTabs/tray/widget ไม่รวม OpenCode, กฎการ์ด setup เดิมคงไว้ (E24), widget คง provider tab ล่าสุด (E28) (🧪 รอคุณดูบนแอป)
+
+**ความคืบหน้า:**
+- 2026-11-10 — Q1 (งบรายเดือนต่อ agent ใน Settings + `AgentBudget`) merge `eb44740`; Q2 (tab OpenCode + gauge) merge `d5e260f`; เทสต์ merge `d664012` — 2,152 tests ผ่าน, build 0 warning, format สะอาด, ผ่าน Inspector A/B (mutant 12/12) และ Reviewer1/2; spec `Docs/SPEC_R015.md` E1–E30
 
 ## R-016 · หน้าภาพรวม gauge ค่าใช้จ่ายของทุก agent ที่ ccusage ตรวจเจอ
 
