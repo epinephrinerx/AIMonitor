@@ -316,4 +316,32 @@ public class ProviderTabViewModelTests
         Assert.Equal("0 Credits", vm.ResetBadge);
         Assert.Contains("Confirmed no reset credits available on this account (count = 0)", vm.ResetSummary);
     }
+
+    // ── R-015 E24: the setup-card rule ─────────────────────────────────────────
+
+    [Theory]
+    // E24: keep the existing setup-card rule for every provider —
+    // ShowSetupCard = !configuredNow && meterList.Count == 0 (R-004). A snapshot with
+    // configured: true, detection: null and an error has Ok == false, so a Claude/OpenAI/AGY tab
+    // still shows the setup card for it ("tab อื่นหน้าตาเดิม"). Only the opencode tab is exempted
+    // (&& !IsOpenCode), so E10's error-only snapshot shows just the error banner there.
+    [InlineData("claude", "Claude", true)]
+    [InlineData("openai", "OpenAI / Codex", true)]
+    [InlineData("agy", "Gemini / AGY", true)]
+    [InlineData("opencode", "OpenCode", false)] // the one exemption (E24/E10)
+    public void UpdateFromSnapshot_E24_ConfiguredWithErrorNoMeters_SetupCardOnlyForOtherProviders(
+        string providerId,
+        string displayName,
+        bool expectSetupCard)
+    {
+        var vm = new ProviderTabViewModel(providerId, displayName);
+
+        vm.UpdateFromSnapshot(new ProviderSnapshot(providerId, configured: true, error: "x"));
+
+        Assert.Equal(expectSetupCard, vm.ShowSetupCard);
+        Assert.Equal("x", vm.ErrorMessage); // the banner shows either way
+        Assert.Empty(vm.Meters); // no meters — no gauge card drawn on any tab
+        Assert.Empty(vm.MeterSections);
+        Assert.Equal(expectSetupCard ? $"{displayName} is not configured yet" : "", vm.AccountLabel);
+    }
 }

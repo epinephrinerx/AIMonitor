@@ -42,24 +42,26 @@ public sealed class MainWindowViewModelAllAgentsTests
     private static FakeAgentUsageSource CompletedReadsSource() =>
         new(n => Task.FromResult(Report(n == 1 ? AgentUsagePricing.OnlineRequested : AgentUsagePricing.Offline)));
 
-    // ── C1: Tabs shape ───────────────────────────────────────────────────────
+    // ── C1 + R-015 E25: Tabs shape ─────────────────────────────────────────────
 
     [Fact]
     public void Tabs_ExposesThreeProviderTabsThenAllAgentsTab_ProviderTabsUnchanged()
     {
-        // Decision C1: ProviderTabs stays provider-only (widget, tray); the new
-        // Tabs : IReadOnlyList<object> is the three provider tabs then AllAgentsTab.
-        // Spec P3.2: TabTitle "All agents", TabId "all-agents".
+        // Decision C1: ProviderTabs stays provider-only (widget, tray). E25 (R-015): the tab list
+        // grew to [Claude, OpenAI, Agy, OpenCode, AllAgents] — the OpenCode tab sits before
+        // AllAgentsTab while ProviderTabs is unchanged. Spec P3.2: TabTitle "All agents",
+        // TabId "all-agents".
         var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase([]));
         using var session = new SettingsSession(new BlockingSettingsStore(), new AppSettings());
         var vm = new MainWindowViewModel(coordinator, session);
 
         Assert.Equal(3, vm.ProviderTabs.Count);
-        Assert.Equal(4, vm.Tabs.Count);
+        Assert.Equal(5, vm.Tabs.Count);
         Assert.Same(vm.ClaudeTab, vm.Tabs[0]);
         Assert.Same(vm.OpenAiTab, vm.Tabs[1]);
         Assert.Same(vm.AgyTab, vm.Tabs[2]);
-        Assert.Same(vm.AllAgentsTab, vm.Tabs[3]);
+        Assert.Same(vm.OpenCodeTab, vm.Tabs[3]); // R-015 Q2.1 / E25
+        Assert.Same(vm.AllAgentsTab, vm.Tabs[4]);
         Assert.Equal("All agents", vm.AllAgentsTab.TabTitle);
         Assert.Equal("all-agents", vm.AllAgentsTab.TabId);
         Assert.False(vm.IsAllAgentsSelected);
@@ -263,7 +265,14 @@ public sealed class MainWindowViewModelAllAgentsTests
         var forceReadStarted = await Task.Run(
             () => SpinWait.SpinUntil(() => secondReadStarted.Task.IsCompleted, TimeSpan.FromSeconds(10)));
         Assert.True(forceReadStarted, "RefreshCommand did not start a forced ccusage read after the provider tabs.");
-        await vm.AgentUsageTask!;
+
+        // C27 (flaky 3× fix): read 2 is signalled inside RefreshAsync BEFORE _agentUsageTask is
+        // replaced, so `await vm.AgentUsageTask` here can await the OLD (first) task and race the
+        // Updated handler. Wait on the final state instead — bounded and pump-safe like the wait
+        // above — then assert the read count.
+        var pricingFlipped = await Task.Run(
+            () => SpinWait.SpinUntil(() => vm.AllAgentsTab.PricingText == "Prices: offline (built-in)", TimeSpan.FromSeconds(10)));
+        Assert.True(pricingFlipped, "The forced read started but the All agents tab never showed its prices.");
 
         Assert.Equal(2, source.ReadCount); // manual && All agents → force bypassed the fresh cache
         Assert.Equal("Prices: offline (built-in)", vm.AllAgentsTab.PricingText);
