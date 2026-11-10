@@ -51,8 +51,13 @@ public sealed class MeterDisplayItem : ViewModelBase
 }
 
 /// <summary>One row of gauge cards under an optional heading. <see cref="Columns"/> is shared by
-/// every section of a tab so cards line up across rows.</summary>
-public sealed record MeterSection(string Heading, IReadOnlyList<MeterDisplayItem> Meters, int Columns);
+/// every section of a tab so cards line up across rows. <see cref="HasMultipleRows"/> indicates
+/// whether the section wraps to more than one row (R-016 I11).</summary>
+public sealed record MeterSection(string Heading, IReadOnlyList<MeterDisplayItem> Meters, int Columns)
+{
+    /// <summary>True when the section wraps to more than one row (I11).</summary>
+    public bool HasMultipleRows => Meters.Count > Columns;
+}
 
 /// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
 public sealed record StatTile(string Label, string Value, string Detail);
@@ -79,6 +84,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statsSummary = "";
     private string _accountInfo = "";
     private string _errorMessage = "";
+    private string? _emptyMessage;
+    private int _meterColumns;
+    private int _meterColumnsCap = int.MaxValue;
     private IReadOnlyList<StatTile> _statTiles = [];
     private SupplementaryDetailsViewModel? _supplementary;
     private bool _showSupplementary;
@@ -96,6 +104,14 @@ public sealed class ProviderTabViewModel : ViewModelBase
         ProviderId = providerId;
         DisplayName = displayName;
         _tabTitle = displayName;
+
+        // I13: Overview tab derives its behavior from ProviderId.
+        var isOverview = string.Equals(providerId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        if (isOverview)
+        {
+            _emptyMessage = "Checking ccusage..."; // I3 state 1 initial
+            _meterColumnsCap = 3; // I5
+        }
     }
 
     /// <summary>Tab caption: the name plus the lead meter's percentage, e.g. "Claude 12%".</summary>
@@ -223,10 +239,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
-    private static IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
+    private IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
     {
         var groups = meters.GroupBy(m => m.Section, StringComparer.Ordinal).ToList();
-        var columns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var rawColumns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var columns = Math.Min(rawColumns, _meterColumnsCap);
+        MeterColumns = columns;
         return groups.Select(g => new MeterSection(g.Key, g.ToList(), columns)).ToList();
     }
 
@@ -370,6 +388,59 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasError));
             }
         }
+    }
+
+    /// <summary>
+    /// Text shown in the provider area when there are no meters (R-016 I3). Null for every tab
+    /// except the Overview, which uses it for "Checking ccusage...", "No agent usage recorded this
+    /// month" and the rollover "Waiting for this month's ccusage data" (I4).
+    /// </summary>
+    public string? EmptyMessage
+    {
+        get => _emptyMessage;
+        internal set
+        {
+            if (SetProperty(ref _emptyMessage, value))
+            {
+                OnPropertyChanged(nameof(HasEmptyMessage));
+            }
+        }
+    }
+
+    public bool HasEmptyMessage => !string.IsNullOrEmpty(_emptyMessage);
+
+    /// <summary>
+    /// Hands off the Overview tab's empty-state message from the builder (I12). Non-Overview tabs
+    /// ignore the call. MainWindowViewModel calls this after UpdateFromSnapshot with the result of
+    /// OverviewSnapshotBuilder.EmptyMessage.
+    /// </summary>
+    public void UpdateOverviewEmptyMessage(string? message)
+    {
+        var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        if (isOverview)
+        {
+            EmptyMessage = message;
+        }
+    }
+
+    /// <summary>
+    /// Gauge-column cap used by <see cref="BuildSections"/>. Overview uses 3 (I5); every other tab
+    /// keeps the existing uncapped behaviour. Set before the first snapshot is applied.
+    /// </summary>
+    public void SetMeterColumnsCap(int cap)
+    {
+        if (cap < 1) throw new ArgumentOutOfRangeException(nameof(cap));
+        _meterColumnsCap = cap;
+    }
+
+    /// <summary>
+    /// Effective column count across <see cref="MeterSections"/>; exposed so tests can assert the
+    /// Overview cap without rendering (I5). Equals the shared per-section column count.
+    /// </summary>
+    public int MeterColumns
+    {
+        get => _meterColumns;
+        private set => SetProperty(ref _meterColumns, value);
     }
 
     /// <summary>
@@ -651,14 +722,21 @@ public sealed class ProviderTabViewModel : ViewModelBase
         LastUpdated = snapshot.FetchedAt;
         IsConfigured = configuredNow;
         HasSnapshot = true;
-        // Every other provider keeps R-004's setup card. Only the OpenCode tab never shows it, so an
-        // error-only snapshot shows the error banner instead (E10), and a configured snapshot with no
-        // meters does not draw an empty gauge card.
+        // Every other provider keeps R-004's setup card. Only the OpenCode tab and the Overview
+        // tab never show it, so an error-only snapshot shows the error banner instead (E10, R-016
+        // I3), and a configured snapshot with no meters does not draw an empty gauge card.
         var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
-        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode;
+        var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
+
+        // I14: Overview caption is always plain "Overview", never "Overview NN%".
+        if (isOverview)
+        {
+            TabTitle = DisplayName;
+        }
 
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);

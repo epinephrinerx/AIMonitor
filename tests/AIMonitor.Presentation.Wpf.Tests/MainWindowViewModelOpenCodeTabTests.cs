@@ -72,12 +72,15 @@ public sealed class MainWindowViewModelOpenCodeTabTests
     {
         var vm = CreateVm(agentUsage: null, new AppSettings(), out _);
 
-        Assert.Equal(5, vm.Tabs.Count);
+        // O9 (R-016 H1.2): Tabs = [Claude, OpenAI, Agy, OpenCode, Overview, AllAgents] — Overview
+        // inserts between OpenCode and All agents; the R-015 Q2.1 ordering below it is unchanged.
+        Assert.Equal(6, vm.Tabs.Count);
         Assert.Same(vm.ClaudeTab, vm.Tabs[0]);
         Assert.Same(vm.OpenAiTab, vm.Tabs[1]);
         Assert.Same(vm.AgyTab, vm.Tabs[2]);
-        Assert.Same(vm.OpenCodeTab, vm.Tabs[3]); // Q2.1: Tabs = [Claude, OpenAI, Agy, OpenCode, AllAgents]
-        Assert.Same(vm.AllAgentsTab, vm.Tabs[4]);
+        Assert.Same(vm.OpenCodeTab, vm.Tabs[3]); // Q2.1: OpenCode sits after Agy
+        Assert.Same(vm.OverviewTab, vm.Tabs[4]); // O9: Overview sits after OpenCode
+        Assert.Same(vm.AllAgentsTab, vm.Tabs[5]);
 
         // Q2.1: ProviderTabs stays [ClaudeTab, OpenAiTab, AgyTab] — OpenCode is not in the tray,
         // the widget or the provider refresh.

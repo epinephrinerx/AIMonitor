@@ -65,7 +65,7 @@ public static class OpenCodeSnapshotBuilder
             title: "Month to date",
             subtitle: subtitle,
             percent: reading.Percent,
-            resetsAt: FirstOfNextMonth(today, zone),
+            resetsAt: MonthBoundary.FirstOfNextMonth(today, zone),
             detail: spent);
 
         return new ProviderSnapshot(
@@ -74,12 +74,5 @@ public static class OpenCodeSnapshotBuilder
             meters: [meter],
             history: OpenCodeHistoryBuilder.Build(lastGood, today, rangeDays, metric),
             fetchedAt: lastGood.RetrievedAt);
-    }
-
-    /// <summary>First day of the next local month at 00:00 in <paramref name="zone"/> (E1).</summary>
-    private static DateTimeOffset FirstOfNextMonth(DateOnly today, TimeZoneInfo zone)
-    {
-        var local = new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Unspecified).AddMonths(1);
-        return new DateTimeOffset(local, zone.GetUtcOffset(local));
     }
 }

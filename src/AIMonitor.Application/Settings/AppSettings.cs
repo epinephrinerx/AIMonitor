@@ -65,7 +65,7 @@ public sealed record AppSettings
         var activeProvider = ActiveProvider switch
         {
             "gemini" => "agy",
-            "claude" or "openai" or "agy" or "all-agents" or "opencode" => ActiveProvider,
+            "claude" or "openai" or "agy" or "all-agents" or "opencode" or "overview" => ActiveProvider,
             _ => "claude",
         };
         var providers = Providers is null

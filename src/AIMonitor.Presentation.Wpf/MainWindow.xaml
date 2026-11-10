@@ -205,6 +205,22 @@
                     </StackPanel>
                 </Border>
 
+                <!-- R-016 I3: Overview empty-state text (Checking ccusage..., No agent usage recorded,
+                     or Waiting for this month's ccusage data). Collapsed when EmptyMessage is null. -->
+                <TextBlock x:Name="OverviewEmptyMessage" Text="{Binding SelectedTab.EmptyMessage}" TextWrapping="Wrap"
+                           Margin="4,8,4,12" FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedTab.HasEmptyMessage}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <!-- Gauges: one row of equal-width cards per section (AGY: Gemini, Claude / GPT);
                      every row shares one column count so cards line up -->
                 <ItemsControl x:Name="GaugeRow" ItemsSource="{Binding SelectedTab.MeterSections}" Margin="0,0,0,12">
@@ -231,8 +247,19 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Margin="0,0,12,0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                            <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                                     BorderThickness="1" CornerRadius="10" Padding="12,10">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <!-- I18: default margin lives in the style so the wrap trigger can override it. -->
+                                                        <Setter Property="Margin" Value="0,0,12,0" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding DataContext.HasMultipleRows, RelativeSource={RelativeSource AncestorType=ItemsControl, AncestorLevel=1}}" Value="True">
+                                                                <Setter Property="Margin" Value="0,0,12,12" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <StackPanel>
                                                     <controls:GaugeControl Value="{Binding Value}" ValueText="{Binding ValueText}"
                                                                            Title="{Binding GaugeTitle}" Subtitle="{Binding Subtitle}"
