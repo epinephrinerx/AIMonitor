@@ -34,6 +34,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private AgentUsageUnavailableException? _lastAgentUsageError;
     private IReadOnlyDictionary<string, decimal> _agentBudgets =
         new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+    private string _lastProviderTabId;
 
     public MainWindowViewModel(
         LatestRefreshCoordinator refreshCoordinator,
@@ -71,6 +72,9 @@ public sealed class MainWindowViewModel : ViewModelBase
                 ?? ClaudeTab;
             _selectedTabItem = _selectedTab;
         }
+
+        // E28: the widget starts on the startup provider tab when the selected tab is not one of them.
+        _lastProviderTabId = ProviderTabs.Contains(_selectedTab) ? _selectedTab.ProviderId : ClaudeTab.ProviderId;
 
         _selectedMetric = DashboardOptions.Find(DashboardOptions.Metrics, settings.ChartMetric, 0);
         _selectedRange = DashboardOptions.Find(DashboardOptions.Ranges, settings.ChartRangeDays, 1);
@@ -122,6 +126,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AllAgentsTabViewModel AllAgentsTab { get; }
     public IReadOnlyList<ProviderTabViewModel> ProviderTabs { get; }
     public IReadOnlyList<object> Tabs { get; }
+
+    /// <summary>
+    /// The provider tab the widget and tray speak for (E28): the selected tab while it is one of
+    /// <see cref="ProviderTabs"/>, otherwise the last provider tab that was selected.
+    /// </summary>
+    public string ActiveProviderTabId =>
+        ProviderTabs.Contains(_selectedTab) ? _selectedTab.ProviderId : _lastProviderTabId;
 
     public object? SelectedTabItem
     {
@@ -177,6 +188,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             SetProperty(ref _selectedTab, value);
+
+            if (ProviderTabs.Contains(value))
+            {
+                _lastProviderTabId = value.ProviderId;
+            }
+
+            OnPropertyChanged(nameof(ActiveProviderTabId));
 
             if (_selectedTabItem != value)
             {
@@ -407,11 +425,56 @@ public sealed class MainWindowViewModel : ViewModelBase
     public void ApplyAgentBudgets(IReadOnlyDictionary<string, decimal> budgets)
     {
         ArgumentNullException.ThrowIfNull(budgets);
+
+        // E29: unrelated settings changes must not rebuild the OpenCode tab.
+        if (BudgetsEqual(_agentBudgets, budgets))
+        {
+            return;
+        }
+
         _agentBudgets = budgets;
 
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         UpdateOpenCodeTab(today, now);
+    }
+
+    /// <summary>Same keys (case-insensitive) and same values (E29).</summary>
+    private static bool BudgetsEqual(
+        IReadOnlyDictionary<string, decimal> left,
+        IReadOnlyDictionary<string, decimal> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var (agent, amount) in left)
+        {
+            if (right.TryGetValue(agent, out var other))
+            {
+                if (other != amount)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            var match = right.FirstOrDefault(
+                pair => string.Equals(pair.Key.Trim(), agent.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match.Key is null || match.Value != amount)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void UpdateOpenCodeTab(DateOnly today, DateTimeOffset now)

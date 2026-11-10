@@ -46,15 +46,16 @@ public static class OpenCodeSnapshotBuilder
         }
 
         var reading = AgentBudget.Compute(lastGood, Agent, budgets, today)!;
-        var detail = ChartFormat.Money((double)reading.MonthCostUsd);
+        // E26: the shared gauge card shows no Detail, so the money also goes into the subtitle.
+        var spent = ChartFormat.Money((double)reading.MonthCostUsd);
         if (reading.HasUnpricedModels)
         {
-            detail += " + unpriced";
+            spent += " + unpriced";
         }
 
         var subtitle = reading.BudgetUsd is { } budget
-            ? $"of your {ChartFormat.Money((double)budget)} budget"
-            : "No budget set — add one in Settings";
+            ? $"{spent} of {ChartFormat.Money((double)budget)} budget"
+            : $"{spent} · No budget set — add one in Settings";
 
         var meter = new Meter(
             kind: "month_budget",
@@ -63,7 +64,7 @@ public static class OpenCodeSnapshotBuilder
             subtitle: subtitle,
             percent: reading.Percent,
             resetsAt: FirstOfNextMonth(today, zone),
-            detail: detail);
+            detail: spent);
 
         return new ProviderSnapshot(
             providerId: ProviderId,
