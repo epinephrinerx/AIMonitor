@@ -426,7 +426,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว (2026-11-10) |
+| สถานะ | 🔨 กำลังทำ (เริ่ม 2026-11-10, spec `Docs/SPEC_R016.md`) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | module ใหม่ใน Application/Presentation ที่สร้างรายการ agent จาก ccusage · tab ใหม่ "Overview" · Settings (งบต่อ agent ใช้ร่วมกับ R-015) |
 | เกี่ยวกับ | [[R-014]] · [[R-015]] · [[R-004]] |
