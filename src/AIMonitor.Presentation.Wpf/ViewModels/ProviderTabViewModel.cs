@@ -399,22 +399,14 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             if (_baseShowSupplementary)
             {
-                if (_supplementary is null)
-                {
-                    if (agentRows.Count > 0)
-                    {
-                        Supplementary = BuildAgentUsageOnly(agentRows);
-                    }
-
-                    ShowSupplementary = true;
-                    return;
-                }
+                // UpdateFromSnapshot assigns a non-null section for Claude/OpenAI before calling this (C24).
+                var section = _supplementary!;
 
                 if (!RowsMatch(currentAgentRows, agentRows))
                 {
-                    var rows = _supplementary.Rows.Where(r => r.Group != "ccusage").ToList();
+                    var rows = section.Rows.Where(r => r.Group != "ccusage").ToList();
                     rows.AddRange(agentRows);
-                    Supplementary = CopyWithRows(_supplementary, rows);
+                    Supplementary = CopyWithRows(section, rows);
                 }
 
                 ShowSupplementary = true;
