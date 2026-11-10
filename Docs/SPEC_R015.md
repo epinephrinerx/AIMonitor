@@ -168,3 +168,10 @@ AGY gauges; the Overview tab (R-016).
 | E20 | Budget rows hold the agent name trimmed + lower-cased (labels from `AgentDisplayName` of that name). Preview budgets use the same rules as `Normalize` (key normalised, value rounded 2 dp AwayFromZero), so preview equals what Save stores. Oracle: typing `20.005` previews `20.01`; knownAgents `" Codex "` → row agent `codex`. | WO2 + TA |
 | E21 | `AgentBudget.Compute` finds the budget case-insensitively whatever comparer the caller's dictionary has (exact `TryGetValue` first, then an `OrdinalIgnoreCase` scan over trimmed keys). Oracle: default-comparer dictionary `{ "OpenCode": 10 }` → `BudgetUsd == 10`. | WO2 + TA |
 | — | Kept as specified: `NumberStyles.Number` + invariant culture reads `20,50` as `2050` (Q1.3). | — |
+
+## Coding Owner decisions after the first R-015 test round (2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| E22 | Names the spec left open follow the Q1 code: `SettingsViewModel.BudgetRows` (`IReadOnlyList<AgentBudgetRowViewModel>`), row `Agent` / `DisplayName` / `Text` / `Error` / `HasError`; constructor `SettingsViewModel(session, startupRegistrar, applyPreview = null, knownAgents = null)`. | TA |
+| E23 | `OpenCodeSnapshotBuilder.Build(...)` returns `ProviderSnapshot?`: `null` for "no ccusage result yet" (lastGood and lastError both null), and the view model then pushes nothing. The snapshot `ProviderId` is `"opencode"`. O8 is superseded by E10 (`configured: true`). | WO3 + TA |
