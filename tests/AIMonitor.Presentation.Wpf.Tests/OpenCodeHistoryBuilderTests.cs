@@ -320,8 +320,13 @@ public sealed class OpenCodeHistoryBuilderTests
     [Fact]
     public void Build_AgentMatchIsCaseInsensitive_OpencodeRowSpelledOpenCodeIsCounted()
     {
-        // G1.2: "the AgentUsage with Agent == \"opencode\" (case-insensitive)". The AgentUsage
-        // record lower-cases its agent, so the pipeline must accept the row regardless of spelling.
+        // G1.2: "the AgentUsage with Agent == \"opencode\" (case-insensitive)". Per F20 (Inspector B
+        // minor 3) this test covers the DOMAIN normalisation: the AgentUsage record lower-cases and
+        // trims its agent at construction, so the builder already receives "opencode" here and its
+        // own OrdinalIgnoreCase comparison never sees mixed case through this public path — the
+        // builder-comparison mutant is an equivalent mutant (no production seam exists to feed it
+        // mixed case, and F22 forbids adding one). The observable contract that stays pinned: a row
+        // spelled "OpenCode" in the report is counted by the pipeline regardless of spelling.
         var report = Report(
             (new DateOnly(2026, 11, 10), [Agent("OpenCode", Model(Kimi, 1000, 10, 1.00m))]));
 

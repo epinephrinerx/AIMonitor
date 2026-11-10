@@ -26,7 +26,10 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// context, which runs at the next await. Hand-written fakes as in the R-014/R-015 test files
 /// (no real ccusage, no network); FakeClock freezes the cache so any later background refresh
 /// serves from it and the "no extra read" assertion is timing-proof. The G1 implementation has
-/// since merged into this branch (041433a), so these tests compile and run against it.
+/// since merged into this branch (041433a), so these tests compile and run against it. Inspector B
+/// decision F21: every test here captures ONE local day (CreateWithReport) — fixture and
+/// assertions read the same value, and MainWindowViewModel's own clock read is the residual,
+/// reported midnight-boundary risk (no production seam, F22).
 /// </summary>
 public sealed class MainWindowViewModelOpenCodeChartWiringTests
 {
@@ -35,8 +38,6 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     private const string Kimi = "kimi-k2.7-code";
     private const string Deepseek = "deepseek-v4.1-flash";
     private const string ClaudeOpus = "claude-opus-5-5";
-
-    private static DateOnly LocalToday() => DateOnly.FromDateTime(DateTime.Now);
 
     private static MainWindowViewModel CreateVm(
         CachedAgentUsageSource? agentUsage,
@@ -79,12 +80,18 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         retrievedAt: FixedUtc,
         skippedRows: 0);
 
-    private static (MainWindowViewModel Vm, FakeAgentUsageSource Source, SettingsSession Session) CreateWithReport()
+    /// <summary>F21 (Inspector B minor 4): ONE local day captured per test — the fixture date and
+    /// every assertion read this value, never a second <c>DateTime.Now</c>. MainWindowViewModel
+    /// takes no clock/TimeProvider (F21 forbids a production change, F22 forbids seams), so the
+    /// residual risk is only the VM's own <c>DateTimeOffset.UtcNow</c> rolling past midnight
+    /// between the capture below and its internal read — reported, not pinned.</summary>
+    private static (MainWindowViewModel Vm, FakeAgentUsageSource Source, SettingsSession Session, DateOnly Today) CreateWithReport()
     {
-        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(LocalToday())));
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(today)));
         var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
         var vm = CreateVm(cache, new AppSettings(), out _, out var session);
-        return (vm, source, session);
+        return (vm, source, session, today);
     }
 
     private static DashboardOption<int> RangeOption(MainWindowViewModel vm, int days) =>
@@ -98,7 +105,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     [Fact]
     public async Task Updated_G13_OpenCodeTabShowsPerModelChartWithCosts()
     {
-        var (vm, source, _) = CreateWithReport();
+        var (vm, source, _, localToday) = CreateWithReport();
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!; // E2's Updated path: Build gets the live ChartRangeDays/metric
@@ -107,7 +114,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         Assert.True(tab.HasHistory);
         Assert.Equal(14, tab.ChartBuckets.Count); // AppSettings default ChartRangeDays 14, G1.3
         Assert.Equal(
-            Enumerable.Range(0, 14).Select(i => LocalToday().AddDays(i - 13)),
+            Enumerable.Range(0, 14).Select(i => localToday.AddDays(i - 13)),
             tab.ChartBuckets.Select(b => b.Day)); // oldest first, window ends at today
         Assert.Equal(2000.0, tab.ChartBuckets[^1].PerModel[Kimi]); // "Total tokens" (default metric)
         Assert.Equal(300.0, tab.ChartBuckets[^1].PerModel[Deepseek]);
@@ -121,7 +128,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
 
         Assert.Equal(14, tab.ChartCosts.Count); // G1.3/F7: costs mapped onto the tab
         var last = tab.ChartCosts[^1];
-        Assert.Equal(LocalToday(), last.Day);
+        Assert.Equal(localToday, last.Day);
         Assert.Equal(1.25, last.PricedUsd, 10);
         Assert.True(last.HasUnpricedModels); // deepseek CostUsd null
         Assert.All(tab.ChartCosts.Take(13), c => Assert.Equal((0.0, false), (c.PricedUsd, c.HasUnpricedModels)));
@@ -133,7 +140,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     [Fact]
     public async Task Updated_F9_RangeThenMetricChange_RebuildTab_NoExtraCcusageRead()
     {
-        var (vm, source, _) = CreateWithReport();
+        var (vm, source, _, localToday) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
@@ -149,7 +156,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         // F9: "its values are output tokens" — today's bucket and the by-model totals switch
         // (kimi 100, deepseek 30 — the H2/H1 pattern), not the totals 2000/300.
         var today = vm.OpenCodeTab.ChartBuckets[^1];
-        Assert.Equal(LocalToday(), today.Day);
+        Assert.Equal(localToday, today.Day);
         Assert.Equal(100.0, today.PerModel[Kimi]);
         Assert.Equal(30.0, today.PerModel[Deepseek]);
         Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count);
@@ -172,7 +179,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         // F1: "Changing the refresh interval does not rebuild the OpenCode tab." Observable: the
         // tab's chart/gauge instances are untouched even after the settings change has fully
         // settled through the session (a rebuild wired from OnSettingsChanged would replace them).
-        var (vm, source, session) = CreateWithReport();
+        var (vm, source, session, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -194,7 +201,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F1: "when the value really changes" — re-selecting the current range (e.g. a combobox
         // re-binding the same option) is not a view change at all.
-        var (vm, _, _) = CreateWithReport();
+        var (vm, _, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -208,7 +215,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     public async Task F1_E29_EqualBudgetsStillShortCircuit_ButARangeChangeRebuildsAnyway()
     {
         // F1: "E29's equal-budgets short-cut stays for budget changes only."
-        var (vm, source, _) = CreateWithReport();
+        var (vm, source, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;
@@ -276,7 +283,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F11 (R1 m2): "a range/metric/budget rebuild does not move LastUpdated" — the snapshot's
         // FetchedAt is lastGood.RetrievedAt (FixedUtc), not the wall clock at rebuild time.
-        var (vm, source, _) = CreateWithReport();
+        var (vm, source, _, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(FixedUtc, vm.OpenCodeTab.LastUpdated);
@@ -298,7 +305,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
         // F13 (R1 m4): "the OpenCode rebuild also runs when range/metric change through
         // OnSettingsChanged (the _syncingFromSettings path), still only when the value really
         // changes." The change enters through the session, not the combobox setter.
-        var (vm, source, session) = CreateWithReport();
+        var (vm, source, session, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
@@ -316,7 +323,7 @@ public sealed class MainWindowViewModelOpenCodeChartWiringTests
     {
         // F13's "only when the value really changes" holds on the sync path too: OnSettingsChanged
         // re-assigns every selector, and a same-valued re-assignment must not rebuild the tab.
-        var (vm, _, session) = CreateWithReport();
+        var (vm, _, session, _) = CreateWithReport();
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
         var buckets = vm.OpenCodeTab.ChartBuckets;

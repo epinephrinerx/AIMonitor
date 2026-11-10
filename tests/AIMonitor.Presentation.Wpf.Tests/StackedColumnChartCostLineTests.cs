@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Controls;
+using AIMonitor.Presentation.Wpf.Theme;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
@@ -22,7 +23,13 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// tooltip still shows Cost: $0.00). Later review decisions: F10 adds <c>internal static string
 /// CostTickLabel(double v)</c> with its tick oracles, and F12 the empty-state guard
 /// (<c>series.Count == 0</c> → the existing "No usage recorded" render, no cost line, no right
-/// axis) — pinned here by comparing whole bitmap renders. Written against Docs/SPEC_R017.md; the
+/// axis) — pinned here by comparing whole bitmap renders. Inspector B decisions: F18 adds a pixel
+/// probe on the cost line itself (ink within 5×5 of a segment midpoint between day-column centres,
+/// and no ink anywhere in the plot with Costs empty), and F19 pins F14/F5 dot rendering (priced dot
+/// centre = ink; unpriced dot centre = card surface with an ink ring ≈3 px out) and the line-shaped
+/// "Cost ($)" legend swatch (ink pixels wider than tall) — both in light AND dark themes. The
+/// probes read their geometry FROM the bitmap (day centres from the bar fills, dot rows from the
+/// ink runs), so no production seam was needed (F22). Written against Docs/SPEC_R017.md; the
 /// G1 implementation has since merged into this branch (041433a).
 /// </summary>
 [Collection("Wpf")]
@@ -372,4 +379,289 @@ public sealed class StackedColumnChartCostLineTests
             @"<controls:StackedColumnChartControl\s+[^>]*Costs=""\{\s*Binding\s+SelectedTab\.ChartCosts\s*\}""",
             xaml);
     }
+
+    // ── F18/F19: pixel probes on the rendered cost line ─────────────────────────
+    //
+    // Everything below reads its geometry FROM the 320×160 bitmap, so no production seam is needed
+    // (F22): the day-column centres are the x-runs of series-coloured pixels in the plot area, the
+    // dot centres are the vertical ink runs at those columns, and "ink" is a colour-distance test
+    // against the palette (F5: line and dots use p.Ink; nothing else on the control draws ink — the
+    // texts are InkMuted/InkSecondary, the bars are categorical, the grid/baseline are their own
+    // tokens). Anti-aliasing is tolerated by the threshold, never by exact-pixel equality (F18).
+
+    private const int RenderW = 320; // the fixed size Render() draws at
+    private const int RenderH = 160;
+    private const double InkTolerance = 70.0;   // RGB distance from the palette's Ink
+    private const double SeriesTolerance = 48.0; // RGB distance from a categorical fill
+    private const double SurfaceTolerance = 60.0; // card-background fill of the hollow dot
+    private const int MinAlpha = 50; // anti-aliased coverage still carries the ink hue
+    private const int PlotInkTop = 45; // below the two legend rows (≈41 px), above all plot ink
+
+    [Fact]
+    public void F18_CostLine_SegmentMidpointProbeFindsInk_AndNothingWithoutCosts()
+    {
+        // F18 (IB major 1): "render with ≥2 priced days and assert ink-coloured pixels in a small
+        // neighbourhood (e.g. 3×3) around the midpoint of a segment between two adjacent day-column
+        // centres, away from any dot; the same probe finds no ink with Costs empty." Killing
+        // mutant: omitting the polyline leaves only the ≈3 px dots — the segment midpoint sits
+        // ≈55 px from both, so no ink is found there and the whole plot-area ink list is empty.
+        WpfTestHost.Run(() =>
+        {
+            var p = ApplyTheme("dark"); // pin the host default rather than inherit another test's theme
+            try
+            {
+                var buckets = new[] { Day8(), Day10() };
+                var series = new[] { Kimi, Glm, Deepseek };
+                var costs = new[] { Cost(D8, 0.60, false), Cost(D10, 1.25, true) };
+
+                var withLine = Render(buckets, series, UsageMetric.TotalTokens, costs);
+                var without = Render(buckets, series, UsageMetric.TotalTokens, null);
+
+                var centres = BarCentres(withLine, p, series);
+                Assert.Equal(2, centres.Count); // the day-8 and day-10 columns, left to right
+
+                var ink = InkPixels(withLine, p, PlotInkTop, RenderH);
+                Assert.True(ink.Count >= 30, $"expected a drawn cost line, found {ink.Count} plot ink pixels");
+                var y8 = DotCentreY(ink, centres[0]); // the priced dot (Nov 8, $0.60)
+                var y10 = DotCentreY(ink, centres[1]); // the unpriced-flagged dot (Nov 10, $1.25)
+                var xm = (centres[0] + centres[1]) / 2.0;
+                var ym = (y8 + y10) / 2.0;
+
+                Assert.True(Math.Abs(xm - centres[0]) >= 15.0 && Math.Abs(xm - centres[1]) >= 15.0,
+                    "the probe must sit away from both dots");
+                Assert.True(InkNear(ink, xm, ym, 2), "ink expected within 5×5 of the segment midpoint");
+
+                // "the same probe finds no ink with Costs empty" — pinned at its strongest form:
+                // with Costs null nothing outside the legend is ink at all.
+                Assert.Empty(InkPixels(without, p, PlotInkTop, RenderH));
+            }
+            finally
+            {
+                ApplyTheme("dark"); // leave the host as WpfTestHost initialised it
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)] // light
+    [InlineData(true)]  // dark
+    public void F19_UnpricedDotIsHollowInkRingAroundSurfaceCentre_PricedDotCentreIsInk(bool dark)
+    {
+        // F19 (IB major 2) over F5/F14: "an unpriced day's dot centre is the card background colour
+        // and its ring is ink; a priced dot centre is ink ... in both light and dark themes." The
+        // surface fill must be OPAQUE (F14: "so the line does not show through"). Killing mutant:
+        // filling the unpriced dot solid paints ink at its centre → the surface check fails (and
+        // the ring checks find no gap-free ink annulus at the nominal radius).
+        WpfTestHost.Run(() =>
+        {
+            var p = ApplyTheme(dark ? "dark" : "light");
+            try
+            {
+                var px = Render(
+                    [Day8(), Day10()],
+                    [Kimi, Glm, Deepseek],
+                    UsageMetric.TotalTokens,
+                    [Cost(D8, 0.60, false), Cost(D10, 1.25, true)]);
+                var centres = BarCentres(px, p, [Kimi, Glm, Deepseek]);
+                Assert.Equal(2, centres.Count);
+                var ink = InkPixels(px, p, PlotInkTop, RenderH);
+
+                // Priced dot (Nov 8): a solid ink disc (r = 2.5) — its centre pixel is ink.
+                var cx1 = (int)Math.Round(centres[0]);
+                var cy1 = (int)Math.Round(DotCentreY(ink, centres[0]));
+                AssertInkAt(px, cx1, cy1, p, "priced dot centre");
+
+                // Unpriced dot (Nov 10): hollow (r = 3) — centre is the opaque card surface…
+                var cx2 = (int)Math.Round(centres[1]);
+                var cy2 = (int)Math.Round(DotCentreY(ink, centres[1]));
+                AssertSurfaceAt(px, cx2, cy2, p, "unpriced dot centre");
+
+                // …and its ring is ink above, below, left and right (≈3 px out, ±1 px probe window).
+                AssertInkNear(ink, cx2, cy2 - 3.0, "ring above");
+                AssertInkNear(ink, cx2, cy2 + 3.0, "ring below");
+                AssertInkNear(ink, cx2 - 3.0, cy2, "ring left");
+                AssertInkNear(ink, cx2 + 3.0, cy2, "ring right");
+            }
+            finally
+            {
+                ApplyTheme("dark");
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)] // light
+    [InlineData(true)]  // dark
+    public void F19_CostLegendSwatch_IsAnInkLineWiderThanTall(bool dark)
+    {
+        // F19 (IB major 2) over F14: "the 'Cost ($)' legend swatch's ink pixels are wider than
+        // tall", in both themes. In the legend band the only ink on the control is this swatch —
+        // model swatches are categorical, legend text is InkSecondary — so the ink bounding box
+        // IS the swatch: ≈9 px wide, 2 px + anti-aliasing tall. Killing mutant: the old square
+        // swatch (9×9) has width == height → fails; no swatch at all → fails on Assert.NotEmpty.
+        WpfTestHost.Run(() =>
+        {
+            var p = ApplyTheme(dark ? "dark" : "light");
+            try
+            {
+                var px = Render(
+                    [Day8(), Day10()],
+                    [Kimi, Glm, Deepseek],
+                    UsageMetric.TotalTokens,
+                    [Cost(D8, 0.60, false), Cost(D10, 1.25, true)]);
+
+                var legendInk = InkPixels(px, p, 0, PlotInkTop);
+                Assert.NotEmpty(legendInk);
+                var (w, h) = Bounds(legendInk);
+                Assert.True(w >= 6, $"swatch should span ≈9 px, measured width {w}");
+                Assert.True(h <= 6, $"a 2 px line plus anti-aliasing expected, measured height {h}");
+                Assert.True(w > h, $"legend swatch must be wider than tall (w={w}, h={h})");
+            }
+            finally
+            {
+                ApplyTheme("dark");
+            }
+        });
+    }
+
+    // ── Pixel-probe helpers (STA: call inside WpfTestHost.Run) ───────────────────
+
+    /// <summary>Switches the shared ThemeManager (the control reads it in OnRender) and returns
+    /// the matching palette. Always restore "dark" — the WpfTestHost default — in a finally.</summary>
+    private static ThemePalette ApplyTheme(string preference)
+    {
+        ThemeManager.Instance.ApplyTheme(preference);
+        return ThemePalette.For(ThemeManager.Instance.IsDark);
+    }
+
+    /// <summary>Pbgra32 is premultiplied; divide the stored channels back to the source colour so
+    /// anti-aliased coverage pixels keep the palette hue they were drawn with.</summary>
+    private static Color PixelColor(byte[] px, int x, int y)
+    {
+        var i = (y * RenderW + x) * 4;
+        byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
+        if (a is > 0 and < 255)
+        {
+            r = (byte)Math.Min(255, r * 255 / a);
+            g = (byte)Math.Min(255, g * 255 / a);
+            b = (byte)Math.Min(255, b * 255 / a);
+        }
+
+        return Color.FromRgb(r, g, b);
+    }
+
+    private static byte PixelAlpha(byte[] px, int x, int y) => px[(y * RenderW + x) * 4 + 3];
+
+    private static bool Close(Color a, Color b, double tolerance)
+    {
+        var dr = (double)a.R - b.R;
+        var dg = (double)a.G - b.G;
+        var db = (double)a.B - b.B;
+        return dr * dr + dg * dg + db * db <= tolerance * tolerance;
+    }
+
+    /// <summary>Every ink-coloured pixel of the render inside the [yMin, yMax) band.</summary>
+    private static List<(int X, int Y)> InkPixels(byte[] px, ThemePalette p, int yMin, int yMax)
+    {
+        var hits = new List<(int, int)>();
+        for (var y = Math.Max(0, yMin); y < Math.Min(RenderH, yMax); y++)
+        {
+            for (var x = 0; x < RenderW; x++)
+            {
+                if (PixelAlpha(px, x, y) >= MinAlpha && Close(PixelColor(px, x, y), p.Ink, InkTolerance))
+                {
+                    hits.Add((x, y));
+                }
+            }
+        }
+
+        return hits;
+    }
+
+    /// <summary>Centre x of each solid bar column: runs of ≥6 consecutive x's that carry opaque
+    /// series-coloured pixels at or below <see cref="PlotInkTop"/>. The bars are exactly
+    /// <c>thickness</c> wide around each day centre, so the run midpoint is that centre.</summary>
+    private static List<double> BarCentres(byte[] px, ThemePalette p, IReadOnlyList<string> series)
+    {
+        var colours = Enumerable.Range(0, series.Count).Select(i => p.Series(i)).ToList();
+        var centres = new List<double>();
+        var start = -1;
+        for (var x = 0; x <= RenderW; x++)
+        {
+            var hit = x < RenderW && HasSeriesPixel(x, colours);
+            if (hit && start < 0)
+            {
+                start = x;
+            }
+            else if (!hit && start >= 0)
+            {
+                if (x - start >= 6)
+                {
+                    centres.Add((start + x - 1) / 2.0);
+                }
+
+                start = -1;
+            }
+        }
+
+        return centres;
+
+        bool HasSeriesPixel(int col, List<Color> palette)
+        {
+            for (var y = PlotInkTop; y < RenderH; y++)
+            {
+                if (PixelAlpha(px, col, y) >= 200)
+                {
+                    var c = PixelColor(px, col, y);
+                    for (var i = 0; i < palette.Count; i++)
+                    {
+                        if (Close(c, palette[i], SeriesTolerance))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Centre y of the dot at <paramref name="centreX"/>: the mid of the vertical ink run
+    /// within ±1.5 px of the column. Solid dots and ink rings are both symmetric about the centre,
+    /// and the line meets the dot at that same point, so min/max of the run brackets the dot.</summary>
+    private static double DotCentreY(List<(int X, int Y)> ink, double centreX)
+    {
+        var ys = ink.Where(pt => Math.Abs(pt.X - centreX) <= 1.5).Select(pt => pt.Y).ToList();
+        Assert.NotEmpty(ys);
+        return (ys.Min() + ys.Max()) / 2.0;
+    }
+
+    private static bool InkNear(List<(int X, int Y)> ink, double x, double y, int radius) =>
+        ink.Any(pt => Math.Abs(pt.X - x) <= radius && Math.Abs(pt.Y - y) <= radius);
+
+    private static void AssertInkNear(List<(int X, int Y)> ink, double x, double y, string what) =>
+        Assert.True(InkNear(ink, x, y, 1), $"{what}: expected ink near ({x:0.0}, {y:0.0})");
+
+    private static void AssertInkAt(byte[] px, int x, int y, ThemePalette p, string what)
+    {
+        var a = PixelAlpha(px, x, y);
+        var c = PixelColor(px, x, y);
+        Assert.True(a >= 200 && Close(c, p.Ink, InkTolerance),
+            $"{what}: expected ink at ({x}, {y}), found rgb({c.R},{c.G},{c.B}) a={a}");
+    }
+
+    private static void AssertSurfaceAt(byte[] px, int x, int y, ThemePalette p, string what)
+    {
+        var a = PixelAlpha(px, x, y);
+        var c = PixelColor(px, x, y);
+        Assert.True(a >= 200, $"{what}: expected an OPAQUE card-background fill at ({x}, {y}), found a={a}");
+        Assert.True(Close(c, p.Surface, SurfaceTolerance),
+            $"{what}: expected the surface colour at ({x}, {y}), found rgb({c.R},{c.G},{c.B})");
+        Assert.False(Close(c, p.Ink, InkTolerance),
+            $"{what}: the dot centre must not be solid ink at ({x}, {y})");
+    }
+
+    private static (int Width, int Height) Bounds(List<(int X, int Y)> pts) =>
+        (pts.Max(pt => pt.X) - pts.Min(pt => pt.X) + 1, pts.Max(pt => pt.Y) - pts.Min(pt => pt.Y) + 1);
 }
