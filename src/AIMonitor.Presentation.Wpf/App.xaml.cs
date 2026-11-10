@@ -347,7 +347,8 @@ public partial class App : System.Windows.Application
                 _settingsSession.Current.DashboardWidth,
                 _settingsSession.Current.DashboardHeight);
 
-            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!, applier.Apply);
+            var knownAgents = CollectKnownAgentNames();
+            var vm = new SettingsViewModel(_settingsSession, _startupRegistrar!, applier.Apply, knownAgents);
             var dialog = new SettingsDialog(vm)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
@@ -355,6 +356,39 @@ public partial class App : System.Windows.Application
 
             dialog.ShowDialog();
         });
+    }
+
+    private IReadOnlyList<string>? CollectKnownAgentNames()
+    {
+        var lastGood = _agentUsageSource?.LastGood;
+        if (lastGood is null)
+        {
+            return null;
+        }
+
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var day in lastGood.Daily)
+        {
+            foreach (var agent in day.Agents)
+            {
+                agents.Add(agent.Agent);
+            }
+        }
+
+        foreach (var month in lastGood.Monthly)
+        {
+            foreach (var agent in month.Agents)
+            {
+                agents.Add(agent.Agent);
+            }
+        }
+
+        foreach (var session in lastGood.Sessions)
+        {
+            agents.Add(session.Usage.Agent);
+        }
+
+        return agents.Count == 0 ? null : agents.ToList().AsReadOnly();
     }
 
     public void OpenUsageLogDialog()
