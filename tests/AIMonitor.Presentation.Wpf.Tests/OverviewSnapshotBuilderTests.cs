@@ -18,14 +18,22 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// the current month, or absent from the report entirely, create no meter) and — added in round 2
 /// per I12 — <c>public static string? EmptyMessage(lastGood, lastError, today, zone)</c> tested
 /// directly with explicit today/zone: the I3/I10 ASCII texts, the I4 rollover trigger (I12: both
-/// halves, plus a current-month entry with zero agents and a month boundary in a non-local zone).
+/// halves, plus a current-month entry with zero agents and a month boundary in a non-local zone),
+/// and — round 3 per I17 — the complete EmptyMessage table: state 1 → "Checking ccusage...",
+/// state 2 → null, state 3 with ≥1 meter → null (I17's new row, the O1 fixture), state 3 with a
+/// current-month entry and zero agents → "No agent usage recorded this month", state 3 with no
+/// current-month entry → the I4 waiting text when the retrieved month differs and I3's recorded
+/// text when it does not. I17's row is checked against Build's own meters, because the decision
+/// says "null whenever state 3 produces at least one meter". Round 4 adds I20: the negative half of
+/// I1 — current-month DAILY rows with no current-month Monthly entry still give zero meters.
 /// The fixture is the spec's oracle fixture: fixture month 2026-11, today = 2026-11-10, zone UTC,
 /// monthly 2026-11 agents claude $12.50 priced · codex $3.20 + unpriced model · copilot $0.00 with
 /// usage · newagent $3.20; monthly 2026-10 has zcode $9.99 only; budgets { "claude": 50, "NewAgent": 10 }.
 /// Expected values are the spec's oracles with the hand calculations shown; nothing here is derived
 /// from the implementation (the code is written in parallel — these tests are expected not to compile
 /// until the R-016 H1 branch merges; I8: the builder is pure, so these tests are clock-free and fully
-/// deterministic). The branch has since merged (5167681 + c02da4e) and the tests run against it.
+/// deterministic). The branch has since merged (5167681 + c02da4e + efa9051) and the tests run
+/// against it.
 /// </summary>
 public sealed class OverviewSnapshotBuilderTests
 {
@@ -334,6 +342,44 @@ public sealed class OverviewSnapshotBuilderTests
         Assert.Equal(RetrievedAt, snapshot.FetchedAt);
     }
 
+    [Theory]
+    // I20 (Inspector B, major 2): the negative half of I1 that O8's fixture cannot kill — Daily
+    // DOES hold current-month rows with costs, while Monthly has no 2026-11 entry at all. A builder
+    // that also reads Daily would synthesise a "claude" meter (or worse, sum the rows) instead of
+    // the zero meters H1.1 mandates. The expected text follows I17's last two rows, split by
+    // whether RetrievedAt's month (in zone) differs from today's: retrieved 2026-10-20 -> the I4
+    // waiting text; retrieved 2026-11-05 (this month) -> I3's recorded text. Hand check: today =
+    // 2026-11-10, zone UTC; both retrieval instants are UTC so their local months are 10 and 11.
+    [InlineData(2026, 10, 20, "Waiting for this month's ccusage data")]
+    [InlineData(2026, 11, 5, "No agent usage recorded this month")]
+    public void Build_I20_CurrentMonthDailyRowsWithoutMonthlyEntry_AreIgnored(
+        int retrievedYear,
+        int retrievedMonth,
+        int retrievedDay,
+        string expectedMessage)
+    {
+        var retrievedAt = new DateTimeOffset(retrievedYear, retrievedMonth, retrievedDay, 8, 0, 0, TimeSpan.Zero);
+        var report = new AgentUsageReport(
+            daily:
+            [
+                new DailyAgentUsage(new DateOnly(2026, 11, 9), [Usage("claude", ("claude-model", 4.00m))]),
+                new DailyAgentUsage(new DateOnly(2026, 11, 10), [Usage("claude", ("claude-model", 1.50m))]),
+            ],
+            monthly: [new MonthlyAgentUsage(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))])],
+            sessions: [],
+            unpricedModels: [],
+            pricing: AgentUsagePricing.OnlineRequested,
+            retrievedAt: retrievedAt,
+            skippedRows: 0);
+
+        var snapshot = Build(report, null, SpecBudgets(), Today);
+
+        Assert.Empty(snapshot.Meters); // H1.1/I1: agents come from today's Monthly entry only (absent)
+
+        // I17's table for state 3 with no current-month entry, on the same fixture.
+        Assert.Equal(expectedMessage, Message(report, null, Today, TimeZoneInfo.Utc));
+    }
+
     [Fact]
     public void Build_H11_CurrentMonthEntryWithNoAgents_IsZeroMeters()
     {
@@ -411,7 +457,15 @@ public sealed class OverviewSnapshotBuilderTests
         Assert.DoesNotContain(snapshot.Meters, m => m.Key == "agent:ghost");
     }
 
-    // ── I12: EmptyMessage(lastGood, lastError, today, zone) — the I3/I4 texts, decided here ──
+    // ── I12 / I17: EmptyMessage(lastGood, lastError, today, zone) — the full I17 table ──
+    //
+    // I17 (round 3) is the whole decision table and every row is pinned by a test below:
+    //   state 1                                    -> "Checking ccusage..."
+    //   state 2                                    -> null
+    //   state 3 with >=1 meter                     -> null          (I17's new row, the O1 fixture)
+    //   state 3, current-month entry, 0 agents     -> "No agent usage recorded this month"
+    //   state 3, no current-month entry, rolled    -> "Waiting for this month's ccusage data"
+    //   state 3, no current-month entry, this month-> "No agent usage recorded this month"
 
     [Fact]
     public void EmptyMessage_I3I10_State1_IsTheAsciiCheckingText()
@@ -499,18 +553,94 @@ public sealed class OverviewSnapshotBuilderTests
         Assert.Equal(expected, Message(report, null, today, zone));
     }
 
-    // SPEC mismatch (kept as a failing-but-skipped oracle, §5.6 rule 3): merged code returns the
-    // recorded text whenever a current-month entry EXISTS, ignoring its agents — so with gauges on
-    // screen the tab still carries an empty-state text. Do not weaken the assertion.
-    [Fact(Skip = "SPEC mismatch: I3")]
+    // I17 closes the spec gap this test was skipped for (round 3): the merged code returned the
+    // recorded text whenever a current-month entry EXISTS, ignoring its agents, so the tab carried an
+    // empty-state text above working gauges. efa9051 implements I17's rule — null whenever state 3
+    // produces at least one meter.
+    [Fact]
     public void EmptyMessage_I3_CurrentMonthEntryWithAgents_HasNoEmptyStateText()
     {
-        // I3 pins the texts to the no-meter states ("With no snapshot yet... / In state 3 with zero
-        // meters... / In state 2 it is null") and I12 says the method returns "the I3/I4/I10 text OR
-        // NULL". A current-month entry WITH agents is not an empty state: Build exposes four meters
-        // for this exact fixture (O1, pinned above), so the tab shows gauges and the handed-off
-        // message must be null. The merged builder returns "No agent usage recorded this month"
-        // here, and MainWindowViewModel hands it to the tab while the gauges render.
+        // I17 row "state 3 with >=1 meter -> null", whose oracle the decision states directly: "the
+        // O1 November fixture -> null". Same report as the O1 meter tests: the 2026-11 Monthly entry
+        // holds four agents, so Build exposes four gauges (pinned by Build_O1_..._ZcodeIsAbsent) and
+        // there is no empty state to message — I3's texts are for the no-meter states (state 1,
+        // state 3 with zero meters) and state 2 is null too. The handed-off text must therefore be
+        // null; a non-null one would render above the working gauges, which is exactly the mismatch
+        // Reviewer2 reported.
         Assert.Null(Message(SpecReport(), null, Today, TimeZoneInfo.Utc));
+
+        // The row's condition is ">=1 meter", so tie it to this same report's meters: not empty.
+        Assert.Equal(4, Build(SpecReport(), null, SpecBudgets(), Today).Meters.Count);
+    }
+
+    [Fact]
+    public void EmptyMessage_I17_MeterPresentBeatsTheRolloverCondition_IsNull()
+    {
+        // I17's headline rule is "null WHENEVER state 3 produces at least one meter", which ranks the
+        // meter row above I4's rollover row — so the order of the two checks is pinned, not only the
+        // texts. Realistic, and reachable only through the builder's own today/zone seam (I12): a
+        // UTC-5 user whose report was retrieved at 2026-12-01T04:30Z, whose LOCAL RetrievedAt is
+        // 2026-11-30T23:30 (November), while ccusage's monthly section — bucketed in UTC — already
+        // holds the 2026-12 entry with claude in it. The rebuild happens minutes later at
+        // 2026-12-01T05:10Z = 00:10 local (I8: today comes from that instant), so today's month is
+        // 2026-12, the RetrievedAt month differs, and state 3 still has one meter -> null. A builder
+        // that read the rollover condition first would answer "Waiting for this month's ccusage data"
+        // above a working gauge.
+        var zone = TimeZoneInfo.CreateCustomTimeZone(
+            "Fixture UTC-5", TimeSpan.FromHours(-5), "Fixture zone", "Fixture zone");
+        var retrievedAt = new DateTimeOffset(2026, 12, 1, 4, 30, 0, TimeSpan.Zero); // 2026-11-30T23:30 local
+        var now = new DateTimeOffset(2026, 12, 1, 5, 10, 0, TimeSpan.Zero); // 2026-12-01T00:10 local
+        var today = new DateOnly(2026, 12, 1);
+        var report = MonthlyReport(2026, 12, [Usage("claude", ("claude-model", 1m))], retrievedAt);
+
+        var retrievedLocal = TimeZoneInfo.ConvertTime(retrievedAt, zone);
+        Assert.Equal(11, retrievedLocal.Month); // I4's month-difference half IS true (2026-11)
+        Assert.Equal(12, today.Month); // while today's month is 2026-12
+
+        var snapshot = BuildRaw(report, null, NoBudgets, today, now: now, zone: zone);
+
+        Assert.NotNull(snapshot);
+        Assert.Single(snapshot!.Meters); // I17's precondition: this state produces a meter
+        Assert.Null(Message(report, null, today, zone));
+    }
+
+    [Theory]
+    // I17's full table in one place, with the invariant the decision adds: in state 3 the message is
+    // null EXACTLY when the same inputs make Build produce a meter ("EmptyMessage returns null
+    // whenever state 3 produces at least one meter"). The row texts are I17's; the meter counts are
+    // H1.1's (one gauge per current-month agent) — the fixture month is the O1 November one. The two
+    // rows with no report at all (state 1 -> "Checking ccusage...", state 2 -> null) are the
+    // EmptyMessage_I3I10_State1_.../EmptyMessage_I3_State2_... facts above.
+    [InlineData("state 3, the O1 November fixture", 4, null)]
+    [InlineData("state 3, current month with one agent", 1, null)]
+    [InlineData("state 3, current month with zero agents", 0, "No agent usage recorded this month")]
+    [InlineData("state 3, no current month, rolled", 0, "Waiting for this month's ccusage data")]
+    [InlineData("state 3, no current month, retrieved this month", 0, "No agent usage recorded this month")]
+    public void EmptyMessage_I17_Table_IsNullExactlyWhenStateThreeProducesAMeter(
+        string scenario,
+        int expectedMeters,
+        string? expectedMessage)
+    {
+        var report = scenario switch
+        {
+            "state 3, the O1 November fixture" => SpecReport(),
+            "state 3, current month with one agent" => ReportWithAgents(2026, 11, Usage("claude", ("claude-model", 1m))),
+            "state 3, current month with zero agents" => ReportWithAgents(2026, 11),
+            "state 3, no current month, rolled" => MonthlyReport(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))],
+                new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero)),
+            "state 3, no current month, retrieved this month" => MonthlyReport(2026, 10, [Usage("zcode", ("z-code-model", 9.99m))],
+                new DateTimeOffset(2026, 11, 5, 8, 0, 0, TimeSpan.Zero)),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Not an I17 table row."),
+        };
+
+        var snapshot = BuildRaw(report, null, SpecBudgets(), Today);
+        var message = Message(report, null, Today, TimeZoneInfo.Utc);
+
+        Assert.NotNull(snapshot); // every row here is state 3 (lastGood exists)
+        Assert.Equal(expectedMeters, snapshot!.Meters.Count);
+        Assert.Equal(expectedMessage, message);
+
+        // The invariant, on the code's own outputs rather than the table's data.
+        Assert.Equal(snapshot.Meters.Count > 0, message is null);
     }
 }

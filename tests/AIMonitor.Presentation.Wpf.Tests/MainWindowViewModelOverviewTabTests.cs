@@ -21,14 +21,19 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// month's ccusage data") are checked here through the real wiring — the I12 hand-off from
 /// OverviewSnapshotBuilder.EmptyMessage to the tab. Round 2 also pins I14 (the caption stays plain
 /// "Overview" with budgeted meters), I15 (chart range/metric changes do NOT rebuild Overview) and
-/// keeps O10's budgeted codex subtitle per H1.1's formula: "{spent} of {Money(budget)} budget" with
+/// round 3 pins I17's two state-3 rows at the hand-off: meters present -> no text at all (the gauges
+/// and the I3 flag are read together, because the XAML element shows whenever HasEmptyMessage is
+/// true), and no current-month entry retrieved THIS month -> the recorded text rather than the
+/// rollover one. Round 3 keeps O10's budgeted codex subtitle per H1.1's formula: "{spent} of
+/// {Money(budget)} budget" with
 /// spent = ChartFormat.Money + " + unpriced". I8: no new clock seam exists in the view model — each
 /// run captures one local day (the midnight-crossing residual risk is the one
 /// I8 accepts, same as R-017 F21); every monthly fixture row is built from the captured month, and
 /// the stale fixture is retrieved on day 15 of the previous month so no ±14 h local conversion can
-/// make its month equal the captured one. Hand-written fakes follow the R-014/R-015 test files; no
-/// real ccusage, no network. The R-016 H1 branch has since merged (5167681 + c02da4e), so these
-/// tests compile and run against it.
+/// make its month equal the captured one — while I17's "retrieved this month" row uses the live
+/// instant, whose local month is the captured one by that same construction. Hand-written fakes
+/// follow the R-014/R-015 test files; no real ccusage, no network. The R-016 H1 branch has since
+/// merged (5167681 + c02da4e + efa9051), so these tests compile and run against it.
 /// </summary>
 public sealed class MainWindowViewModelOverviewTabTests
 {
@@ -85,8 +90,14 @@ public sealed class MainWindowViewModelOverviewTabTests
             retrievedAt: LiveNow,
             skippedRows: 0);
 
-    /// <summary>I4: the report is from last month and holds no current-month entry (O11's zcode shape).</summary>
-    private static AgentUsageReport StaleReport()
+    /// <summary>
+    /// A report whose only Monthly entry is last month's (O11's zcode shape) — the state-3-with-no-
+    /// current-month-entry shape. <paramref name="retrievedAt"/> selects which half of I4's conjunction
+    /// holds: the default PreviousMonthFetchedAt (day 15 of last month) makes RetrievedAt's local month
+    /// differ from today's in every zone, which is I4's rollover; LiveNow makes it equal today's, which
+    /// is I17's "otherwise" row.
+    /// </summary>
+    private static AgentUsageReport StaleReport(DateTimeOffset? retrievedAt = null)
     {
         var lastDayOfPreviousMonth = FirstOfThisMonthUtc.AddDays(-1);
         return new AgentUsageReport(
@@ -95,7 +106,7 @@ public sealed class MainWindowViewModelOverviewTabTests
             sessions: [],
             unpricedModels: [],
             pricing: AgentUsagePricing.OnlineRequested,
-            retrievedAt: PreviousMonthFetchedAt,
+            retrievedAt: retrievedAt ?? PreviousMonthFetchedAt,
             skippedRows: 0);
     }
 
@@ -419,15 +430,40 @@ public sealed class MainWindowViewModelOverviewTabTests
         Assert.Equal(PreviousMonthFetchedAt, vm.OverviewTab.LastUpdated);
     }
 
-    // Same mismatch through the real wiring (see the builder-level oracle in
-    // OverviewSnapshotBuilderTests — the skipped half of §5.6 rule 3). Do not weaken.
-    [Fact(Skip = "SPEC mismatch: I3")]
+    // I17's last row through the real hand-off: the report holds NO current-month entry but was
+    // retrieved now, so RetrievedAt's local month equals today's — I4's conjunction is false and the
+    // recorded text stands. Same fixture as Updated_I4_Stale... above except the retrieval instant:
+    // together the two tests pin both halves of the state-3/no-entry row at the tab level.
+    [Fact]
+    public async Task Updated_I17_NoCurrentMonthEntryRetrievedThisMonth_ShowsTheRecordedText()
+    {
+        // I17 (with I12): "state 3 with no current-month entry ... otherwise 'No agent usage recorded
+        // this month'". Zero meters either way, because meters come from today's month only (H1.1), so
+        // zcode's previous-month row gets no gauge (O11's shape) — and the tab still visibly updates.
+        var report = StaleReport(LiveNow);
+        var cache = new CachedAgentUsageSource(
+            new FakeAgentUsageSource(_ => Task.FromResult(report)), new FakeClock(LiveNow));
+        var vm = CreateVm(cache, new AppSettings(), out _);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+
+        Assert.True(vm.OverviewTab.HasSnapshot);
+        Assert.Empty(vm.OverviewTab.Meters);
+        Assert.Equal("No agent usage recorded this month", vm.OverviewTab.EmptyMessage); // I17 row 6
+        Assert.Equal(LiveNow, vm.OverviewTab.LastUpdated); // the retrieval instant, not a clock guess
+    }
+
+    // The wiring half of the I17 row that efa9051 fixed (round 3): the builder no longer hands a text
+    // over working gauges, so the tab's flag stays false and the XAML text element stays collapsed.
+    [Fact]
     public async Task Updated_I3_MetersPresent_EmptyTextIsNotHandedToTheTab()
     {
-        // I3 defines the empty texts for the no-meter states (state 1 / state 3-zero-meters / state
-        // 2 null); with gauges on screen there is no empty state, so nothing must be handed to the
-        // tab — and the XAML shows the text element whenever HasEmptyMessage is true, so a non-null
-        // hand-off would render "No agent usage recorded this month" ABOVE the working gauges.
+        // I17 row "state 3 with >=1 meter -> null", reached through MainWindowViewModel's hand-off:
+        // the current month has claude and codex rows, so the tab has gauges and there is no empty
+        // state to message (I3's texts are only for the no-meter states, state 2 is null too). The
+        // pre-fix code handed "No agent usage recorded this month" over the working gauges, and
+        // HasEmptyMessage would have revealed the XAML text element above them.
         var report = CurrentMonthReport(CapturedToday);
         var cache = new CachedAgentUsageSource(
             new FakeAgentUsageSource(_ => Task.FromResult(report)), new FakeClock(LiveNow));
@@ -436,8 +472,8 @@ public sealed class MainWindowViewModelOverviewTabTests
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
 
-        Assert.NotEmpty(vm.OverviewTab.Meters); // state 3 with gauges
-        Assert.Null(vm.OverviewTab.EmptyMessage); // I3: the text is for the no-meter states only
+        Assert.NotEmpty(vm.OverviewTab.Meters); // state 3 with gauges — I17's condition
+        Assert.Null(vm.OverviewTab.EmptyMessage); // I17: the text is for the no-meter states only
         Assert.False(vm.OverviewTab.HasEmptyMessage); // the I3 flag would otherwise reveal the element
     }
 

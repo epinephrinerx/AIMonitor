@@ -114,3 +114,12 @@ Fixture month = today's month 2026-11, `today = 2026-11-10`, zone UTC. Monthly a
 | I17 | (R2 major 1; spec gap in I12) `OverviewSnapshotBuilder.EmptyMessage` returns **null whenever state 3 produces at least one meter**. Full table: state 1 → `"Checking ccusage..."`; state 2 → null; state 3 with ≥1 meter → null; state 3 with a current-month entry and zero agents → `"No agent usage recorded this month"`; state 3 with no current-month entry → `"Waiting for this month's ccusage data"` when the month of `RetrievedAt` (in `zone`) differs from today's month, otherwise `"No agent usage recorded this month"`. Oracle: the O1 November fixture → null. | WO2 + TA |
 | I18 | (R2 minor 2) The wrapped-row gap must actually render. Move the card's default `Margin="0,0,12,0"` from the local attribute into the style (a `Setter`), so the trigger can override it. When wrapping, use `0,0,12,12` (a gap *below* each card, so the first row does not move down). Single-row tabs keep `0,0,12,0` exactly. | WO2 |
 
+## Coding Owner decisions after Inspector B (Codex GPT-6-Sol, 2026-11-10, at f0dac34)
+
+| Id | Decision | Owner |
+|---|---|---|
+| I19 | (IB major 1) The two I17 regression tests must run un-skipped before acceptance; this is already the Test Author's round 3. | TA |
+| I20 | (IB major 2) Add a negative I1 test: a report whose `Monthly` has no current-month entry but whose `Daily` has current-month rows for some agent → zero meters (and the I17 "Waiting.../No agent usage" text as the table says). This kills a builder that also reads Daily. | TA |
+| I21 | (IB minor 3) I18's rendered gap is not unit-tested. It becomes a user acceptance check on the running app: Overview with at least 4 agents shows a visible gap between the gauge rows, and the other tabs' single-row cards look unchanged. | user acceptance |
+| — | Inspector B could not execute mutants (the Codex sandbox cannot restore NuGet). Mutant evidence for R-016 is the Test Author's 3 executed mutants plus Inspector B's 19 read-only predictions; I20 closes the one predicted survivor. | — |
+
