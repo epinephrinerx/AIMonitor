@@ -350,6 +350,72 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-015 · gauge ค่าใช้จ่ายของ OpenCode และ tab OpenCode
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว (2026-11-10) |
+| วันที่ | 2026-11-10 |
+| แตะส่วนไหน | tab ใหม่ "OpenCode" · Settings (งบรายเดือนต่อ agent) · `AppSettings` · ข้อมูล ccusage ของ R-014 |
+| เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-004]] |
+
+**คุณระบุ:**
+> 1. สร้าง meter guage สำหรับ opencode ครับ
+
+คำตอบเพิ่มเติม (2026-11-10): gauge วัด "ค่าใช้จ่ายเทียบงบที่ตั้งเอง" · tab หลักเป็น Claude, Codex, Antigravity, OpenCode + All agents · ใช้รอบอ่านเดิมของ R-014
+
+**ผมเข้าใจว่า:**
+1. เพิ่ม tab "OpenCode" เป็น tab หลักตัวที่สี่ (ต่อจาก Claude, OpenAI / Codex, Gemini / AGY) ก่อน tab "All agents"
+2. ใน tab มี gauge แบบเดียวกับ tab อื่น แสดง **ค่าใช้จ่ายเดือนนี้ของ agent `opencode` จาก ccusage ÷ งบรายเดือนที่ผู้ใช้ตั้ง** เป็น % พร้อมข้อความ `$ใช้ไป / $งบ` และใต้ gauge มีแถว "Today (ccusage)" / "This month (ccusage)" แบบ AGY ใน R-014
+3. งบรายเดือน (USD) ตั้งได้ใน Settings ต่อ agent ค่าเริ่มต้นคือไม่ตั้ง → gauge แสดงยอดเงินแต่ไม่แสดง % และบอกให้ไปตั้งงบ
+4. เดือนนับตามปฏิทินของเวลาเครื่อง (เหมือน "This month" ของ ccusage) เกินงบแสดงเกิน 100% ได้และใช้สีเตือนเดิมของ gauge
+5. ตัวเลขมาจากข้อมูล ccusage ชุดเดียวกับ R-014 (เปิดแอป + ทุก 15 นาที + ปุ่ม refresh) ไม่เรียก ccusage เพิ่ม
+
+**ไม่รวม:**
+- ไม่ดึงโควต้าจริงของแผน OpenCode / opencode-go และไม่อ่าน log ของ OpenCode เอง (R-014: ผ่าน ccusage เท่านั้น)
+- ไม่ใส่ OpenCode ใน tray icon หรือ widget
+- ไม่แจ้งเตือน (notification) เมื่อเกินงบ
+- ไม่เปลี่ยน gauge ของ Claude / Codex / AGY ที่วัดโควต้าจริงอยู่แล้ว
+
+**ตรวจรับเมื่อ:**
+- [ ] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้
+- [ ] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X
+- [ ] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings
+- [ ] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014
+- [ ] tab อื่น tray และ widget หน้าตาเดิม
+
+## R-016 · หน้าภาพรวม gauge ค่าใช้จ่ายของทุก agent ที่ ccusage ตรวจเจอ
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว (2026-11-10) |
+| วันที่ | 2026-11-10 |
+| แตะส่วนไหน | module ใหม่ใน Application/Presentation ที่สร้างรายการ agent จาก ccusage · tab ใหม่ "Overview" · Settings (งบต่อ agent ใช้ร่วมกับ R-015) |
+| เกี่ยวกับ | [[R-014]] · [[R-015]] · [[R-004]] |
+
+**คุณระบุ:**
+> 2. สร้าง Module ใหม่ ทำหน้าที่อ่าน output ของ ccusage ตอนเริ่มโปรแกรม แล้วจึงวาด Guage ตาม agent ที่ตรวจเจอจาก ccusage ครับ แต่ยังคง Tab สำหรับ 4 agent หลัก คือ Claude, Codex, Antigravity, OpenCode
+
+คำตอบเพิ่มเติม (2026-11-10): gauge วัดค่าใช้จ่ายเทียบงบที่ตั้งเอง · วางใน "หน้าภาพรวมใหม่" แยกจาก tab All agents · คง 4 tab หลัก + All agents (agent อื่นไม่มี tab ของตัวเอง) · ใช้รอบอ่านเดิมของ R-014
+
+**ผมเข้าใจว่า:**
+1. module ใหม่รับข้อมูล ccusage ชุดเดียวกับ R-014 (ครั้งแรกตอนเปิดแอป แล้วทุก 15 นาที) แล้วสร้างรายการ agent ที่ ccusage เจอ — บนเครื่องนี้คือ antigravity, claude, codex, copilot, opencode, zcode — ไม่มีรายชื่อ agent ฝังในโค้ด
+2. tab ใหม่ "Overview" (ผมเลือกเป็น tab แทนหน้าต่างแยก เพราะแอปใช้ tab อยู่แล้ว) วาง gauge หนึ่งอันต่อ agent ที่เจอ คำนวณแบบ R-015 (ค่าใช้จ่ายเดือนนี้ ÷ งบรายเดือนของ agent นั้น) เรียงตามค่าใช้จ่ายเดือนนี้มากไปน้อย
+3. agent ที่ไม่ได้ตั้งงบแสดงยอดเงินโดยไม่มี % · agent ที่หายไปจาก ccusage ในรอบถัดไปก็หายจากหน้านี้ · agent ใหม่ที่โผล่มาก็เพิ่มเอง
+4. tab ทั้งหมดเรียงเป็น: Claude · OpenAI / Codex · Gemini / AGY · OpenCode · Overview · All agents
+5. งบต่อ agent ตั้งใน Settings ที่เดียวกับ R-015 โดยรายชื่อ agent ใน Settings มาจาก ccusage
+
+**ไม่รวม:**
+- ไม่สร้าง tab ให้ copilot / zcode / agent อื่น
+- ไม่ลบหรือเปลี่ยน tab "All agents" ของ R-014
+- ไม่ใส่ใน tray หรือ widget · ไม่มี notification
+- ไม่ดึงโควต้าจริงของแผนใด ๆ จากผู้ให้บริการ (gauge ทุกอันเป็นค่าใช้จ่ายเทียบงบ)
+
+**ตรวจรับเมื่อ:**
+- [ ] tab Overview แสดง gauge ครบทุก agent ที่ `ccusage daily --json --by-agent` ของเครื่องเดียวกันมีในเดือนนี้ และค่าใช้จ่ายตรงกัน
+- [ ] ตั้งงบให้ agent หนึ่งแล้ว % ตรงกับ ค่าใช้จ่ายเดือนนี้ ÷ งบ · agent ที่ไม่ตั้งงบไม่แสดง %
+- [ ] เทสต์ด้วย JSON สังเคราะห์ที่มี agent ชื่อใหม่ → มี gauge ของ agent นั้นโดยไม่แก้โค้ด
+- [ ] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม
 ## R-014 · ใช้ ccusage เป็นแหล่งข้อมูล usage/cost ของทุก agent และปรับตัวอ่าน transcript ของเราให้ตรงกัน
 
 | | |
