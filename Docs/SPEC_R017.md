@@ -107,3 +107,16 @@ Fixture (today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10). `r
 | F7 | (m5/m6) `ProviderTabViewModel.ChartCosts = history.DailyCosts` when there is history, and is cleared to empty in the no-history branch (so an error snapshot after a good one leaves no stale costs). | WO3 + TA |
 | F8 | (m8) Tie-break oracle H10: two models with equal window totals → `Series`/`ByModel` ordered by `StringComparer.Ordinal` (e.g. `glm` before `kimi`). | TA |
 | F9 | (m4) Wiring test: after `Updated`, then `SelectedRange = 30` and `SelectedMetric = "Output tokens"`, the OpenCode tab's `ChartBuckets.Count == 30` and its values are output tokens, with no extra ccusage read. | TA |
+
+## Coding Owner decisions after G1 code review (Reviewer1 + Reviewer2, 2026-11-10)
+
+| Id | Decision | Owner |
+|---|---|---|
+| F10 | (both reviewers) Right-axis tick labels: `"$" + v.ToString("#,##0.00##", InvariantCulture)` below $1,000 (up to 4 decimals, at least 2), `"$" + ChartFormat.Compact(v)` from $1,000. Oracles: ticks for max 0.10 → `$0.00, $0.025, $0.05, $0.075, $0.10`; for max 0.02 → `$0.00, $0.005, $0.01, $0.015, $0.02`. Tooltip keeps `ChartFormat.Money`. Expose as `internal static string CostTickLabel(double v)`. | WO3 + TA |
+| F11 | (R1 m2) Every OpenCode snapshot uses `fetchedAt: lastGood.RetrievedAt` (or `lastError`'s time if no lastGood — use `now` only then), so a range/metric/budget rebuild does not move `LastUpdated`. | WO3 + TA |
+| F12 | (R1 m3) Empty-state guard back to the original `series.Count == 0` → the existing "No usage recorded" state, no cost line, no right axis. | WO3 + TA |
+| F13 | (R1 m4) The OpenCode rebuild also runs when range/metric change through `OnSettingsChanged` (the `_syncingFromSettings` path), still only when the value really changes. | WO3 + TA |
+| F14 | (R1 m5, R2 m3) Hollow dots are filled with the card background brush so the line does not show through; the legend swatch for "Cost ($)" is a short horizontal line, not a square; one frozen `Pen` per render for line and dots. | WO3 |
+| F15 | (R1 m6) `OpenCodeSnapshotBuilder.Build`'s `rangeDays` and `metric` parameters have no default values. | WO3 + TA |
+| F16 | (R2 m4) `OpenCodeHistoryBuilder` uses the existing metric constants (`ChartFormat.ValueMetric`, `DashboardOptions`/`UsageMetric` names) instead of new duplicates. | WO3 |
+| — | Kept: the `index` parameter of the 5-argument `TooltipText` (F4); the empty-window chart card (H6, R1 m7) is the intended empty state. | — |
