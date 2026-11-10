@@ -8,4 +8,4 @@
 
 Windows x64 downloads: use **AIUsageMonitor Setup 2.0.3.exe** to install, or **AIUsageMonitor 2.0.3.exe** for the self-contained portable app. Settings carry over from 2.0.2; agent budgets default to unset. Keep the previous installer for rollback.
 
-Validation: build with 0 warnings/errors, all 2,330 synthetic .NET tests and format verification pass, and the NuGet vulnerability audit reports no vulnerable packages. Owner acceptance of R-014, R-015, R-016 and R-017 on the real app is **pending**. Real-desktop DPI/tray and clean-machine upgrade smoke matrices were not repeated. Executables are unsigned.
+Validation: build with 0 warnings/errors, all 2,330 synthetic .NET tests and format verification pass, and the NuGet vulnerability audit reports no vulnerable packages. The owner accepted R-014, R-015, R-016 and R-017. Real-desktop DPI/tray and clean-machine upgrade smoke matrices were not repeated. Executables are unsigned.

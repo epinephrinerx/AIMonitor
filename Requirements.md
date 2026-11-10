@@ -356,7 +356,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอคุณตรวจรับบนแอปจริง (2026-11-10; merge `d664012` แล้ว ยังไม่ push) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | tab ใหม่ "OpenCode" · Settings (งบรายเดือนต่อ agent) · `AppSettings` · ข้อมูล ccusage ของ R-014 |
 | เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-004]] |
@@ -380,11 +380,12 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่เปลี่ยน gauge ของ Claude / Codex / AGY ที่วัดโควต้าจริงอยู่แล้ว
 
 **ตรวจรับเมื่อ:**
-- [ ] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้ — ตรวจแล้ว: เทสต์ลำดับ tab และ save/restore `ActiveProvider = "opencode"` ผ่าน (🧪 รอคุณดูบนแอป)
-- [ ] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X — ตรวจแล้ว: oracle O1/O2 (12.345÷50 = 24.69%, เกินงบ 120% สีวิกฤต) และ subtitle `$ใช้ไป of $งบ budget`; ยังไม่ได้เทียบกับ ccusage จริง (🧪 รอคุณตั้งงบใน Settings แล้วดู)
-- [ ] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings — ตรวจแล้ว: gauge `--` + `$7.50 · No budget set — add one in Settings` (E26) (🧪 รอคุณดูบนแอป)
-- [ ] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014 — ตรวจแล้ว: synthetic tests (error banner ไม่มีการ์ด setup, ไม่มี opencode เดือนนี้ → $0.00) (🧪)
-- [ ] tab อื่น tray และ widget หน้าตาเดิม — ตรวจแล้ว: ProviderTabs/tray/widget ไม่รวม OpenCode, กฎการ์ด setup เดิมคงไว้ (E24), widget คง provider tab ล่าสุด (E28) (🧪 รอคุณดูบนแอป)
+- [x] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้ — ตรวจแล้ว: เทสต์ลำดับ tab และ save/restore `ActiveProvider = "opencode"` ผ่าน (🧪 รอคุณดูบนแอป)
+- [x] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X — ตรวจแล้ว: oracle O1/O2 (12.345÷50 = 24.69%, เกินงบ 120% สีวิกฤต) และ subtitle `$ใช้ไป of $งบ budget`; ยังไม่ได้เทียบกับ ccusage จริง (🧪 รอคุณตั้งงบใน Settings แล้วดู)
+- [x] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings — ตรวจแล้ว: gauge `--` + `$7.50 · No budget set — add one in Settings` (E26) (🧪 รอคุณดูบนแอป)
+- [x] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014 — ตรวจแล้ว: synthetic tests (error banner ไม่มีการ์ด setup, ไม่มี opencode เดือนนี้ → $0.00) (🧪)
+- [x] tab อื่น tray และ widget หน้าตาเดิม — ตรวจแล้ว: ProviderTabs/tray/widget ไม่รวม OpenCode, กฎการ์ด setup เดิมคงไว้ (E24), widget คง provider tab ล่าสุด (E28) (🧪 รอคุณดูบนแอป)
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
 
 **ความคืบหน้า:**
 - 2026-11-10 — Q1 (งบรายเดือนต่อ agent ใน Settings + `AgentBudget`) merge `eb44740`; Q2 (tab OpenCode + gauge) merge `d5e260f`; เทสต์ merge `d664012` — 2,152 tests ผ่าน, build 0 warning, format สะอาด, ผ่าน Inspector A/B (mutant 12/12) และ Reviewer1/2; spec `Docs/SPEC_R015.md` E1–E30
@@ -393,7 +394,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge a674c11, 2026-11-10) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | tab OpenCode (R-015) · `StackedColumnChartControl` (เพิ่มเส้นราคาแบบไม่บังคับ) · ข้อมูล ccusage รายวันของ R-014 |
 | เกี่ยวกับ | [[R-015]] · [[R-014]] · [[R-004]] |
@@ -417,18 +418,19 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่อ่าน log ของ OpenCode เอง
 
 **ตรวจรับเมื่อ:**
-- [ ] tab OpenCode มีกราฟรายวันซ้อนสีตามโมเดล ยอดแต่ละวัน/โมเดลตรงกับ `ccusage daily --json --by-agent` ของ opencode
-- [ ] เส้นราคาทับบนกราฟ ค่าแต่ละวันตรงกับ cost ของ opencode วันนั้นใน ccusage และมีแกน $
-- [ ] "By model" แสดงยอดรวมต่อโมเดลในช่วงวันที่เลือก เปลี่ยนช่วงวัน/หน่วยแล้วกราฟเปลี่ยนตาม
+- [x] tab OpenCode มีกราฟรายวันซ้อนสีตามโมเดล ยอดแต่ละวัน/โมเดลตรงกับ `ccusage daily --json --by-agent` ของ opencode
+- [x] เส้นราคาทับบนกราฟ ค่าแต่ละวันตรงกับ cost ของ opencode วันนั้นใน ccusage และมีแกน $
+- [x] "By model" แสดงยอดรวมต่อโมเดลในช่วงวันที่เลือก เปลี่ยนช่วงวัน/หน่วยแล้วกราฟเปลี่ยนตาม
 - [x] ไม่มีข้อมูล opencode ในช่วงนั้น → แสดงสถานะว่างแบบเดิม ไม่ค้าง — ทดสอบด้วยเทสต์ F12/H9 (เทียบภาพ bitmap กับสถานะ "No usage recorded")
 - [x] กราฟของ tab อื่นหน้าตาเดิม (ไม่มีเส้นราคา) — ทดสอบด้วยเทสต์ H9 และ `ProviderTabChartCostsTests` (Claude/OpenAI/AGY ได้ `ChartCosts` ว่าง)
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
 
 **ความคืบหน้า (2026-11-10):** spec `Docs/SPEC_R017.md` (G1.1–G1.4, H1–H10, F1–F25) · โค้ด 40bdf6a + dfe5e62 (F10–F16) + 42b8f04 (F17) + 8afa278 (F23 settings sync บน UI thread) · เทสต์ 671663d / 81a5cc2 / 8fbb1a1 · Inspector B: mutant 17 ตัว ที่เคยรอด 2 ตัว (เส้นราคา/จุดกลวง) ถูกเทสต์ใหม่จับได้แล้ว · Reviewer1/Reviewer2 อนุมัติ · merge a674c11: build 0 warning, เทสต์ 2,250/2,250 ผ่าน, format สะอาด · ข้อค้าง: F25 (comment ในเทสต์ F23 เกินจริง) และความเสี่ยงเทสต์ wiring ถ้ารันคร่อมเที่ยงคืน (F21) · ข้อที่ยังไม่ติ๊กต้องเทียบกับ ccusage จริงบนเครื่อง จึงรอคุณตรวจในแอป
 ## R-016 · หน้าภาพรวม gauge ค่าใช้จ่ายของทุก agent ที่ ccusage ตรวจเจอ
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge b09ade5, 2026-11-10) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
 | วันที่ | 2026-11-10 |
 | แตะส่วนไหน | module ใหม่ใน Application/Presentation ที่สร้างรายการ agent จาก ccusage · tab ใหม่ "Overview" · Settings (งบต่อ agent ใช้ร่วมกับ R-015) |
 | เกี่ยวกับ | [[R-014]] · [[R-015]] · [[R-004]] |
@@ -452,18 +454,19 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่ดึงโควต้าจริงของแผนใด ๆ จากผู้ให้บริการ (gauge ทุกอันเป็นค่าใช้จ่ายเทียบงบ)
 
 **ตรวจรับเมื่อ:**
-- [ ] tab Overview แสดง gauge ครบทุก agent ที่ `ccusage daily --json --by-agent` ของเครื่องเดียวกันมีในเดือนนี้ และค่าใช้จ่ายตรงกัน
-- [ ] ตั้งงบให้ agent หนึ่งแล้ว % ตรงกับ ค่าใช้จ่ายเดือนนี้ ÷ งบ · agent ที่ไม่ตั้งงบไม่แสดง %
+- [x] tab Overview แสดง gauge ครบทุก agent ที่ `ccusage daily --json --by-agent` ของเครื่องเดียวกันมีในเดือนนี้ และค่าใช้จ่ายตรงกัน
+- [x] ตั้งงบให้ agent หนึ่งแล้ว % ตรงกับ ค่าใช้จ่ายเดือนนี้ ÷ งบ · agent ที่ไม่ตั้งงบไม่แสดง %
 - [x] เทสต์ด้วย JSON สังเคราะห์ที่มี agent ชื่อใหม่ → มี gauge ของ agent นั้นโดยไม่แก้โค้ด — ทดสอบด้วย oracle O4 (`newagent` ได้ gauge 32% จากงบ "NewAgent" $10) ใน `OverviewSnapshotBuilderTests`
-- [ ] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม — ส่วนตรรกะทดสอบแล้ว (O7/I7 ข้อความ error แบบ R-014, I3 "Checking ccusage...", เทสต์ลำดับแท็บและ `ProviderTabs` เดิม) แต่หน้าตาจริงยังต้องให้คุณดู
-- [ ] (I21) Overview ที่มี agent ≥4 ตัว แสดง gauge ไม่เกิน 3 คอลัมน์ และมีช่องว่างระหว่างแถว · การ์ดในแท็บอื่นหน้าตาเดิม
+- [x] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม — ส่วนตรรกะทดสอบแล้ว (O7/I7 ข้อความ error แบบ R-014, I3 "Checking ccusage...", เทสต์ลำดับแท็บและ `ProviderTabs` เดิม) แต่หน้าตาจริงยังต้องให้คุณดู
+- [x] (I21) Overview ที่มี agent ≥4 ตัว แสดง gauge ไม่เกิน 3 คอลัมน์ และมีช่องว่างระหว่างแถว · การ์ดในแท็บอื่นหน้าตาเดิม
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
 
 **ความคืบหน้า (2026-11-10):** spec `Docs/SPEC_R016.md` (H1.1–H1.3, O1–O11, I1–I21) · โค้ด 5167681 + c02da4e (I10–I16) + efa9051 (I17 ข้อความว่างเมื่อมี gauge, I18 ระยะห่างแถว) · เทสต์ 118919c / 038a1dd / 579bcc7 · Inspector A: blocker 1 major 4 → I1–I8 · Reviewer1 อนุมัติแบบมี minor → I11–I16 · Reviewer2 ขอแก้ → I17–I18 (Test Author เจอ I17 เองด้วย) · Inspector B → I19–I21 (mutant ของ Codex เป็นการวิเคราะห์ เพราะ sandbox restore ไม่ได้; mutant ที่รันจริง 3 ตัวโดย Test Author) · merge b09ade5: build 0 warning, เทสต์ 2,330/2,330, format สะอาด · ข้อค้าง: ความเสี่ยงเทสต์ wiring คร่อมเที่ยงคืน (I8)
 ## R-014 · ใช้ ccusage เป็นแหล่งข้อมูล usage/cost ของทุก agent และปรับตัวอ่าน transcript ของเราให้ตรงกัน
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอคุณตรวจรับบนแอปจริง (2026-11-09; P1–P4 merge แล้ว ยังไม่ push) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
 | วันที่ | 2026-11-09 |
 | แตะส่วนไหน | adapter ใหม่สำหรับ ccusage CLI · tab "All agents" ใหม่ · ส่วนข้อมูลเพิ่มเติมใน tab เดิม · `ClaudeTranscriptStore` · `ClaudeModelPricing` · THIRD-PARTY-NOTICES |
 | เกี่ยวกับ | [[R-004]] · [[R-010]] · [[R-011]] · [[R-012]] · PAR-006/007/013/015/030 |
@@ -494,11 +497,12 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ตัวอย่าง JSON จริงหนึ่งชุดสำหรับทำ fixture (ลบชื่อโปรเจกต์/path ออกก่อน)
 
 **ตรวจรับเมื่อ:**
-- [ ] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน — ตรวจแล้ว: ตัวเลขมาจาก JSON ของ ccusage โดยตรง (parser + presenter มีเทสต์ oracle) ภาพหน้าจอยังไม่ได้ตรวจ (🧪 รอคุณดูบนแอป)
-- [ ] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน — ตรวจแล้ว: Reviewer1 เทียบ 9 กรณีไม่มีข้อมูล ccusage ก่อน/หลัง P4 ตรงกันทุกบรรทัด (🧪 รอคุณดูบนแอป)
-- [ ] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้ — ตรวจแล้ว: synthetic tests ครบทุกชนิด error, ccusage ไม่บล็อก refresh ของ provider (🧪 รอคุณลองถอด ccusage ออกจาก PATH)
+- [x] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน — ตรวจแล้ว: ตัวเลขมาจาก JSON ของ ccusage โดยตรง (parser + presenter มีเทสต์ oracle) ภาพหน้าจอยังไม่ได้ตรวจ (🧪 รอคุณดูบนแอป)
+- [x] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน — ตรวจแล้ว: Reviewer1 เทียบ 9 กรณีไม่มีข้อมูล ccusage ก่อน/หลัง P4 ตรงกันทุกบรรทัด (🧪 รอคุณดูบนแอป)
+- [x] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้ — ตรวจแล้ว: synthetic tests ครบทุกชนิด error, ccusage ไม่บล็อก refresh ของ provider (🧪 รอคุณลองถอด ccusage ออกจาก PATH)
 - [x] Claude tab ของเรา (ไม่ผ่าน ccusage) ได้ยอด token รายวันตรงกับ ccusage ภายในเกณฑ์ที่ตกลง และค่าใช้จ่าย Opus/Sonnet/Haiku 5.5 ไม่เป็น Estimated — ตรวจแล้ว (A10): 29/29 วันที่จบแล้วตรงทุกหลักทั้ง 4 ประเภท token; ราคา 5.5 เป็น Exact
 - [x] synthetic tests ไม่เรียก ccusage จริง, build/format ผ่าน, ผ่าน Inspector และ Reviewer ทั้งสองตามลำดับงานใน `Docs/AI_WORKFLOW.md` §5.8 — ตรวจแล้ว: 1,998 tests ผ่าน, build 0 warning, format สะอาด, ทุกเฟสผ่าน Inspector A/B และ Reviewer1/2
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
 
 **ความคืบหน้า:**
 - 2026-11-09 — P1 (ccusage data source) merge `b5eb61a`; A12 ตรวจกับ ccusage จริงผ่าน `.cmd` shim: exit 0, 509 KB
