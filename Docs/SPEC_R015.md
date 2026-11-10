@@ -136,3 +136,24 @@ AGY gauges; the Overview tab (R-016).
 | O6 | settings `{" OpenCode ": 20.005, "codex": 0, "": 5, "x": 2000000}` | Normalize → `{"opencode": 20.01}` |
 | O7 | today 2026-11-30 local | resetsAt 2026-12-01T00:00 local |
 | O8 | lastGood null, lastError NotInstalled | configured false, error = `ErrorText(NotInstalled, …)`, no meters |
+
+## Coding Owner decisions after Inspector A (2026-11-10) — override anything above
+
+| Id | Decision | Owner |
+|---|---|---|
+| E1 | `OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, now, TimeZoneInfo zone)`. `resetsAt` = `today.AddMonths(1)` → day 1 at 00:00 in `zone`, offset = `zone.GetUtcOffset(that local DateTime)`. The view model passes the same zone it uses for SummaryFor/sessions. Oracle O7 holds; also 2026-01-31 → 2026-02-01, 2024-02-29 → 2024-03-01. | WO3 + TA |
+| E2 | `MainWindowViewModel` keeps the last `(lastGood, lastError)` received in `OnAgentUsageUpdated` and the last budgets; `ApplyAgentBudgets(budgets)` stores the budgets and rebuilds the OpenCode snapshot from the stored pair (no ccusage run). Before the first `Updated`, `ApplyAgentBudgets` only stores. | WO3 + TA |
+| E3 | `ProviderTabViewModel.SupportsAgentUsage` = `AppendsAgentUsage || id is "agy" or "opencode"` (case-insensitive). Other ids (e.g. `gemini`) still ignore a summary (C25a). | WO3 + TA |
+| E4 | `AppSettings.Normalize` keeps `ActiveProvider == "opencode"`. Startup selection looks up `ActiveProvider` among all `ProviderTabViewModel`s in `Tabs` (so `opencode` selects `OpenCodeTab`); `ProviderTabs` itself stays the three provider tabs. Unknown value → Claude as now. | WO2 (Normalize) + WO3 (selection) + TA |
+| E5 | Budgets join the live preview: every text change of a budget box re-runs the existing preview with `AgentBudgets` built from the currently **valid, non-empty** rows (invalid rows are left out of the preview, as on Save). | WO2 + TA |
+| E6 | `SettingsViewModel.HasBudgetError` (true when any row is invalid); Save's CanExecute = `!HasIntervalError && !HasBudgetError`; per-row `Error` text as in Q1.3. | WO2 + TA |
+| E7 | `AgentBudget.Compute`: blank `agent` → `ArgumentException` with `ParamName == "agent"`; month row = `m.Year == today.Year && m.Month == today.Month`; `reading.Agent` = `agent.Trim().ToLowerInvariant()`. | WO2 + TA |
+| E8 | `Normalize` always returns a **new** dictionary with `StringComparer.OrdinalIgnoreCase` (also after JSON load, where the comparer is lost). JSON round trip of `{ "opencode": 20.01 }` must give the same value. | WO2 + TA |
+| E9 | Known agents for Settings = distinct agent names over `report.Daily`, `report.Monthly` and `report.Sessions` of the last good report (`CachedAgentUsageSource.LastGood` or the equivalent already reachable from `App`), plus saved budget keys, plus `opencode`. | WO2 + TA |
+| E10 | `lastGood == null && lastError != null` → snapshot `configured: true`, `error: ErrorText(kind, message)`, no meters, no stats — so the tab shows the error banner (not the setup card, which would have an empty hint). WO3 verifies no empty gauge card is drawn when there are no meters. | WO3 + TA |
+| E11 | Rejected D11: `Meter.EffectiveSeverity` already applies the local thresholds from the percent (`Meter.cs:76`, `SeverityRules.Combine`), so 120 % is Critical without new code. Test: O2 gauge severity is Critical. | TA |
+| E12 | `money(x)` = `ChartFormat.Money((double)x)`, the formatter `AgentUsagePresenter` uses for a priced cost; the budget in the subtitle uses it too. | WO3 + TA |
+| E13 | Save writes only non-empty valid rows; an emptied row removes the key (never a 0 entry). | WO2 + TA |
+| E14 | Settings agent order: `opencode` first, then the others distinct (case-insensitive) sorted by `AgentDisplayName` with `StringComparer.OrdinalIgnoreCase`. | WO2 + TA |
+| E15 | The OpenAI "Monthly budget (USD)" field lives on the Connections page (`ProviderMeta.OpenAi.ExtraLabel`); it is unrelated and unchanged. | — |
+| E16 | Test Author: put Q1 tests and Q2 tests in **separate commits** (Q1 tests must compile against Q1 alone; Q2 tests may not compile until Q2 merges). Assert final state, not the number of internal `ApplyAgentUsage` calls. | TA |
