@@ -68,6 +68,19 @@ public static class AgentBudget
         {
             budgetUsd = budgetValue;
         }
+        else
+        {
+            // E21: find the budget case-insensitively even when the caller's dictionary uses the default comparer.
+            foreach (var pair in budgets)
+            {
+                if (string.Equals(pair.Key.Trim(), normalisedAgent, StringComparison.OrdinalIgnoreCase)
+                    && pair.Value > 0m)
+                {
+                    budgetUsd = pair.Value;
+                    break;
+                }
+            }
+        }
 
         double? percent = budgetUsd.HasValue
             ? (double)(monthCostUsd / budgetUsd.Value * 100m)

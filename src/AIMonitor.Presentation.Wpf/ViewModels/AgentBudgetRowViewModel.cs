@@ -110,7 +110,7 @@ public sealed class AgentBudgetRowViewModel : ViewModelBase
             return "Enter an amount in USD between 0.01 and 1,000,000, or leave it empty.";
         }
 
-        if (value <= 0m || value > 1_000_000m)
+        if (value < 0.01m || value > 1_000_000m)
         {
             return "Enter an amount in USD between 0.01 and 1,000,000, or leave it empty.";
         }

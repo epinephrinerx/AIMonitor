@@ -190,17 +190,18 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private List<AgentBudgetRowViewModel> CreateBudgetRows(IReadOnlyList<string>? knownAgents)
     {
-        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "opencode" };
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddKnownAgent(agents, "opencode");
         foreach (var key in _entrySettings.AgentBudgets.Keys)
         {
-            agents.Add(key);
+            AddKnownAgent(agents, key);
         }
 
         if (knownAgents is not null)
         {
             foreach (var agent in knownAgents)
             {
-                agents.Add(agent);
+                AddKnownAgent(agents, agent);
             }
         }
 
@@ -216,6 +217,15 @@ public sealed class SettingsViewModel : ViewModelBase
                     : null,
                 OnBudgetRowChanged))
             .ToList();
+    }
+
+    private static void AddKnownAgent(HashSet<string> agents, string? agent)
+    {
+        var normalised = agent?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(normalised))
+        {
+            agents.Add(normalised);
+        }
     }
 
     private void OnBudgetRowChanged()
@@ -236,7 +246,7 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             if (row.TryGetValue(out var value))
             {
-                budgets[row.Agent] = value;
+                budgets[row.Agent] = Math.Round(value, 2, MidpointRounding.AwayFromZero);
             }
         }
 
@@ -404,7 +414,8 @@ public sealed class SettingsViewModel : ViewModelBase
             WidgetOpacity = _entrySettings.WidgetOpacity,
             WidgetAlwaysOnTop = _entrySettings.WidgetAlwaysOnTop,
             DashboardWidth = _entrySettings.DashboardWidth,
-            DashboardHeight = _entrySettings.DashboardHeight
+            DashboardHeight = _entrySettings.DashboardHeight,
+            AgentBudgets = _entrySettings.AgentBudgets
         });
     }
 

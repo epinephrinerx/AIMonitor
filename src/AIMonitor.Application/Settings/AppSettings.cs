@@ -88,13 +88,14 @@ public sealed record AppSettings
                 }
 
                 var key = pair.Key.Trim().ToLowerInvariant();
-                if (pair.Value <= 0m || pair.Value > 1_000_000m)
+                var rounded = Math.Round(pair.Value, 2, MidpointRounding.AwayFromZero);
+                if (rounded <= 0m || rounded > 1_000_000m)
                 {
-                    budgets.Remove(key);
+                    // E18: invalid values are skipped and never remove or replace an entry.
                     continue;
                 }
 
-                budgets[key] = Math.Round(pair.Value, 2, MidpointRounding.AwayFromZero);
+                budgets[key] = rounded;
             }
         }
 
