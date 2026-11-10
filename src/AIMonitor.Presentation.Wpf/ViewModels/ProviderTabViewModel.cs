@@ -374,9 +374,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         ApplyAgentUsage();
     }
 
-    /// <summary>Provider ids whose tab shows ccusage rows (C9); all others ignore a summary.</summary>
+    /// <summary>Provider ids whose tab shows ccusage rows (C9/E3); all others ignore a summary.</summary>
     private bool SupportsAgentUsage =>
-        AppendsAgentUsage || string.Equals(ProviderId, "agy", StringComparison.OrdinalIgnoreCase);
+        AppendsAgentUsage
+        || string.Equals(ProviderId, "agy", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Claude and OpenAI append the ccusage rows to their existing supplementary rows (C8).</summary>
     private bool AppendsAgentUsage =>
@@ -384,8 +386,8 @@ public sealed class ProviderTabViewModel : ViewModelBase
         || string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Rebuilds the supplementary rows from the base rows plus the stored ccusage summary. AGY shows
-    /// only the ccusage rows (C8); Claude/OpenAI keep their existing rows and append (C8) when the
+    /// Rebuilds the supplementary rows from the base rows plus the stored ccusage summary. AGY and
+    /// OpenCode show only the ccusage rows (C8/E3); Claude/OpenAI keep their existing rows and append (C8) when the
     /// section is visible, otherwise they show a ccusage-only section (C20). When no summary line is
     /// present the pre-existing visibility rule is restored (C10), and an unchanged set of ccusage
     /// rows does not rebuild the section (C21).
@@ -437,7 +439,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
             return;
         }
 
-        // AGY: the section exists only while a ccusage line is present (C8).
+        // AGY and OpenCode: the section exists only while a ccusage line is present (C8/E3).
         if (agentRows.Count > 0)
         {
             if (_supplementary is null || !IsAgentUsageOnly(_supplementary) || !RowsMatch(currentAgentRows, agentRows))
@@ -638,7 +640,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         LastUpdated = snapshot.FetchedAt;
         IsConfigured = configuredNow;
         HasSnapshot = true;
-        ShowSetupCard = !configuredNow && meterList.Count == 0;
+        // Every other provider keeps R-004's setup card. Only the OpenCode tab never shows it, so an
+        // error-only snapshot shows the error banner instead (E10), and a configured snapshot with no
+        // meters does not draw an empty gauge card.
+        var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
