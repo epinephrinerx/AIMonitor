@@ -96,3 +96,14 @@ Fixture month = today's month 2026-11, `today = 2026-11-10`, zone UTC. Monthly a
 | I9 | (CO, after WO2 5167681) Two existing tests pin the old 5-tab order and now fail as O9 requires: `MainWindowViewModelOpenCodeTabTests.Tabs_Q21_OpenCodeTabSitsBetweenAgyAndAllAgents_ProviderTabsUnchanged` and `MainWindowViewModelAllAgentsTests.Tabs_ExposesThreeProviderTabsThenAllAgentsTab_ProviderTabsUnchanged`. The Test Author updates them to the 6-tab order (Overview at index 4) and keeps their `ProviderTabs` assertions. | TA |
 | I10 | (CO) Empty-message texts are exactly as written in this spec, ASCII: `"Checking ccusage..."` (three dots, not U+2026), `"No agent usage recorded this month"`, `"Waiting for this month's ccusage data"` (ASCII apostrophe). WO2's 5167681 uses U+2026 for the first one; fix it. | WO2 + TA |
 
+## Coding Owner decisions after Reviewer1 (Claude Code · Fable 5.1, 2026-11-10, at 5167681, verdict approve with minors)
+
+| Id | Decision | Owner |
+|---|---|---|
+| I11 | (R1 M1) When Overview gauges wrap to more than one row, the rows get a vertical gap equal to the existing 12 px horizontal gap. Other tabs (always one row) must look pixel-identical, so do not change their margins: scope the change to the wrapped/Overview case. | WO2 |
+| I12 | (R1 m1) The I4 rollover condition is computed in `OverviewSnapshotBuilder` from its own `today` and `zone`. It applies only in state 3, and its trigger is exactly "the report has no `Monthly` entry for today's month AND the month of `lastGood.RetrievedAt` converted to `zone` differs from today's month". A current-month entry with zero agents shows "No agent usage recorded this month". The builder exposes the resulting message, for example `public static string? EmptyMessage(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError, DateOnly today, TimeZoneInfo zone)` returning the I3/I4/I10 text or null. `MainWindowViewModel` hands it to the Overview tab after `UpdateFromSnapshot`. `ProviderTabViewModel` no longer reads `TimeZoneInfo.Local` or the clock for this. | WO2 + TA |
+| I13 | (R1 m2) The Overview tab's behaviour derives from `ProviderId == "overview"` inside `ProviderTabViewModel`: initial `EmptyMessage = "Checking ccusage..."` and a `MeterColumns` cap of 3, so a directly constructed `new ProviderTabViewModel("overview", "Overview")` behaves the same. `EmptyMessage` gets a non-public setter; the I12 hand-off goes through a method that ignores non-Overview tabs. | WO2 + TA |
+| I14 | (R1 m3) The Overview tab caption is always plain `"Overview"`, never `"Overview NN%"`. | WO2 + TA |
+| I15 | (R1 m4) Do not rebuild Overview on chart range/metric changes; it rebuilds only on a ccusage update and on budget changes (H1.2, I4). | WO2 + TA |
+| I16 | (R1 m5) Comments use ASCII "..." too (tidy with I10). | WO2 |
+
