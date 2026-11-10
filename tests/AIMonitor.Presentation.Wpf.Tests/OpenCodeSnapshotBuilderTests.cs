@@ -8,12 +8,15 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// <summary>
 /// R-015 Q2.2 — <c>OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, now, zone)</c>
 /// written from Docs/SPEC_R015.md only (§5.6): the three-state table, the meter fields, oracles
-/// O2/O3/O5/O7/O8 and decisions E1 (resetsAt day 1 00:00 in the caller's zone with
-/// zone.GetUtcOffset of THAT local instant), E10 (error-first snapshot is configured TRUE — E10
-/// overrides the "configured: false" wording of the state table and of O8), E11 (120 % renders
+/// O2/O3/O5/O7 (O8 is superseded by E10) and decisions E1 (resetsAt day 1 00:00 in the caller's zone
+/// with zone.GetUtcOffset of THAT local instant), E10 (the error-first snapshot is configured TRUE —
+/// it overrides the "configured: false" wording of the state table and of O8), E11 (120 % renders
 /// Critical through the existing local thresholds, no new code) and E12 (money(x) is
-/// ChartFormat.Money((double)x), also for the budget in the subtitle). Q2 tests: expected not to
-/// compile until the Q2 branch merges (handoff note, E16).
+/// ChartFormat.Money((double)x), also for the budget in the subtitle).
+/// E23 pins the return type: <c>ProviderSnapshot?</c> — <c>null</c> means "no ccusage result yet"
+/// (lastGood AND lastError are null) and the view model then pushes nothing; the snapshot it does
+/// return carries <c>ProviderId == "opencode"</c>. Q2 tests: expected not to compile until the Q2
+/// branch merges (handoff note, E16).
 /// </summary>
 public sealed class OpenCodeSnapshotBuilderTests
 {
@@ -43,28 +46,50 @@ public sealed class OpenCodeSnapshotBuilderTests
 
     private static AgentUsage OpenCode(decimal cost) => Usage("opencode", ("glm-4.6", cost));
 
-    // ── The three states of the Q2.2 table ─────────────────────────────────────
+    // Build returns ProviderSnapshot? (E23). The raw call, for the one case that expects null.
+    private static ProviderSnapshot? BuildRaw(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        IReadOnlyDictionary<string, decimal> budgets,
+        DateOnly today,
+        TimeZoneInfo? zone = null) =>
+        OpenCodeSnapshotBuilder.Build(lastGood, lastError, budgets, today, Now, zone ?? TimeZoneInfo.Utc);
+
+    // Every state that has something to show: unwrap once here so the tests read against a
+    // non-null snapshot (the repo style is Assert.NotNull + `!`, CS8602 under warnings-as-errors).
+    private static ProviderSnapshot Build(
+        AgentUsageReport? lastGood,
+        AgentUsageUnavailableException? lastError,
+        IReadOnlyDictionary<string, decimal> budgets,
+        DateOnly today,
+        TimeZoneInfo? zone = null)
+    {
+        var snapshot = BuildRaw(lastGood, lastError, budgets, today, zone);
+        Assert.NotNull(snapshot); // a state with a report or an error always yields a snapshot
+        return snapshot!;
+    }
+
+    // ── The three states of the Q2.2 table (E23 return type) ───────────────────
 
     [Fact]
-    public void Build_Q22_FirstRunStillGoing_ReturnsNullSoNothingIsPushed()
+    public void Build_E23_FirstRunStillGoing_ReturnsNullSoNothingIsPushed()
     {
-        // Q2.2: lastGood == null && lastError == null → "no snapshot is pushed; the tab keeps its
-        // initial 'Checking...' state".
-        Assert.Null(OpenCodeSnapshotBuilder.Build(null, null, NoBudgets, Today, Now, TimeZoneInfo.Utc));
+        // E23 / Q2.2 state 1: lastGood == null && lastError == null → Build returns null, and "no
+        // snapshot is pushed; the tab keeps its initial 'Checking...' state".
+        Assert.Null(BuildRaw(null, null, NoBudgets, Today));
     }
 
     [Fact]
     public void Build_E10_ErrorBeforeAnyGoodReport_IsConfiguredWithErrorBannerAndNoMeters()
     {
-        // E10 (OVERRIDES the "configured: false" cell of the state table and of O8): the error-first
-        // snapshot carries configured: true so the tab shows the error banner — not the setup card,
-        // which would have an empty hint — with no meters and no stats.
+        // E10 (OVERRIDES the "configured: false" cell of the state table and of O8, which E23 also
+        // marks superseded): the error-first snapshot carries configured: true so the tab shows the
+        // error banner — not the setup card, which would have an empty hint — with no meters/stats.
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.NotInstalled, "ccusage is not installed");
 
-        var snapshot = OpenCodeSnapshotBuilder.Build(null, failure, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(null, failure, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
-        Assert.Equal("opencode", snapshot.ProviderId);
+        Assert.Equal("opencode", snapshot.ProviderId); // E23: the snapshot is the OpenCode tab's
         Assert.True(snapshot.Configured); // E10, not O8's stale "configured false"
         Assert.Equal(AgentUsagePresenter.ErrorText(AgentUsageErrorKind.NotInstalled, "ccusage is not installed"), snapshot.Error);
         Assert.Empty(snapshot.Meters);
@@ -78,10 +103,9 @@ public sealed class OpenCodeSnapshotBuilderTests
         // lastError while lastGood exists is ignored here, matching the All agents tab".
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.Failed, "ccusage failed this time");
 
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(30m)), failure, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(30m)), failure, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
+        Assert.Equal("opencode", snapshot.ProviderId); // E23
         Assert.True(snapshot.Configured);
         Assert.Null(snapshot.Error);
         var meter = Assert.Single(snapshot.Meters); // one meter (below), no stats
@@ -98,10 +122,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     {
         // O2: cost 60, budget 50 → Percent 120, not capped. Subtitle text pinned by O1/E12:
         // money(50) = ChartFormat.Money(50.0) = "$50.00". Detail = money(60) = "$60.00".
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(60m)), null, Budget(("opencode", 50m)), Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(60m)), null, Budget(("opencode", 50m)), Today);
 
-        Assert.NotNull(snapshot);
         var meter = Assert.Single(snapshot.Meters);
         Assert.Equal(120.0, meter.Percent); // E12/O2: (60/50)*100 uncapped
         Assert.Equal("of your $50.00 budget", meter.Subtitle);
@@ -114,10 +136,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     {
         // O3: cost 7.5, no budget → Percent null, subtitle "No budget set — add one in Settings",
         // detail "$7.50".
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(7.5m)), null, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(7.5m)), null, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
         var meter = Assert.Single(snapshot.Meters);
         Assert.Null(meter.Percent);
         Assert.Equal("No budget set — add one in Settings", meter.Subtitle);
@@ -131,12 +151,9 @@ public sealed class OpenCodeSnapshotBuilderTests
         // O5: model A cost 3, model B unpriced → detail "$3.00 + unpriced" (cost not counted as $0).
         var monthRow = Usage("opencode", ("model-a", 3m), ("model-b", null));
 
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, monthRow), null, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, monthRow), null, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
-        var meter = Assert.Single(snapshot.Meters);
-        Assert.Equal("$3.00 + unpriced", meter.Detail); // Q2.2: money(MonthCostUsd) + " + unpriced"
+        Assert.Equal("$3.00 + unpriced", Assert.Single(snapshot.Meters).Detail); // Q2.2: money(MonthCostUsd) + " + unpriced"
     }
 
     [Theory]
@@ -148,10 +165,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     {
         var cost = decimal.Parse(costText, CultureInfo.InvariantCulture);
 
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(cost)), null, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(cost)), null, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
         Assert.Equal(expectedDetail, Assert.Single(snapshot.Meters).Detail);
     }
 
@@ -159,10 +174,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     public void Build_E12_BudgetInSubtitleIsTheSameMoneyFormatter()
     {
         // E12: "the budget in the subtitle uses it too" — money(20.01) = "$20.01".
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(1m)), null, Budget(("opencode", 20.01m)), Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(1m)), null, Budget(("opencode", 20.01m)), Today);
 
-        Assert.NotNull(snapshot);
         Assert.Equal("of your $20.01 budget", Assert.Single(snapshot.Meters).Subtitle);
     }
 
@@ -179,15 +192,18 @@ public sealed class OpenCodeSnapshotBuilderTests
     [InlineData("20240229", "UTC", 2024, 3, 1, 0)]
     [InlineData("20261031", "Eastern Standard Time", 2026, 11, 1, -4)]
     public void Build_E1_ResetsAtIsNextLocalMonthStartInZone(
-        string todayText, string zoneId, int year, int month, int day, int utcOffsetHours)
+        string todayText,
+        string zoneId,
+        int year,
+        int month,
+        int day,
+        int utcOffsetHours)
     {
-        var day2 = DateOnly.ParseExact(todayText, "yyyyMMdd", CultureInfo.InvariantCulture);
+        var today = DateOnly.ParseExact(todayText, "yyyyMMdd", CultureInfo.InvariantCulture);
         var expected = new DateTimeOffset(year, month, day, 0, 0, 0, TimeSpan.FromHours(utcOffsetHours));
 
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(day2, OpenCode(1m)), null, NoBudgets, day2, Now, TimeZoneInfo.FindSystemTimeZoneById(zoneId));
+        var snapshot = Build(ReportWithMonth(today, OpenCode(1m)), null, NoBudgets, today, TimeZoneInfo.FindSystemTimeZoneById(zoneId));
 
-        Assert.NotNull(snapshot);
         Assert.Equal(expected, Assert.Single(snapshot.Meters).ResetsAt);
     }
 
@@ -199,10 +215,8 @@ public sealed class OpenCodeSnapshotBuilderTests
         // O2: gauge text "120%" (ProviderTabViewModel: Percent F0 + '%'), E11: 120 % ≥ 90 % critical
         // threshold → EffectiveSeverity is Critical through the existing Meter.cs / SeverityRules
         // Combine — no new severity code; 120 must still not be capped.
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(60m)), null, Budget(("opencode", 50m)), Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(60m)), null, Budget(("opencode", 50m)), Today);
 
-        Assert.NotNull(snapshot);
         Assert.Equal(Severity.Critical, Assert.Single(snapshot.Meters).EffectiveSeverity);
 
         var tab = new ProviderTabViewModel("opencode", "OpenCode");
@@ -217,10 +231,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     public void Build_O3_GaugeTextIsDashesWhenNoBudget()
     {
         // O3: gauge text "--" when Percent is null.
-        var snapshot = OpenCodeSnapshotBuilder.Build(
-            ReportWithMonth(Today, OpenCode(7.5m)), null, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(ReportWithMonth(Today, OpenCode(7.5m)), null, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
         var tab = new ProviderTabViewModel("opencode", "OpenCode");
         tab.UpdateFromSnapshot(snapshot, Now);
 
@@ -235,9 +247,8 @@ public sealed class OpenCodeSnapshotBuilderTests
     {
         // E10 tail: "no empty gauge card is drawn when there are no meters" — tab level.
         var failure = new AgentUsageUnavailableException(AgentUsageErrorKind.NotInstalled, "ccusage is not installed");
-        var snapshot = OpenCodeSnapshotBuilder.Build(null, failure, NoBudgets, Today, Now, TimeZoneInfo.Utc);
+        var snapshot = Build(null, failure, NoBudgets, Today);
 
-        Assert.NotNull(snapshot);
         var tab = new ProviderTabViewModel("opencode", "OpenCode");
         tab.UpdateFromSnapshot(snapshot, Now);
 

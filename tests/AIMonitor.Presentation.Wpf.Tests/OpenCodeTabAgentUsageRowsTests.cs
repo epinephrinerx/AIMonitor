@@ -37,9 +37,7 @@ public sealed class OpenCodeTabAgentUsageRowsTests
         Assert.True(vm.ShowSupplementary);
         Assert.NotNull(vm.Supplementary);
         var rows = vm.SupplementaryRows;
-        Assert.Equal(2, rows.Count); // only the ccusage rows
-        Assert.Equal(TodayLabel, rows[0].Label);
-        Assert.Equal(MonthLabel, rows[1].Label);
+        Assert.Equal([TodayLabel, MonthLabel], rows.Select(r => r.Label)); // only the ccusage rows
         Assert.Equal("1,234 · $1.23", rows[0].Value);
         Assert.Equal("9,999 · $10.50", rows[1].Value);
         Assert.All(rows, r => Assert.Equal(RowGroup, r.Group));
@@ -49,7 +47,7 @@ public sealed class OpenCodeTabAgentUsageRowsTests
 
         vm.UpdateFromSnapshot(new ProviderSnapshot("opencode", configured: true,
             meters: [new Meter("month_budget", "month_budget", "Month to date", "", 50.0)]));
-        Assert.Equal(2, vm.SupplementaryRows.Count); // C10-analogue: rows survive the gauge update
+        Assert.Equal([TodayLabel, MonthLabel], vm.SupplementaryRows.Select(r => r.Label)); // C10-analogue: rows survive the gauge update
 
         vm.SetAgentUsage(null);
         Assert.False(vm.ShowSupplementary);
@@ -67,7 +65,7 @@ public sealed class OpenCodeTabAgentUsageRowsTests
         vm.SetAgentUsage(BothLines());
 
         var ccusageRows = vm.SupplementaryRows.Where(r => r.Group == RowGroup).ToList();
-        Assert.Equal(2, ccusageRows.Count);
+        Assert.Equal([TodayLabel, MonthLabel], ccusageRows.Select(r => r.Label));
         Assert.True(vm.ShowSupplementary);
     }
 

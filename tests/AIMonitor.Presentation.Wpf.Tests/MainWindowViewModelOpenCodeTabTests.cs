@@ -13,11 +13,12 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// Tabs = [Claude, OpenAI, Agy, OpenCode, AllAgents]; ProviderTabs stays the three provider tabs — no
 /// tray/widget/provider refresh), E4 (selecting saves ActiveProvider = "opencode"; startup restores it
 /// by looking among the ProviderTabViewModels in Tabs; unknown → Claude), Q2.2 (on every Updated the
-/// view model pushes the OpenCodeSnapshotBuilder gauge and the SummaryFor ccusage rows) and E2 (the
-/// last (lastGood, lastError) and the last budgets are stored: ApplyAgentBudgets rebuilds from the
-/// stored pair WITHOUT running ccusage; before the first Updated it only stores). Hand-written fakes
-/// follow the R-014 test files; no real ccusage, no network. Q2 tests: expected not to compile until
-/// the Q2 branch merges (E16).
+/// view model pushes the OpenCodeSnapshotBuilder gauge and the SummaryFor ccusage rows), E23 (Build
+/// returns <c>ProviderSnapshot?</c>: null for "no ccusage result yet", and the view model then pushes
+/// nothing) and E2 (the last (lastGood, lastError) and the last budgets are stored: ApplyAgentBudgets
+/// rebuilds from the stored pair WITHOUT running ccusage; before the first Updated it only stores).
+/// Hand-written fakes follow the R-014 test files; no real ccusage, no network. Q2 tests: expected not
+/// to compile until the Q2 branch merges (E16).
 /// </summary>
 public sealed class MainWindowViewModelOpenCodeTabTests
 {
@@ -151,10 +152,8 @@ public sealed class MainWindowViewModelOpenCodeTabTests
         // Q2.2: SetAgentUsage(SummaryFor(lastGood, "opencode", today)) — C9-style opencode lines.
         Assert.True(vm.OpenCodeTab.ShowSupplementary);
         var rows = vm.OpenCodeTab.SupplementaryRows;
-        Assert.Equal(2, rows.Count); // ccusage-only for opencode (Q2.2 rows)
-        Assert.Equal("Today (ccusage)", rows[0].Label);
+        Assert.Equal(["Today (ccusage)", "This month (ccusage)"], rows.Select(r => r.Label));
         Assert.Equal("1,234 · $2.50", rows[0].Value);
-        Assert.Equal("This month (ccusage)", rows[1].Label);
         Assert.Equal("9,999 · $25.00", rows[1].Value);
         Assert.Equal(1, source.ReadCount); // one read produced both the gauge and the rows
     }
@@ -227,11 +226,11 @@ public sealed class MainWindowViewModelOpenCodeTabTests
     }
 
     [Fact]
-    public async Task Updated_Q22_WhenNothingIsKnownYet_NoSnapshotIsPushed()
+    public async Task Updated_E23_WhenNothingIsKnownYet_NoSnapshotIsPushed()
     {
-        // Q2.2 state 1 at the view-model level: a read that yields neither a report nor an error
-        // (OperationCanceled-style swallow inside the refresher) reaches Updated(null, null) —
-        // "no snapshot is pushed; the tab keeps its initial 'Checking...' state".
+        // E23 / Q2.2 state 1 at the view-model level: Build returns null when neither a report nor an
+        // error exists (a read that yields neither, swallowed inside the refresher, reaches
+        // Updated(null, null)) — "no snapshot is pushed; the tab keeps its initial 'Checking...' state".
         var cache = new CachedAgentUsageSource(
             new FakeAgentUsageSource(_ => Task.FromResult<AgentUsageReport>(null!)), new FakeClock(FixedUtc));
         var vm = CreateVm(cache, new AppSettings(), out _);
