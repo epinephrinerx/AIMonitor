@@ -399,22 +399,14 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             if (_baseShowSupplementary)
             {
-                if (_supplementary is null)
-                {
-                    if (agentRows.Count > 0)
-                    {
-                        Supplementary = BuildAgentUsageOnly(agentRows);
-                    }
-
-                    ShowSupplementary = true;
-                    return;
-                }
+                // UpdateFromSnapshot assigns a non-null section for Claude/OpenAI before calling this (C24).
+                var section = _supplementary!;
 
                 if (!RowsMatch(currentAgentRows, agentRows))
                 {
-                    var rows = _supplementary.Rows.Where(r => r.Group != "ccusage").ToList();
+                    var rows = section.Rows.Where(r => r.Group != "ccusage").ToList();
                     rows.AddRange(agentRows);
-                    Supplementary = CopyWithRows(_supplementary, rows);
+                    Supplementary = CopyWithRows(section, rows);
                 }
 
                 ShowSupplementary = true;
@@ -654,9 +646,6 @@ public sealed class ProviderTabViewModel : ViewModelBase
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
-        _baseShowSupplementary = (isClaude || isOpenAi)
-            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
-
         if (isClaude || isOpenAi)
         {
             var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
@@ -667,6 +656,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             Supplementary = null;
         }
+
+        // C26: set after the section is assigned, so a BuildSupplementary exception cannot leave the
+        // base flag true while the section is still null.
+        _baseShowSupplementary = (isClaude || isOpenAi)
+            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
 
         ApplyAgentUsage();
 
