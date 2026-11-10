@@ -93,3 +93,17 @@ Fixture (today 2026-11-10, rangeDays 7 → window 2026-11-04 … 2026-11-10). `r
 | H7 | report null | `null` |
 | H8 | rangeDays 1 | one bucket 11-10 `{kimi:2000, deepseek:300}` |
 | H9 | chart control with `Costs` null/empty | rendering identical to before (no right axis, no "Cost ($)" legend) |
+
+## Coding Owner decisions after Inspector A (2026-11-10) — override anything above
+
+| Id | Decision | Owner |
+|---|---|---|
+| F1 | (M1) The OpenCode rebuild for range/metric is called from the `SelectedRange` and `SelectedMetric` setters only (when the value really changes), not from `ApplyViewChangeAsync`. Changing the refresh interval does not rebuild the OpenCode tab. The builder receives the live `ChartRangeDays` and `SelectedMetric.Value`. | WO3 + TA |
+| F2 | (M2/H9) Testable seams in `StackedColumnChartControl`: `internal static bool ShowsCostAxis(IReadOnlyList<DailyCost>? costs)` (true only when non-empty and some `PricedUsd > 0`) and `internal static IReadOnlyList<string> LegendEntries(IReadOnlyList<string> series, IReadOnlyList<DailyCost>? costs)` (= `series` when `ShowsCostAxis` is false, otherwise `series` + `"Cost ($)"`); `OnRender` uses both. H9 = `ShowsCostAxis(null/empty) == false`, `LegendEntries(series, null) == series`, and the tooltip with no costs equals the existing text. | WO3 + TA |
+| F3 | (M3) When `Costs` is non-empty, the tooltip of **every** day appends `Cost: {Money(PricedUsd)}` + `" + unpriced"` iff that day's `HasUnpricedModels` — also when all costs are 0. | WO3 + TA |
+| F4 | (M4) New overload `TooltipText(bucket, series, metric, IReadOnlyList<DailyCost>? costs, int index)`; the existing 3-argument method forwards with `costs: null` and its output is unchanged. `OnMouseMove` calls the new overload with the hovered bucket's index; the cost entry is matched by `Day` (no entry for that day → no cost line). | WO3 + TA |
+| F5 | (M5) Line and dots use the palette's primary ink (`p.Ink`) in both themes; dots for `HasUnpricedModels` days are hollow (`p.Ink` stroke, transparent fill). | WO3 |
+| F6 | (m3) `DailyCost` throws `ArgumentOutOfRangeException` for NaN, ±Infinity or negative `PricedUsd` (reuse the existing guard). | WO3 + TA |
+| F7 | (m5/m6) `ProviderTabViewModel.ChartCosts = history.DailyCosts` when there is history, and is cleared to empty in the no-history branch (so an error snapshot after a good one leaves no stale costs). | WO3 + TA |
+| F8 | (m8) Tie-break oracle H10: two models with equal window totals → `Series`/`ByModel` ordered by `StringComparer.Ordinal` (e.g. `glm` before `kimi`). | TA |
+| F9 | (m4) Wiring test: after `Updated`, then `SelectedRange = 30` and `SelectedMetric = "Output tokens"`, the OpenCode tab's `ChartBuckets.Count == 30` and its values are output tokens, with no extra ccusage read. | TA |
