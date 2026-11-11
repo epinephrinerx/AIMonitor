@@ -202,16 +202,17 @@
 - ไม่ให้คะแนนหรือรับรองความเหมือนแทนผู้ใช้ตาม R-004
 
 **ตรวจรับเมื่อ:**
-- [ ] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน
+- [x] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน — ตรวจแล้ว: `Docs/STATUS_2026-11-11.md` ข้อ 1 (verification พร้อมคำสั่งและ commit), ข้อ 2 (ตาราง Implementation | Verification | Acceptance ของ R-001–R-017 อ้าง commit จริง), ข้อ 4 (สิ่งที่ยังไม่ได้ทดสอบ); 2026-11-11
 - [x] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows — ตรวจแล้ว: GitHub Actions "Windows verification" ผ่านทุกขั้นที่ `a1765a3` (runs 42837235552 tag `v2.0.3`, 42837245808 `v2`, 42837246886 branch; 2026-11-10)
 - [x] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง — ตรวจแล้ว 2026-11-10 ที่ `dde0519` (ดูความคืบหน้าบรรทัดวันเดียวกัน)
-- [ ] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ
+- [x] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ — ตรวจแล้ว 2026-11-11 ที่ `0bacf53`: render 46 ภาพ 2.0 + 36 ภาพ 1.3.3 (PySide6 6.12.0), `build_parity_report.py` → 38 คู่ + 2.0-only 10 จอ + 106 ข้อย่อยฟังก์ชัน, verification tests 10/10; รายการที่ยังไม่ได้ทดสอบอยู่ใน `STATUS_2026-11-11.md` ข้อ 3–4
 - [ ] ผู้ใช้ตรวจรับ R-004 และ installer upgrade ใน disposable Windows environment
 
 **ความคืบหน้า:**
 - 2026-10-14 — Baseline `4681919`: build 0 warnings/errors, 1,310 tests ผ่าน, format ผ่าน; commits มี widget resize, theme, dashboard, charts, widget behavior, tray, Settings/Connections/About (เฟส 5–11b), update flow และ packaging naming ถึง 2026-10-07 ส่วนรายงานรีวิวที่เก็บใน repo มีถึง R-002 เฟส 4
 - 2026-11-10 — ตรวจซ้ำที่ `dde0519` (หลัง R-014–R-017): build 0 warnings และ tests 2,330/2,330 ผ่าน และ format สะอาด (รันที่ merge `b09ade5`; `dde0519` แก้แค่ `Requirements.md`); `pwsh -File scripts/verify_packages.ps1` → no vulnerable packages; `dotnet publish src/AIMonitor.Presentation.Wpf/AIMonitor.Presentation.Wpf.csproj -p:PublishProfile=win-x64-self-contained -o publish/win-x64` ผ่าน (exe 78 MB); `artifacts/tools/inno/compiler/ISCC.exe -DAppVersion=2.0.2 installer/AIMonitor2.iss` ผ่าน → `installer_out/AIUsageMonitor Setup 2.0.2.exe` (73 MB). รันทีละขั้นแทน `build_installer.ps1` เพราะขั้นแรกของสคริปต์ build Debug แบบ `--no-incremental` ซึ่งชนกับแอป Debug ที่เปิดให้ผู้ใช้ตรวจรับอยู่; `verify_packages.ps1` ต้องใช้ PowerShell 7 (`-Depth`) เหมือน CI. ข้อควรระวัง: `VersionPrefix` ยังเป็น 2.0.2 ไฟล์ setup 2.0.2 ในเครื่องจึงถูกแทนด้วย build ที่มี R-014–R-017 แล้ว ต้อง bump version ก่อน release
 - 2026-11-10 — ผู้ใช้สั่ง "เปลี่ยน version เลยครับ": `VersionPrefix` เป็น 2.0.3 และร่าง `Docs/RELEASE_2.0.3.md` (ระบุว่า R-014–R-017 ยังรอตรวจรับ); publish + ISCC ใหม่ได้ `AIUsageMonitor 2.0.3.exe` และ `AIUsageMonitor Setup 2.0.3.exe` (FileVersion 2.0.3.0); ไม่ได้ push หรือ release
+- 2026-11-11 — ผู้ใช้สั่ง "ทำเลยทั้งสามข้อครับ": spec `Docs/SPEC_R005_EVIDENCE.md` (V1–V14) ผ่าน Inspector A, WO1 (glm-5.3-flash) `dc155f1` + fix `726b92d`, Test Author (qwen3.8-flash) `056fc3f` → `4cb1166` → `eecf044`, Inspector B สองรอบ, Reviewer1/2 อนุมัติ, Integrator (Sonnet 5.5) merge `fff2571` + `0bacf53`; render หลักฐานใหม่และเติม `Docs/STATUS_2026-11-11.md` ข้อ 3 → ติ๊กเกณฑ์ 1 และ 4. เกณฑ์ 5 รอผู้ใช้: คะแนน R-004 และรันชุดทดสอบ upgrade ใน Windows Sandbox (เปิด feature แล้ว)
 
 ## R-006 · แก้ OpenAI API Key ดึงข้อมูลไม่ได้ และ Gemini เชื่อมต่อไม่ได้
 
