@@ -25,6 +25,12 @@ internal readonly record struct DashboardTextLayout(double MaxTextWidth, int Cap
 /// </summary>
 public sealed class GaugeControl : FrameworkElement
 {
+    // R-018 D13: the gauge geometry factors shared by OnRender and ComputeDashboardText so the
+    // pure helper's caption-top decision matches exactly where OnRender draws the caption.
+    private const double CentreYFactor = 0.48;
+    private const double RadiusFactor = 0.38;
+    private const double CaptionOffsetFactor = 0.45;
+
     public static readonly DependencyProperty ValueProperty =
         DependencyProperty.Register(nameof(Value), typeof(double), typeof(GaugeControl),
             new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -166,12 +172,12 @@ public sealed class GaugeControl : FrameworkElement
     }
 
     /// <summary>
-    /// Pure dashboard caption/subtitle layout decision (R-018 G3/D8), unit-testable without
+    /// Pure dashboard caption/subtitle layout decision (R-018 G3/D8/D12), unit-testable without
     /// rendering. The text box spans <c>width − 8</c> (never below 1); the caption sits at
     /// <c>center.Y + radius * 0.45</c> and the subtitle keeps a bottom margin of 4. Two caption
     /// lines are allowed unless, with a subtitle drawn, they would overlap its top
-    /// (<c>captionTop + lines × captionLineHeight &gt; height − subtitleHeight − 4</c>); then the
-    /// caption is reduced to one line, never hidden.
+    /// (<c>captionTop + lines × captionLineHeight &gt; height − subtitleHeight − 2</c>, the 2 px
+    /// gap per D12); then the caption is reduced to one line, never hidden.
     /// </summary>
     internal static DashboardTextLayout ComputeDashboardText(
         double width, double height, double captionLineHeight, double subtitleHeight, bool hasSubtitle)
@@ -182,11 +188,12 @@ public sealed class GaugeControl : FrameworkElement
         double safeSubtitleHeight = NonNegative(subtitleHeight);
 
         double maxTextWidth = Math.Max(1.0, safeWidth - 8.0);
-        double captionTop = (safeHeight * 0.48) + (Math.Min(safeWidth, safeHeight) * 0.38 * 0.45);
+        double captionTop = (safeHeight * CentreYFactor)
+            + (Math.Min(safeWidth, safeHeight) * RadiusFactor * CaptionOffsetFactor);
 
         int captionLines = 2;
         if (hasSubtitle
-            && captionTop + (captionLines * safeCaptionLineHeight) > safeHeight - safeSubtitleHeight - 4.0)
+            && captionTop + (captionLines * safeCaptionLineHeight) > safeHeight - safeSubtitleHeight - 2.0)
         {
             captionLines = 1;
         }
@@ -245,8 +252,8 @@ public sealed class GaugeControl : FrameworkElement
         var height = ActualHeight;
         if (width < 20 || height < 20) return;
 
-        var center = new Point(width / 2.0, height * 0.48);
-        var radius = Math.Min(width, height) * 0.38;
+        var center = new Point(width / 2.0, height * CentreYFactor);
+        var radius = Math.Min(width, height) * RadiusFactor;
         var strokeThickness = Math.Max(4, radius * 0.16);
 
         var trackBrush = (System.Windows.Application.Current?.Resources["TrackBrush"] as Brush) ?? Brushes.LightGray;
@@ -293,7 +300,7 @@ public sealed class GaugeControl : FrameworkElement
         // Title text (e.g. Session or Session 45% when !ShowInlineValue)
         var captionText = FormatCaptionText(Title, ValueText, ShowInlineValue);
         var hasSubtitle = ShowSubtitle && !string.IsNullOrEmpty(Subtitle);
-        var captionTop = center.Y + radius * 0.45;
+        var captionTop = center.Y + radius * CaptionOffsetFactor;
 
         // R-018 G1/G2/G3: build the natural single-line metrics first, then let the pure helper
         // decide the maximum text width and how many caption lines fit above the subtitle.

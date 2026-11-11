@@ -452,11 +452,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         AllAgentsTab.Update(lastGood, lastError, today, ChartRangeDays, TimeZoneInfo.Local);
         ClaudeTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "claude", today));
         OpenAiTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "codex", today));
-        // R-018 A3: recompose the AGY tab from the raw snapshot and the fresh report.
-        UpdateAgyTab(today, now);
         AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
         UpdateOpenCodeTab(today, now);
         UpdateOverviewTab(today, now);
+        // R-018 A3/D13: recompose the AGY tab from the raw snapshot and the fresh report, after
+        // OpenCode/Overview so an AGY failure cannot stop the other tabs.
+        UpdateAgyTab(today, now);
     }
 
     /// <summary>
@@ -573,6 +574,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     /// </summary>
     private void UpdateAgyTab(DateOnly today, DateTimeOffset now)
     {
+        // D13: with AGY disabled in the current settings, never compose for it; the tab keeps its
+        // last state. A missing "agy" entry counts as enabled (same rule as the refresh path).
+        if (_settingsSession.Current.Providers.GetValueOrDefault("agy") is { Enabled: false })
+        {
+            return;
+        }
+
         if (_latestRawAgySnapshot is not { } rawAgy)
         {
             return;
@@ -648,9 +656,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             // Update tab ViewModels
             if (result.Snapshots.TryGetValue("claude", out var claudeSnap)) ClaudeTab.UpdateFromSnapshot(claudeSnap);
             if (result.Snapshots.TryGetValue("openai", out var openAiSnap)) OpenAiTab.UpdateFromSnapshot(openAiSnap);
-            if (disabledProviders.Contains(AgyUsageComposer.AgentId))
+            if (disabledProviders.Contains("agy"))
             {
-                // D6: AGY disabled in Settings — drop the raw snapshot and never compose for it.
+                // D6/D13: AGY disabled in Settings (check the provider id, not the agent id) —
+                // drop the raw snapshot and never compose for it.
                 _latestRawAgySnapshot = null;
             }
             else if (result.Snapshots.TryGetValue("agy", out var agySnap))
