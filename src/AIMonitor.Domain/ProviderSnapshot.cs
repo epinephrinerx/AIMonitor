@@ -36,6 +36,14 @@ public sealed record ProviderSnapshot
 
     public DetectionInfo? Detection { get; }
 
+    /// <summary>
+    /// True when the Anthropic Admin API produced usable stats for this refresh, regardless of
+    /// whether Claude Code OAuth is also present (R-019 E2). Lets the tab and the Connections card
+    /// show "Admin key connected · Claude Code not signed in" when OAuth is missing but the Admin
+    /// call succeeded.
+    /// </summary>
+    public bool AdminApiConnected { get; }
+
     public bool Ok => Configured && Error is null;
 
     public ProviderSnapshot(
@@ -51,7 +59,8 @@ public sealed record ProviderSnapshot
         string setupHint = "",
         string valueNote = "",
         DateTimeOffset? fetchedAt = null,
-        DetectionInfo? detection = null)
+        DetectionInfo? detection = null,
+        bool adminApiConnected = false)
     {
         ProviderId = DomainGuard.RequireNonBlank(providerId, nameof(providerId));
         Configured = configured;
@@ -67,6 +76,7 @@ public sealed record ProviderSnapshot
         ValueNote = valueNote ?? string.Empty;
         FetchedAt = fetchedAt;
         Detection = detection;
+        AdminApiConnected = adminApiConnected;
     }
 
     /// <summary>

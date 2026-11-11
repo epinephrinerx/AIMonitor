@@ -725,9 +725,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         // Every other provider keeps R-004's setup card. Only the OpenCode tab and the Overview
         // tab never show it, so an error-only snapshot shows the error banner instead (E10, R-016
         // I3), and a configured snapshot with no meters does not draw an empty gauge card.
+        // For Claude, the setup card is also hidden when the Admin API is connected (R-019 E2),
+        // even if OAuth is not connected.
         var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
         var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
-        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview;
+        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview && !(isClaude && snapshot.AdminApiConnected);
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
@@ -738,7 +741,6 @@ public sealed class ProviderTabViewModel : ViewModelBase
             TabTitle = DisplayName;
         }
 
-        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
         if (isClaude || isOpenAi)

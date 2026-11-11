@@ -73,6 +73,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
     private readonly TimeSpan _timeout;
     private readonly int _maxResponseBodyBytes;
     private readonly ClaudeTranscriptStore _transcriptStore;
+    private readonly Func<CancellationToken, Task<string?>>? _adminKeyReader;
 
     /// <summary>Serializes <see cref="ClaudeTranscriptStore.RefreshAsync"/> together with every query
     /// that reads its result for one <see cref="AttachHistoryAsync"/> call, so two overlapping
@@ -103,6 +104,11 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
     /// <param name="xdgConfigHome">The value of <c>XDG_CONFIG_HOME</c>, if any - passed in explicitly
     /// rather than read from the environment here. Used only to locate the default transcript roots
     /// when <paramref name="claudeConfigDirOverride"/> is unset.</param>
+    /// <param name="adminKeyReader">Reads the saved Anthropic Admin API key at the start of each
+    /// refresh (R-019 E6). When non-null and the reader returns a non-empty key, this client calls
+    /// the Admin API in the same refresh and appends usage/cost stats to the snapshot. When null or
+    /// the reader returns null/empty, the Admin API is not called and behaviour matches the
+    /// pre-R-019 Claude client.</param>
     public ClaudeLiveQuotaClient(
         HttpClient httpClient,
         string? claudeConfigDirOverride,
@@ -112,7 +118,8 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         TimeSpan? timeout = null,
         int? maxResponseBodyBytes = null,
         TimeZoneInfo? transcriptTimeZone = null,
-        string? xdgConfigHome = null)
+        string? xdgConfigHome = null,
+        Func<CancellationToken, Task<string?>>? adminKeyReader = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(userProfileDirectory);
@@ -131,6 +138,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         _credentialReader = credentialReader ?? new ClaudeCredentialFileReader();
         _timeout = ValidateTimeout(timeout ?? DefaultTimeout);
         _maxResponseBodyBytes = maxResponseBodyBytes ?? DefaultMaxResponseBodyBytes;
+        _adminKeyReader = adminKeyReader;
 
         var transcriptsRoots =
             ClaudeTranscriptPathResolver.ResolveAll(claudeConfigDirOverride, xdgConfigHome, userProfileDirectory);
@@ -151,10 +159,11 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         TimeSpan? timeout = null,
         int? maxResponseBodyBytes = null,
         TimeZoneInfo? transcriptTimeZone = null,
-        string? xdgConfigHome = null)
+        string? xdgConfigHome = null,
+        Func<CancellationToken, Task<string?>>? adminKeyReader = null)
         : this(
             httpClient, claudeConfigDirOverride, userProfileDirectory, clock,
-            credentialReader, timeout, maxResponseBodyBytes, transcriptTimeZone, xdgConfigHome)
+            credentialReader, timeout, maxResponseBodyBytes, transcriptTimeZone, xdgConfigHome, adminKeyReader)
     {
         ArgumentNullException.ThrowIfNull(transcriptOpenFile);
 
@@ -189,6 +198,24 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
 
         // Checked before any file or network access so an already-cancelled call touches neither.
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Read the saved Admin API key at the start of each refresh (R-019 E6). The key is not
+        // cached between refreshes; a saved-key change triggers the existing Changed → refresh
+        // path through the connection store, so the next refresh picks it up automatically.
+        string? adminKey = null;
+        if (_adminKeyReader is not null)
+        {
+            try
+            {
+                adminKey = await _adminKeyReader(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A key-reader failure is never fatal: treat it as "no key" and continue with
+                // the OAuth path. The Admin API simply won't be called this refresh.
+                adminKey = null;
+            }
+        }
 
         var credentialsPath = ClaudeCredentialPathResolver.Resolve(_claudeConfigDirOverride, _userProfileDirectory);
         var credentialResult = await _credentialReader
@@ -230,12 +257,140 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         // it regardless of login state - so it is read in every branch above, not only on quota
         // success (PAR-004: a history-only failure must never fail a successful live quota, and the
         // converse holds too: a quota failure must not suppress history that is otherwise readable).
-        if (!request.IncludeHistory)
+        if (request.IncludeHistory)
         {
-            return quotaSnapshot;
+            quotaSnapshot = await AttachHistoryAsync(quotaSnapshot, request, cancellationToken).ConfigureAwait(false);
         }
 
-        return await AttachHistoryAsync(quotaSnapshot, request, cancellationToken).ConfigureAwait(false);
+        // Admin API stats are appended after the transcript history step (R-019 E1). A failure in
+        // either part never removes the other part's output: if the Admin call fails, we append an
+        // "API usage · Unavailable" stat and keep everything else; if it succeeds, we append the
+        // three Admin stats and keep the OAuth quota and transcript history.
+        if (!string.IsNullOrWhiteSpace(adminKey))
+        {
+            quotaSnapshot = await AttachAdminStatsAsync(quotaSnapshot, adminKey, detection, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return quotaSnapshot;
+    }
+
+    /// <summary>
+    /// Calls the Anthropic Admin API and appends usage/cost stats to the snapshot. On success, adds
+    /// three stats ("API cost today (UTC)", "API cost this month (UTC)", "API tokens this month (UTC)")
+    /// with <c>Detail</c> "Anthropic Admin API · billed". On failure, adds one stat ("API usage" =
+    /// "Unavailable") with the failure message as <c>Detail</c>. If OAuth failed but Admin succeeded,
+    /// the snapshot is upgraded to <c>Configured = true</c> and <c>AdminApiConnected = true</c> so
+    /// the tab shows no setup card (R-019 E2).
+    /// </summary>
+    private async Task<ProviderSnapshot> AttachAdminStatsAsync(
+        ProviderSnapshot snapshot, string adminKey, DetectionInfo detection, CancellationToken cancellationToken)
+    {
+        AnthropicAdminUsageResult? result = null;
+        string? failureMessage = null;
+
+        try
+        {
+            var adminClient = new AnthropicAdminUsageClient(_httpClient, adminKey, _clock);
+            result = await adminClient.GetUsageAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (AnthropicAdminApiException ex)
+        {
+            failureMessage = ex.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            // Caller cancellation propagates without wrapping (R-019 E7).
+            throw;
+        }
+        catch (Exception)
+        {
+            failureMessage = AnthropicAdminUsageClient.ParseErrorMessage;
+        }
+
+        var stats = new List<Stat>(snapshot.Stats);
+
+        if (result is not null)
+        {
+            stats.Add(new Stat("API cost today (UTC)", FormatUsd(result.TodayCostUsd), "Anthropic Admin API · billed"));
+            stats.Add(new Stat("API cost this month (UTC)", FormatUsd(result.MonthCostUsd), "Anthropic Admin API · billed"));
+            stats.Add(new Stat("API tokens this month (UTC)", FormatCompactTokens(result.MonthTokens), "Anthropic Admin API · billed"));
+
+            var configured = snapshot.Configured || snapshot.AdminApiConnected || true;
+            var adminApiConnected = true;
+            var error = snapshot.Error;
+            var setupHint = snapshot.SetupHint;
+            var valueNote = snapshot.ValueNote;
+
+            // Admin-only mode: OAuth is missing/expired but Admin API succeeded. Show the Admin
+            // stats and the note, with no setup card (R-019 E2).
+            var oAuthNotConnected = snapshot.Detection is null
+                || snapshot.Detection.State is DetectionState.NotConnected or DetectionState.Expired;
+
+            if (oAuthNotConnected && !snapshot.Configured)
+            {
+                configured = true;
+                error = null;
+                setupHint = "";
+                valueNote = "Claude Code not signed in — quota unavailable; API usage from Admin key";
+            }
+
+            return new ProviderSnapshot(
+                snapshot.ProviderId,
+                configured: configured,
+                meters: snapshot.Meters,
+                stats: stats,
+                history: snapshot.History,
+                account: snapshot.Account,
+                error: error,
+                historyError: snapshot.HistoryError,
+                unauthorized: snapshot.Unauthorized,
+                setupHint: setupHint,
+                valueNote: valueNote,
+                fetchedAt: snapshot.FetchedAt,
+                detection: snapshot.Detection,
+                adminApiConnected: adminApiConnected);
+        }
+        else
+        {
+            // Admin API failed: append "API usage · Unavailable" with the failure message as Detail.
+            stats.Add(new Stat("API usage", "Unavailable", failureMessage ?? AnthropicAdminUsageClient.ParseErrorMessage));
+
+            return new ProviderSnapshot(
+                snapshot.ProviderId,
+                configured: snapshot.Configured,
+                meters: snapshot.Meters,
+                stats: stats,
+                history: snapshot.History,
+                account: snapshot.Account,
+                error: snapshot.Error,
+                historyError: snapshot.HistoryError,
+                unauthorized: snapshot.Unauthorized,
+                setupHint: snapshot.SetupHint,
+                valueNote: snapshot.ValueNote,
+                fetchedAt: snapshot.FetchedAt,
+                detection: snapshot.Detection,
+                adminApiConnected: false);
+        }
+    }
+
+    /// <summary>
+    /// Formats a token count in compact K/M form (e.g. 1234 → "1.2K", 1234567 → "1.2M"), matching
+    /// the style of other token stats in the UI.
+    /// </summary>
+    private static string FormatCompactTokens(long tokens)
+    {
+        if (tokens < 1000)
+        {
+            return tokens.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (tokens < 1_000_000)
+        {
+            return (tokens / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+        }
+
+        return (tokens / 1_000_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "M";
     }
 
     private async Task<ProviderSnapshot> AttachHistoryAsync(

@@ -137,7 +137,7 @@ public sealed class ConnectionsPageAndDialogXamlTests
     }
 
     [Fact]
-    public void ConnectDialog_ForClaude_HasNoKeyField_CloseButtonPresent_AndNoSaveButton()
+    public void ConnectDialog_ForClaude_HasCredentialsSection_Save_Cancel_Close_AndNoExtra_NoBrowse()
     {
         WpfTestHost.Run(() =>
         {
@@ -145,30 +145,39 @@ public sealed class ConnectionsPageAndDialogXamlTests
             var vm = new ConnectDialogViewModel(
                 ProviderMeta.Claude,
                 new DetectionInfo("claude", DetectionState.Connected, "cli", "Claude CLI", "claude-user"),
-                new ProviderConnection(null, ""),
+                new ProviderConnection("sk-ant-admin-test-key", ""),
                 store);
 
             var dialog = new ConnectDialog(vm) { DataContext = vm };
             using var _ = WpfTestHost.ShowOffscreen(dialog);
             WpfTestHost.Realize(dialog);
 
-            Assert.Equal("Claude sign-in", dialog.Title);
+            Assert.Equal("Connect Claude", dialog.Title);
 
             var credSection = (FrameworkElement)dialog.FindName("CredentialsSection");
             Assert.NotNull(credSection);
-            Assert.Equal(Visibility.Collapsed, credSection.Visibility);
+            Assert.Equal(Visibility.Visible, credSection.Visibility);
 
             var saveButton = (Button)dialog.FindName("SaveButton");
             Assert.NotNull(saveButton);
-            Assert.Equal(Visibility.Collapsed, saveButton.Visibility);
+            Assert.Equal(Visibility.Visible, saveButton.Visibility);
 
             var cancelButton = (Button)dialog.FindName("CancelButton");
             Assert.NotNull(cancelButton);
-            Assert.Equal(Visibility.Collapsed, cancelButton.Visibility);
+            Assert.Equal(Visibility.Visible, cancelButton.Visibility);
 
             var closeButton = (Button)dialog.FindName("CloseButton");
             Assert.NotNull(closeButton);
-            Assert.Equal(Visibility.Visible, closeButton.Visibility);
+            Assert.Equal(Visibility.Collapsed, closeButton.Visibility);
+
+            // Claude has no ExtraLabel, so the extra section is hidden.
+            var extraSection = (FrameworkElement)dialog.FindName("ExtraFieldSection");
+            Assert.NotNull(extraSection);
+            Assert.Equal(Visibility.Collapsed, extraSection.Visibility);
+
+            var browseButton = (Button)dialog.FindName("BrowseButton");
+            Assert.NotNull(browseButton);
+            Assert.Equal(Visibility.Collapsed, browseButton.Visibility);
         });
     }
 

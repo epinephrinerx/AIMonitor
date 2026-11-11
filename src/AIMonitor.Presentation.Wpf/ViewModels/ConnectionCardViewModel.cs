@@ -111,8 +111,10 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     /// <summary>
     /// Updates the card representation from detection telemetry.
     /// When <paramref name="detection"/> is null, behaves as NotConnected with "Checking..." StateWord.
+    /// For Claude, when <paramref name="adminApiConnected"/> is true and OAuth is not connected, the
+    /// SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2).
     /// </summary>
-    public void Update(DetectionInfo? detection)
+    public void Update(DetectionInfo? detection, bool adminApiConnected = false)
     {
         Detection = detection;
         RefreshColours();
@@ -156,17 +158,28 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             Account = Meta.Tagline;
         }
 
-        var parts = new List<string>(2);
-        if (!string.IsNullOrEmpty(detection.SourceLabel))
-        {
-            parts.Add($"Detected from {detection.SourceLabel}");
-        }
-        if (!string.IsNullOrEmpty(detection.Hint))
-        {
-            parts.Add(detection.Hint);
-        }
+        // Admin-only mode for Claude: OAuth is not connected but Admin API succeeded (R-019 E2).
+        var isClaude = string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase);
+        var oAuthNotConnected = detection.State is DetectionState.NotConnected or DetectionState.Expired;
 
-        SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        if (isClaude && adminApiConnected && oAuthNotConnected)
+        {
+            SourceLine = "Admin key connected · Claude Code not signed in";
+        }
+        else
+        {
+            var parts = new List<string>(2);
+            if (!string.IsNullOrEmpty(detection.SourceLabel))
+            {
+                parts.Add($"Detected from {detection.SourceLabel}");
+            }
+            if (!string.IsNullOrEmpty(detection.Hint))
+            {
+                parts.Add(detection.Hint);
+            }
+
+            SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        }
 
         if (!Meta.NeedsKey)
         {
