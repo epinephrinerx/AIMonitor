@@ -74,6 +74,11 @@ class OfflineWindow(MainWindow):
         pass
 
 data = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+# R-012: the fixture names the third provider "agy" (2.0.1 replaced Gemini with AGY),
+# while 1.3.3 still builds a "gemini" provider. One explicit mapping keys the snapshot
+# dictionary by the 1.3.3 id; output names stay 1.3.3 names (dashboard-gemini-*).
+LEGACY_PROVIDER_IDS = {"agy": "gemini"}
 app = QApplication([])
 # Qt's offscreen Windows platform does not enumerate the system font database.
 # Register real Windows fonts explicitly; otherwise every character becomes a box.
@@ -108,16 +113,17 @@ for theme_name in ("light", "dark"):
     window = OfflineWindow(settings)
     snapshots = {}
     for p in data["providers"]:
+        provider_id = LEGACY_PROVIDER_IDS.get(p["id"], p["id"])
         history = HistoryView(
             buckets=[SimpleNamespace(day=dt.date.fromisoformat(b["day"]), per_model=b["values"], total=sum(b["values"].values())) for b in data["buckets"]],
             series=["Model A", "Model B"], by_model=[("Model A", 42000), ("Model B", 21000)],
             by_project=[("Synthetic project", 63000)], days=7)
-        snapshots[p["id"]] = ProviderSnapshot(
-            p["id"], configured=True,
+        snapshots[provider_id] = ProviderSnapshot(
+            provider_id, configured=True,
             meters=[Meter(m["key"], m["title"], m["subtitle"], m["percent"]) for m in p["meters"]],
             stats=[Stat(s["label"], s["value"]) for s in data["stats"]],
             history=history, account="Synthetic account", value_note="Equivalent API value is an estimate.",
-            detection=Detection(p["id"], state="connected", source_id="fixture", source_label="Synthetic login", account="Synthetic account"))
+            detection=Detection(provider_id, state="connected", source_id="fixture", source_label="Synthetic login", account="Synthetic account"))
     window._on_result(RefreshResult(snapshots=snapshots, days=7, metric="Total tokens"))
     window.status.setText("Synthetic fixture · Manual refresh")
     for i, provider in enumerate(window.providers):
