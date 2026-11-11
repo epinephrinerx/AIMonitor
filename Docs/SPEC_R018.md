@@ -64,3 +64,10 @@ AGY quota source unchanged; widget/tray unchanged; no new tab; no change to Clau
 | D9 | (IA 9) `OnAgentUsageUpdated` work that touches tabs runs on the UI thread (post through the captured dispatcher/synchronization context when present; inline when none, as in tests). When ccusage data was composed, the AGY `ValueNote` becomes "Quota from AGY CLI · tokens and cost from ccusage"; otherwise the client's note is kept. | WO + TA |
 
 Test oracles (Inspector A, hand-computed): today 2026-05-01; Apr 30 `antigravity` Model A 10,000 total / 500 output / 8,500 cache reads / $0.50; May 1 Model A 20,000 / 1,000 / 17,000 / $1.00 and Model X 10,000 / 500 / 8,500 / null. Range 7 → 40K / 2,000 / 34K / `$1.50 + unpriced`, seven buckets (Apr 30 = 10K, May 1 = 30K, five empty). Range 1 (May 1 only) → 30K / 1,500 / 25.5K / `$1.00 + unpriced`. E1 Model C weight 1 over the V6 factors (Σk = 28) → 280K / 14K / 238K / $14.00; Overview gains exactly one meter.
+
+## Coding Owner decisions after the first trial merge (59231cd = 99e4d44 + 80a7b7f)
+
+| Id | Decision | Owner |
+|---|---|---|
+| D10 | A2's last sentence is literal: compose (stats, history, note) only when `agy.History` is null; an agy snapshot that already has history is returned unchanged. | TA |
+| D11 | Test-side fixes (the code is correct): compare `UsageHistory` contents, not record equality; update the C9 mapping oracle to the four added tiles; D1 setter test must not count the existing follow-up refresh's agy call; D1 settings test must pump the settings sync the way the existing R-017 wiring tests do; D6 must assert "no compose" by content/flag, not `Assert.Same` on rebuilt lists. | TA |
