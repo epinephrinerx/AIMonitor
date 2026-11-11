@@ -89,8 +89,9 @@ internal static class Program
             using var usageSession = new SettingsSession(new MemorySettings(usageSettings), usageSettings);
             var usageVm = new MainWindowViewModel(coordinator, usageSession, agentUsage: agentUsage);
             usageVm.RefreshAsync().GetAwaiter().GetResult();
-            // The update arrives through the UI context; pump background-priority frames
-            // instead of blocking on the agent-usage task.
+            // The in-memory update may already complete inside RefreshAsync; the loop is the
+            // V5 readiness check and pumps background frames instead of blocking on the
+            // agent-usage task.
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (true)
             {
@@ -101,6 +102,11 @@ internal static class Program
                 if (missing is null) break;
                 if (DateTime.UtcNow >= deadline)
                 {
+                    if (DateOnly.FromDateTime(DateTime.Now) != today)
+                    {
+                        throw new InvalidOperationException("render crossed local midnight; rerun");
+                    }
+
                     throw new TimeoutException($"Synthetic agent usage did not reach the {missing} tab within 30 seconds.");
                 }
 
