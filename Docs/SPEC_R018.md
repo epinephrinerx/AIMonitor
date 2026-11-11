@@ -71,3 +71,11 @@ Test oracles (Inspector A, hand-computed): today 2026-05-01; Apr 30 `antigravity
 |---|---|---|
 | D10 | A2's last sentence is literal: compose (stats, history, note) only when `agy.History` is null; an agy snapshot that already has history is returned unchanged. | TA |
 | D11 | Test-side fixes (the code is correct): compare `UsageHistory` contents, not record equality; update the C9 mapping oracle to the four added tiles; D1 setter test must not count the existing follow-up refresh's agy call; D1 settings test must pump the settings sync the way the existing R-017 wiring tests do; D6 must assert "no compose" by content/flag, not `Assert.Same` on rebuilt lists. | TA |
+
+## Coding Owner decisions after Reviewer1/2 (at 59231cd)
+
+| Id | Decision | Owner |
+|---|---|---|
+| D11a | Correction to D11: `D6_DisablingAgyDropsRawSnapshot…` fails because of the code (Reviewer1 M1, Reviewer2 1), not the test. It is removed from D11's test-side list; the Test Author keeps its intent and may only loosen `Assert.Same` if it still fails after D13. | CO |
+| D12 | (Reviewer1 m1, approved by the owner 2026-11-11) The D8 overlap gap is 2 px instead of 4: overlap when `captionTop + lines × captionLineHeight > height − subtitleHeight − 2`, so long captions take two lines on the 190 px dashboard gauge. Everything else in D8 stays. | WO + TA |
+| D13 | (Reviewer1 M1 + m3 + m5, Reviewer2 1) Check the provider id `"agy"` (not the agent id) when dropping the raw snapshot; `UpdateAgyTab` itself returns without composing when AGY is disabled in the current settings; call `UpdateAgyTab` after `UpdateOpenCodeTab`/`UpdateOverviewTab` in `OnAgentUsageUpdated` so an AGY failure cannot stop them; share the gauge geometry constants (0.48, 0.38, 0.45) between `OnRender` and `ComputeDashboardText`. m2 (extra AGY redraws) is accepted. | WO |
