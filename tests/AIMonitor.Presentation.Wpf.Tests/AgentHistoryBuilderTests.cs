@@ -11,7 +11,9 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// matter); only the named agent's models contribute to buckets, series and the cost line; unknown
 /// metric strings normalise to "Total tokens"; a null report returns null and rangeDays ≤ 0 throws,
 /// as before. <c>OpenCodeHistoryBuilder</c> must keep its public API and delegate with "opencode"
-/// (A1) — pinned here by record equality against the same report. Hand-computed oracles from the
+/// (A1) — pinned here by content equality against the same report (D11: record equality cannot
+/// hold across two builds — the history's lists and per-model dictionaries are defensive copies).
+/// Hand-computed oracles from the
 /// spec: today 2026-05-01; Apr 30 <c>antigravity</c> Model A 10,000 total / 500 output / 8,500 cache
 /// reads / $0.50; May 1 Model A 20,000 / 1,000 / 17,000 / $1.00 and Model X 10,000 / 500 / 8,500 /
 /// null (unpriced). Range 7 → seven buckets with Apr 30 = 10K, May 1 = 30K (A 20K + X 10K) and five
@@ -202,7 +204,10 @@ public sealed class AgentHistoryBuilderTests
     public void Build_OpencodeAgent_IdenticalToOpenCodeHistoryBuilder()
     {
         // A1: OpenCodeHistoryBuilder.Build delegates to AgentHistoryBuilder.Build with "opencode" —
-        // both public methods return the same history for the same report (record equality).
+        // both public methods return the same history CONTENT for the same report. D11: content, not
+        // record equality: UsageHistory is a record whose Buckets/Series/ByModel/DailyCosts and each
+        // bucket's PerModel are defensive copies, so two builds over one report never match as
+        // records even when every value agrees.
         var report = Report(
             (new DateOnly(2026, 4, 30), [
                 Agent("antigravity", Model(ModelA, 10_000, 500, 8_500, 0.50m)),
@@ -214,11 +219,41 @@ public sealed class AgentHistoryBuilderTests
         var generalised = AgentHistoryBuilder.Build(report, "opencode", Today, 7, UsageMetric.TotalTokens);
         var dedicated = OpenCodeHistoryBuilder.Build(report, Today, 7, UsageMetric.TotalTokens);
 
-        Assert.Equal(dedicated, generalised);
+        Assert.NotNull(dedicated);
+        Assert.NotNull(generalised);
+        AssertSameHistoryContent(dedicated!, generalised!);
 
         // The opencode path never sees the antigravity rows (existing behaviour unchanged).
-        Assert.Equal(["deepseek-v4.1-flash", ModelX], generalised!.Series);
+        // Series by descending window totals: Model X 10,000 (May 1) > deepseek 8,000 (4,000 + 4,000).
+        Assert.Equal([ModelX, "deepseek-v4.1-flash"], generalised!.Series);
         Assert.DoesNotContain(ModelA, generalised!.Series);
+    }
+
+    /// <summary>D11: element-wise history comparison — buckets with their per-model values, series,
+    /// by-model, daily costs, days and metric — the content the chart consumes.</summary>
+    private static void AssertSameHistoryContent(UsageHistory expected, UsageHistory actual)
+    {
+        Assert.Equal(expected.Days, actual.Days);
+        Assert.Equal(expected.Metric, actual.Metric);
+        Assert.Equal(expected.Series, actual.Series);
+        Assert.Equal(expected.ByModel, actual.ByModel);   // value-equal records
+        Assert.Equal(expected.ByProject, actual.ByProject);
+
+        Assert.Equal(expected.Buckets.Count, actual.Buckets.Count);
+        for (var i = 0; i < expected.Buckets.Count; i++)
+        {
+            Assert.Equal(expected.Buckets[i].Day, actual.Buckets[i].Day);
+            Assert.Equal(expected.Buckets[i].PerModel, actual.Buckets[i].PerModel); // by content, not reference
+            Assert.Equal(expected.Buckets[i].Total, actual.Buckets[i].Total);
+        }
+
+        Assert.Equal(expected.DailyCosts.Count, actual.DailyCosts.Count);
+        for (var i = 0; i < expected.DailyCosts.Count; i++)
+        {
+            Assert.Equal(
+                (expected.DailyCosts[i].Day, expected.DailyCosts[i].PricedUsd, expected.DailyCosts[i].HasUnpricedModels),
+                (actual.DailyCosts[i].Day, actual.DailyCosts[i].PricedUsd, actual.DailyCosts[i].HasUnpricedModels));
+        }
     }
 
     // ── Identical edge behaviour to OpenCode (A1) ───────────────────────────────

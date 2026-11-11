@@ -8,7 +8,8 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// caption layout without rendering, written from Docs/SPEC_R018.md only.
 /// ORACLE: max text width = width − 8, never below 1 (G1). Caption max lines: 2 unless a subtitle is
 /// drawn AND the caption's bottom would overlap it — overlap when
-/// <c>captionTop + lines × captionLineHeight > height − subtitleHeight − 4</c> with
+/// <c>captionTop + lines × captionLineHeight > height − subtitleHeight − 2</c> (D12: the gap is
+/// 2 px, so long captions take two lines on the 190 px dashboard gauge) with
 /// <c>captionTop = height × 0.48 + min(width, height) × 0.38 × 0.45</c> (D8: the check runs for the
 /// 2-line candidate; on overlap the caption is reduced to 1 line, never 0 — "never hide caption or
 /// subtitle"). No subtitle → always 2 (G2 checks overlap only when a subtitle is drawn).
@@ -37,7 +38,7 @@ public sealed class GaugeControlDashboardTextTests
     public void WideCardWithRoom_AllowsTwoLines_AndWidthMinusEight()
     {
         // captionTop = 200*0.48 + 200*0.38*0.45 = 130.2; two lines reach 162.2, the subtitle top is
-        // 200 − 12 − 4 = 184 → no overlap.
+        // 200 − 12 − 2 = 186 → no overlap (D12: the 2 px gap).
         var (maxWidth, maxLines) = Compute(width: 200, height: 200, captionLineHeight: 16, subtitleHeight: 12, hasSubtitle: true);
 
         Assert.Equal(192.0, maxWidth); // G1/G2: ActualWidth − 8
@@ -47,14 +48,30 @@ public sealed class GaugeControlDashboardTextTests
     [Fact]
     public void CaptionWouldOverlapSubtitle_FallsBackToOneLine_StillTrimmed()
     {
-        // captionTop = 120*0.48 + 120*0.38*0.45 = 78.12; two lines reach 110.12 > 120 − 12 − 4 = 104
-        // → overlap → one line (G2/D8). Trimming (CharacterEllipsis) is the render-side half of
+        // captionTop = 120*0.48 + 120*0.38*0.45 = 78.12; two lines reach 110.12 > 120 − 12 − 2 = 106
+        // (D12 gap) → overlap → one line (G2/D8). Trimming (CharacterEllipsis) is the render-side
+        // half of
         // "1 line, still trimmed" — pinned by GaugeControlCaptionFitTests.
         var (maxWidth, maxLines) = Compute(200, 120, 16, 12, hasSubtitle: true);
 
         Assert.Equal(192.0, maxWidth);
         Assert.Equal(1, maxLines);
         Assert.True(maxLines >= 1); // "never hide caption or subtitle" (D8)
+    }
+
+    [Fact]
+    public void D12_TwoPixelGap_Boundary_KeepsTwoLinesThatTheOldFourPixelGapWouldCut()
+    {
+        // D12: overlap when captionTop + lines × lineHeight > height − subtitleHeight − 2 (gap 2,
+        // not 4). Height 135 (width 200 → min = 135): captionTop = 135*0.48 + 135*0.38*0.45 =
+        // 87.885; two lines reach 119.885. The D12 threshold is 135 − 12 − 2 = 121 → 119.885 is
+        // NOT over it → two lines — while the old 4 px threshold 119 would have cut the caption
+        // to one line. This is the 190 px-class dashboard gauge case D12 exists for.
+        Assert.Equal(2, Compute(200, 135, 16, 12, hasSubtitle: true).MaxLines);
+
+        // One pixel of height less (131): captionTop = 62.88 + 22.401 = 85.281, reach 117.281 >
+        // 131 − 12 − 2 = 117 → still overlap → one line, so the gap is 2 px, not "effectively 0".
+        Assert.Equal(1, Compute(200, 131, 16, 12, hasSubtitle: true).MaxLines);
     }
 
     [Fact]
@@ -74,7 +91,7 @@ public sealed class GaugeControlDashboardTextTests
     public void NoSubtitle_AllowsTwoLines_EvenWhenTooTallForTwoWithOne()
     {
         // G2: the overlap check applies only when a subtitle is drawn. For height 100 two lines
-        // (65.1 + 32 = 97.1) would pass 100 − 12 − 4 = 84 — yet with hasSubtitle = false the
+        // (65.1 + 32 = 97.1) would pass 100 − 12 − 2 = 86 — yet with hasSubtitle = false the
         // caption keeps its two-line budget.
         Assert.Equal(2, Compute(200, 100, 16, 12, hasSubtitle: false).MaxLines);
         Assert.Equal(1, Compute(200, 100, 16, 12, hasSubtitle: true).MaxLines); // same numbers, subtitle drawn

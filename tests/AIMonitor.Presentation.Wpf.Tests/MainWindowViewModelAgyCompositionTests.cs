@@ -4,6 +4,7 @@ using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
+using System.Collections.Concurrent;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
@@ -19,6 +20,9 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// disabled the raw snapshot is dropped and never composed; an AGY-only re-detect recomposes from
 /// the cached report without starting ccusage. D9: after data was composed the AGY ValueNote is
 /// "Quota from AGY CLI · tokens and cost from ccusage"; otherwise the client's note is kept.
+/// D11 (round 2, the code is correct): the setter test does not count agy calls — the PRE-EXISTING
+/// follow-up refresh may run them synchronously inside the setter — and the settings-driven test
+/// pumps the sync with the R-017 F13/F24 QueuedSyncContext + Drain pattern instead of Task.Yield.
 /// Hand-written fakes as in the R-014/R-015/R-017 view-model tests: no real ccusage, no agy, no
 /// network; F21 — ONE local day captured per test (fixture and assertions read the same value; the
 /// view model's own clock read is the documented midnight residual). The view model is constructed
@@ -362,8 +366,10 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count); // the existing OpenCode rebuild stands
         Assert.Same(overviewBuckets, vm.OverviewTab.ChartBuckets); // D1: Overview stays excluded (I15)
         Assert.Equal(1, source.ReadCount); // no ccusage read for the recompose
-        Assert.Equal(1, agy.CallCount); // ...and no extra agy refresh either (the follow-up existing
-                                        // refresh path only starts asynchronously, after these lines)
+        // D11: the agy call count is deliberately NOT asserted here — the setter's PRE-EXISTING
+        // follow-up chain (ApplyViewChangeAsync → RefreshAsync) runs its fakes to completion
+        // synchronously and calls the agy client again; what D1 pins is the synchronous recompose
+        // above and that no ccusage read happens (source.ReadCount stays 1).
 
         vm.SelectedMetric = MetricOption(vm, UsageMetric.OutputTokens);
         Assert.Equal(UsageMetric.OutputTokens, vm.AgyTab.ChartMetric);
@@ -375,8 +381,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
 
         // D4: the four tiles are fixed sums, independent of the chart metric.
         AssertComposedTiles(vm.AgyTab);
-        Assert.Equal(1, source.ReadCount);
-        Assert.Equal(1, agy.CallCount);
+        Assert.Equal(1, source.ReadCount); // D11: agy.CallCount is not pinned after a setter — see above.
     }
 
     [Fact]
@@ -385,6 +390,10 @@ public sealed class MainWindowViewModelAgyCompositionTests
         // D1: "Test direct selection and settings-driven changes" — the external settings path
         // (OnSettingsChanged sync) recomposes AGY through the same rebuild, without touching
         // ccusage or the agy client (no view-change refresh runs on the syncing path).
+        // D11: the sync is pumped the way the existing R-017 wiring tests do (F13/F24): the view
+        // model is constructed under a controllable QueuedSyncContext it captures as its UI
+        // context, the Changed raise posts there, and the test drains it before asserting —
+        // instead of racing xUnit's own pump with Task.Yield.
         var agy = new FakeAgyClient(AgySnapshot());
         var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(DateOnly.FromDateTime(DateTime.Now))));
         var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
@@ -397,7 +406,19 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(new AppSettings());
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+
+        MainWindowViewModel vm;
+        var previous = SynchronizationContext.Current;
+        var context = new QueuedSyncContext();
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
@@ -406,8 +427,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.Equal(14, vm.AgyTab.ChartBuckets.Count);
 
         await session.UpdateAsync(s => s with { ChartRangeDays = 30 });
-        await Task.Yield(); // the Changed raise is posted to the captured context — pump it
-        await Task.Yield(); // (D9: a composed push from the same sync settles within these pumps)
+        context.Drain(); // F13/F24: applies OnSettingsChangedCore — the sync path rebuilds here
 
         Assert.Equal(30, vm.SelectedRange.Value);
         Assert.Equal(30, vm.AgyTab.ChartBuckets.Count); // recomposed through the settings path
@@ -415,7 +435,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.Equal(30_000.0, vm.AgyTab.ChartBuckets[^1].Total); // values from the cached report
         AssertComposedTiles(vm.AgyTab);
         Assert.Equal(1, source.ReadCount);
-        Assert.Equal(1, agy.CallCount);
+        Assert.Equal(1, agy.CallCount); // the _syncingFromSettings path never fires the view-change refresh
     }
 
     // ── Fakes (hand-written, same as the R-014/R-015/R-017 view-model tests) ────
@@ -458,6 +478,56 @@ public sealed class MainWindowViewModelAgyCompositionTests
         {
             Interlocked.Increment(ref _readCount);
             return handler(since);
+        }
+    }
+
+    /// <summary>R-017 F24 pattern (copied from MainWindowViewModelOpenCodeChartWiringTests): a
+    /// <see cref="SynchronizationContext"/> that queues every Post and runs nothing until the test
+    /// calls <see cref="Drain"/>. Installed around the view model's construction so the settings
+    /// sync is posted to a queue the test controls; xUnit's own AsyncTestSyncContext would pump it
+    /// at any await and hide the ordering. D11 wires this into
+    /// <see cref="D1_SettingsDrivenRangeChange_RecomposesAgyTab_NoReads"/>.</summary>
+    private sealed class QueuedSyncContext : SynchronizationContext
+    {
+        // A posted body that re-posted itself (the loop F23's design forbids) would otherwise hang
+        // the test run; fail fast instead — the real body drains after the first callback.
+        private const int DrainGuard = 64;
+
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private int _postCount;
+
+        /// <summary>Total Post calls received, from any thread.</summary>
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        /// <summary>Callbacks queued and not yet drained.</summary>
+        public int PendingCount => _queue.Count;
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            _queue.Enqueue((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) =>
+            throw new InvalidOperationException(
+                "R-017 F23: OnSettingsChanged must Post to the captured context, never Send.");
+
+        /// <summary>
+        /// Runs the queued callbacks FIFO on the calling thread WITHOUT installing this context —
+        /// the posted body must not depend on Current (the sync body never re-tests it).
+        /// </summary>
+        public void Drain()
+        {
+            for (var run = 0; _queue.TryDequeue(out var item); run++)
+            {
+                if (run >= DrainGuard)
+                {
+                    throw new InvalidOperationException(
+                        "The settings sync re-posted to its own context: the queue never drains (R-017 F23 re-post loop).");
+                }
+
+                item.Callback(item.State);
+            }
         }
     }
 }

@@ -76,7 +76,18 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
         // enter the tiles).
         Assert.Equal(2, vm.AgyTab.SupplementaryRows.Count);
         Assert.False(vm.AgyTab.HasResetInfo); // C19: ccusage-only has no reset part
-        Assert.Equal("Requests today", Assert.Single(vm.AgyTab.StatTiles).Label);
+
+        // R-018 C9/D11 oracle: the tab now shows the COMPOSED snapshot — the agy stat followed by
+        // the four R-018 tiles. Hand-computed from this test's own data (antigravity daily row
+        // 3,500 total / 0 output / 0 cache reads; one priced model, $2.00): ChartFormat.Compact
+        // gives "3,500" (below 10K keeps the grouped plain form), "0", "0"; CostText over all-priced
+        // models is Money(2.00) = "$2.00" with no " + unpriced".
+        var agyTiles = vm.AgyTab.StatTiles;
+        Assert.Equal(
+            ["Requests today", "Total tokens", "Output tokens", "Cache reads", "Equivalent API value"],
+            agyTiles.Select(t => t.Label));
+        Assert.Equal(["128", "3,500", "0", "0", "$2.00"], agyTiles.Select(t => t.Value));
+        Assert.Equal("ccusage · equivalent API price", agyTiles[^1].Detail);
 
         // C9: "opencode" has no tab — its line appears nowhere (no 700-token / $0.10 value).
         foreach (var tab in vm.ProviderTabs)

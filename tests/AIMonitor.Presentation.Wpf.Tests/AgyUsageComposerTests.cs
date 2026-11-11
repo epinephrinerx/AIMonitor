@@ -15,8 +15,9 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// <c>$X.XX + unpriced</c>, all-unpriced <c>Unknown price</c>, no models <c>$0.00</c>, via
 /// ChartFormat.Money; <c>Stat.Detail</c> = "ccusage · equivalent API price"). Stats and history are
 /// added only when at least one antigravity daily row lies in the range; null report or no in-range
-/// rows returns agy unchanged (same instance or field-equal). Hand-computed oracles (spec test
-/// oracles): today 2026-05-01; Apr 30 Model A 10,000/500/8,500/$0.50; May 1 Model A
+/// rows returns agy unchanged (same instance or field-equal). D10: the same-instance rule also
+/// covers a snapshot that ALREADY has history — nothing is composed at all. Hand-computed oracles
+/// (spec test oracles): today 2026-05-01; Apr 30 Model A 10,000/500/8,500/$0.50; May 1 Model A
 /// 20,000/1,000/17,000/$1.00 + Model X 10,000/500/8,500/null. Range 7 → 40K / 2,000 / 34K /
 /// "$1.50 + unpriced"; range 1 → 30K / 1,500 / 25.5K / "$1.00 + unpriced". Pure composer; dates from
 /// the test. The new type does not exist at the base commit — this file is R-018 "expected red".
@@ -288,12 +289,14 @@ public sealed class AgyUsageComposerTests
         Assert.Equal("20K", composed.Stats.Single(s => s.Label == "Total tokens").Value); // only May 1 (20,000) is in range
     }
 
-    // ── A2 — existing agy history is kept ───────────────────────────────────────
+    // ── A2/D10 — existing agy history short-circuits the whole compose ──────────
 
     [Fact]
-    public void Compose_AgySnapshotAlreadyHasHistory_KeepsIt_AndStillAppendsStats()
+    public void Compose_AgySnapshotAlreadyHasHistory_ReturnsTheSameInstanceUnchanged()
     {
-        // A2: "Only when agy.History is null; if the agy snapshot already has history, keep it."
+        // D10: A2's last sentence is literal — stats, history and note are composed ONLY when
+        // agy.History is null; a snapshot that already carries history is returned unchanged,
+        // the same instance, with nothing appended even when in-range antigravity data exists.
         var ownHistory = new UsageHistory(
             buckets: [new UsageHistoryBucket(Today, new Dictionary<string, double> { ["agy-model"] = 42 })],
             series: ["agy-model"],
@@ -302,8 +305,11 @@ public sealed class AgyUsageComposerTests
 
         var composed = Compose(agy, OracleReport(), rangeDays: 1);
 
-        Assert.Same(ownHistory, composed.History); // the agy-owned history is kept, not replaced
-        AssertNewTiles(composed, 2, "30K", "1,500", "25.5K", "$1.00 + unpriced");
+        Assert.Same(agy, composed);
+        Assert.Same(ownHistory, composed.History);            // kept as it was, not rebuilt
+        Assert.Equal(2, composed.Stats.Count);                // no tiles appended
+        Assert.DoesNotContain(composed.Stats, s => s.Label == "Total tokens");
+        Assert.Equal("AGY shared model-pool quotas; used percentage.", composed.ValueNote); // note not overridden
     }
 
     // ── D5 — unconfigured / error snapshots still get stats and chart ───────────
