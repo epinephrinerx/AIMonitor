@@ -203,7 +203,7 @@
 
 **ตรวจรับเมื่อ:**
 - [ ] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน
-- [ ] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows
+- [x] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows — ตรวจแล้ว: GitHub Actions "Windows verification" ผ่านทุกขั้นที่ `a1765a3` (runs 42837235552 tag `v2.0.3`, 42837245808 `v2`, 42837246886 branch; 2026-11-10)
 - [x] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง — ตรวจแล้ว 2026-11-10 ที่ `dde0519` (ดูความคืบหน้าบรรทัดวันเดียวกัน)
 - [ ] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ
 - [ ] ผู้ใช้ตรวจรับ R-004 และ installer upgrade ใน disposable Windows environment
