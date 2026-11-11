@@ -7,7 +7,7 @@ These support review but do not replace real-app screenshots or certify function
 
 ## Functional subcriteria
 
-Full automated suite results are in `STATUS_2026-10-14.md`. Each subcriterion must be
+Full automated suite results are in `STATUS_2026-11-11.md`. Each subcriterion must be
 reviewed against Python behavior; none is automatically accepted because a suite passed.
 The owner may record Pass/Fail and approve each exception here. Functional score = accepted passed
 subcriteria / all applicable subcriteria, strictly >95%. Unassessed items keep the result pending.
@@ -143,16 +143,12 @@ must be strictly >95%. Native shell/titlebar/menu and actual DPI captures remain
 | about-version-light | Pending | Client-area render; no owner score |
 | connect-claude-dark | Pending | Client-area render; no owner score |
 | connect-claude-light | Pending | Client-area render; no owner score |
-| connect-gemini-dark | Pending | Client-area render; no owner score |
-| connect-gemini-light | Pending | Client-area render; no owner score |
 | connect-openai-dark | Pending | Client-area render; no owner score |
 | connect-openai-light | Pending | Client-area render; no owner score |
 | connections-dark | Pending | Client-area render; no owner score |
 | connections-light | Pending | Client-area render; no owner score |
 | dashboard-claude-dark | Pending | Client-area render; no owner score |
 | dashboard-claude-light | Pending | Client-area render; no owner score |
-| dashboard-gemini-dark | Pending | Client-area render; no owner score |
-| dashboard-gemini-light | Pending | Client-area render; no owner score |
 | dashboard-minimum-dark | Pending | Client-area render; no owner score |
 | dashboard-minimum-light | Pending | Client-area render; no owner score |
 | dashboard-openai-dark | Pending | Client-area render; no owner score |
@@ -167,8 +163,27 @@ must be strictly >95%. Native shell/titlebar/menu and actual DPI captures remain
 | widget-230x175-light | Pending | Client-area render; no owner score |
 | widget-300x300-dark | Pending | Client-area render; no owner score |
 | widget-300x300-light | Pending | Client-area render; no owner score |
+| connect-agy-dark ↔ connect-gemini-dark | Pending | Client-area render; no owner score |
+| connect-agy-light ↔ connect-gemini-light | Pending | Client-area render; no owner score |
+| dashboard-agy-dark ↔ dashboard-gemini-dark | Pending | Client-area render; no owner score |
+| dashboard-agy-light ↔ dashboard-gemini-light | Pending | Client-area render; no owner score |
 | tray-light | Pending | Client-area render; no owner score |
 | tray-dark | Pending | Client-area render; no owner score |
+
+## 2.0-only screens
+
+| Screen | Reason |
+|---|---|
+| dashboard-all-agents-dark | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| dashboard-all-agents-light | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| dashboard-opencode-dark | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| dashboard-opencode-light | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| dashboard-overview-dark | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| dashboard-overview-light | R-014–R-017 ccusage tabs (owner accepted 2026-11-10) |
+| supplementary-expanded-dark | R-010/R-011 supplementary details |
+| supplementary-expanded-light | R-010/R-011 supplementary details |
+| supplementary-narrow-dark | R-010/R-011 supplementary details |
+| supplementary-narrow-light | R-010/R-011 supplementary details |
 
 ## Exceptions and remaining evidence
 
@@ -178,4 +193,7 @@ must be strictly >95%. Native shell/titlebar/menu and actual DPI captures remain
 - Native tray context menu/tooltip/balloon, real printer/preview, title bars, actual multi-monitor/DPI and lock/crash smoke need a disposable Windows environment.
 - Clean install/upgrade must cover startup on/off, no duplicate processes/trays and preservation of legacy settings/credentials. Compiler success does not prove these.
 - No installer was executed and no real Run key or real credentials were used during local verification.
+- Gemini tab renamed Gemini / AGY and backed by AGY CLI pools (R-012, R-013; owner accepted 2026-10-16).
+- The dashboard tab row adds OpenCode, Overview and All agents (R-014–R-017; owner accepted 2026-11-10); paired screens show the extra tab headers.
+- Paired dashboard screens are rendered without ccusage; the ccusage rows that R-014 adds under existing gauges are not in the paired evidence.
 - Owner sign-off and final R-004 score have not been recorded.
