@@ -24,15 +24,11 @@ public sealed record AnthropicAdminUsageResult(
 /// Thrown by <see cref="AnthropicAdminUsageClient"/> when the Admin API call fails in a way the UI
 /// should surface as "Unavailable". The <see cref="Exception.Message"/> is always a fixed, safe
 /// string that never includes the key, headers, response body or the underlying exception text
-/// (R-019 E8).
+/// (R-019 E8, E12b).
 /// </summary>
 public sealed class AnthropicAdminApiException : Exception
 {
     public AnthropicAdminApiException(string message) : base(message)
-    {
-    }
-
-    public AnthropicAdminApiException(string message, Exception innerException) : base(message, innerException)
     {
     }
 }
@@ -177,17 +173,22 @@ public sealed class AnthropicAdminUsageClient
         }
         catch (HttpRequestException)
         {
+            // Ensure the sibling stops too (R-019 E12d).
+            linkedCts.Cancel();
             cancellationToken.ThrowIfCancellationRequested();
             throw new AnthropicAdminApiException(TransportErrorMessage);
         }
         catch (AnthropicAdminApiException)
         {
+            // One report failed: cancel the sibling so it stops making network calls (R-019 E12d).
+            linkedCts.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new AnthropicAdminApiException(ParseErrorMessage, ex);
+            linkedCts.Cancel();
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         return new AnthropicAdminUsageResult(
@@ -203,12 +204,13 @@ public sealed class AnthropicAdminUsageClient
     private async Task<UsageReport> FetchUsageReportAsync(
         DateTime monthStartUtc, DateTime nowUtc, DateTime todayUtc, CancellationToken cancellationToken)
     {
-        var startingAt = monthStartUtc.ToString("O", CultureInfo.InvariantCulture);
-        var endingAt = nowUtc.ToString("O", CultureInfo.InvariantCulture);
+        var startingAt = monthStartUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+        var endingAt = nowUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
 
         long monthTokens = 0;
         long todayTokens = 0;
         string? page = null;
+        var seenCursors = new HashSet<string?>(StringComparer.Ordinal) { null };
 
         for (var i = 0; i < MaxPages; i++)
         {
@@ -223,12 +225,15 @@ public sealed class AnthropicAdminUsageClient
 
             var (bucketTokens, hasMore, nextPage) = ParseUsagePage(body);
 
-            foreach (var (dayUtc, tokens) in bucketTokens)
+            checked
             {
-                checked { monthTokens += tokens; }
-                if (dayUtc == todayUtc)
+                foreach (var (dayUtc, tokens) in bucketTokens)
                 {
-                    checked { todayTokens += tokens; }
+                    monthTokens += tokens;
+                    if (dayUtc == todayUtc)
+                    {
+                        todayTokens += tokens;
+                    }
                 }
             }
 
@@ -237,7 +242,7 @@ public sealed class AnthropicAdminUsageClient
                 return new UsageReport(monthTokens, todayTokens);
             }
 
-            if (string.IsNullOrEmpty(nextPage) || string.Equals(nextPage, page, StringComparison.Ordinal))
+            if (!seenCursors.Add(nextPage))
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
@@ -251,12 +256,13 @@ public sealed class AnthropicAdminUsageClient
     private async Task<CostReport> FetchCostReportAsync(
         DateTime monthStartUtc, DateTime nowUtc, DateTime todayUtc, CancellationToken cancellationToken)
     {
-        var startingAt = monthStartUtc.ToString("O", CultureInfo.InvariantCulture);
-        var endingAt = nowUtc.ToString("O", CultureInfo.InvariantCulture);
+        var startingAt = monthStartUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+        var endingAt = nowUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
 
         decimal monthCost = 0m;
         decimal todayCost = 0m;
         string? page = null;
+        var seenCursors = new HashSet<string?>(StringComparer.Ordinal) { null };
 
         for (var i = 0; i < MaxPages; i++)
         {
@@ -285,7 +291,7 @@ public sealed class AnthropicAdminUsageClient
                 return new CostReport(monthCost, todayCost);
             }
 
-            if (string.IsNullOrEmpty(nextPage) || string.Equals(nextPage, page, StringComparison.Ordinal))
+            if (!seenCursors.Add(nextPage))
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
@@ -394,9 +400,14 @@ public sealed class AnthropicAdminUsageClient
         {
             stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException)
+        catch (Exception) when (token.IsCancellationRequested)
         {
-            throw new AnthropicAdminApiException(ResponseBodyErrorMessage, ex);
+            token.ThrowIfCancellationRequested();
+            throw new AnthropicAdminApiException(ResponseBodyErrorMessage);
+        }
+        catch (Exception)
+        {
+            throw new AnthropicAdminApiException(ResponseBodyErrorMessage);
         }
 
         await using (stream.ConfigureAwait(false))
@@ -416,18 +427,23 @@ public sealed class AnthropicAdminUsageClient
                     buffer.Write(chunk, 0, bytesRead);
                 }
             }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException)
+            catch (Exception) when (token.IsCancellationRequested)
             {
-                throw new AnthropicAdminApiException(ResponseBodyErrorMessage, ex);
+                token.ThrowIfCancellationRequested();
+                throw new AnthropicAdminApiException(ResponseBodyErrorMessage);
+            }
+            catch (Exception)
+            {
+                throw new AnthropicAdminApiException(ResponseBodyErrorMessage);
             }
 
             try
             {
                 return StrictUtf8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
             }
-            catch (DecoderFallbackException ex)
+            catch (DecoderFallbackException)
             {
-                throw new AnthropicAdminApiException(ResponseBodyErrorMessage, ex);
+                throw new AnthropicAdminApiException(ResponseBodyErrorMessage);
             }
         }
     }
@@ -435,7 +451,8 @@ public sealed class AnthropicAdminUsageClient
     /// <summary>
     /// Parses a usage report page. Returns the per-bucket (day, token sum) pairs, whether the API
     /// indicated there are more pages, and the cursor for the next page. A missing or unparsable
-    /// envelope, non-numeric token fields, or a negative sum become <see cref="AnthropicAdminApiException"/>.
+    /// envelope, non-numeric token fields, or a negative sum become <see cref="AnthropicAdminApiException"/>
+    /// (R-019 E4, E5, E12c).
     /// </summary>
     private static (IReadOnlyList<(DateTime DayUtc, long Tokens)> Buckets, bool HasMore, string? NextPage) ParseUsagePage(string body)
     {
@@ -445,9 +462,9 @@ public sealed class AnthropicAdminUsageClient
             using var doc = JsonDocument.Parse(body);
             root = doc.RootElement.Clone();
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            throw new AnthropicAdminApiException(ParseErrorMessage, ex);
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         if (!root.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
@@ -455,8 +472,12 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        var hasMore = root.TryGetProperty("has_more", out var hasMoreElement)
-            && hasMoreElement.ValueKind == JsonValueKind.True;
+        if (!root.TryGetProperty("has_more", out var hasMoreElement)
+            || (hasMoreElement.ValueKind != JsonValueKind.True && hasMoreElement.ValueKind != JsonValueKind.False))
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+        var hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
 
         string? nextPage = null;
         if (root.TryGetProperty("next_page", out var nextPageElement))
@@ -493,17 +514,19 @@ public sealed class AnthropicAdminUsageClient
             var dayUtc = startingAt.UtcDateTime.Date;
 
             long bucketTokens = 0;
-            if (bucket.TryGetProperty("results", out var resultsElement)
-                && resultsElement.ValueKind == JsonValueKind.Array)
+            if (!bucket.TryGetProperty("results", out var resultsElement)
+                || resultsElement.ValueKind != JsonValueKind.Array)
             {
-                foreach (var result in resultsElement.EnumerateArray())
-                {
-                    bucketTokens += ReadTokenField(result, "uncached_input_tokens");
-                    bucketTokens += ReadTokenField(result, "cache_read_input_tokens");
-                    bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_5m_input_tokens");
-                    bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_1h_input_tokens");
-                    bucketTokens += ReadTokenField(result, "output_tokens");
-                }
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            foreach (var result in resultsElement.EnumerateArray())
+            {
+                bucketTokens += ReadTokenField(result, "uncached_input_tokens");
+                bucketTokens += ReadTokenField(result, "cache_read_input_tokens");
+                bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_5m_input_tokens");
+                bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_1h_input_tokens");
+                bucketTokens += ReadTokenField(result, "output_tokens");
             }
 
             buckets.Add((dayUtc, bucketTokens));
@@ -516,12 +539,12 @@ public sealed class AnthropicAdminUsageClient
     {
         if (!element.TryGetProperty(fieldName, out var fieldElement))
         {
-            return 0;
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         if (fieldElement.ValueKind == JsonValueKind.Null)
         {
-            return 0;
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         if (fieldElement.ValueKind == JsonValueKind.Number && fieldElement.TryGetInt64(out var value))
@@ -542,7 +565,7 @@ public sealed class AnthropicAdminUsageClient
         if (!element.TryGetProperty(parentField, out var parentElement)
             || parentElement.ValueKind != JsonValueKind.Object)
         {
-            return 0;
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         return ReadTokenField(parentElement, childField);
@@ -551,7 +574,7 @@ public sealed class AnthropicAdminUsageClient
     /// <summary>
     /// Parses a cost report page. Returns the per-bucket (day, USD amount) pairs, whether the API
     /// indicated there are more pages, and the cursor for the next page. Negative, non-USD or
-    /// unparsable amounts become <see cref="AnthropicAdminApiException"/> (R-019 E4).
+    /// unparsable amounts become <see cref="AnthropicAdminApiException"/> (R-019 E4, E12c).
     /// </summary>
     private static (IReadOnlyList<(DateTime DayUtc, decimal AmountUsd)> Buckets, bool HasMore, string? NextPage) ParseCostPage(string body)
     {
@@ -561,9 +584,9 @@ public sealed class AnthropicAdminUsageClient
             using var doc = JsonDocument.Parse(body);
             root = doc.RootElement.Clone();
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            throw new AnthropicAdminApiException(ParseErrorMessage, ex);
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         if (!root.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
@@ -571,8 +594,12 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        var hasMore = root.TryGetProperty("has_more", out var hasMoreElement)
-            && hasMoreElement.ValueKind == JsonValueKind.True;
+        if (!root.TryGetProperty("has_more", out var hasMoreElement)
+            || (hasMoreElement.ValueKind != JsonValueKind.True && hasMoreElement.ValueKind != JsonValueKind.False))
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+        var hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
 
         string? nextPage = null;
         if (root.TryGetProperty("next_page", out var nextPageElement))
@@ -609,13 +636,15 @@ public sealed class AnthropicAdminUsageClient
             var dayUtc = startingAt.UtcDateTime.Date;
 
             decimal bucketCost = 0m;
-            if (bucket.TryGetProperty("results", out var resultsElement)
-                && resultsElement.ValueKind == JsonValueKind.Array)
+            if (!bucket.TryGetProperty("results", out var resultsElement)
+                || resultsElement.ValueKind != JsonValueKind.Array)
             {
-                foreach (var result in resultsElement.EnumerateArray())
-                {
-                    bucketCost += ReadCostAmount(result);
-                }
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            foreach (var result in resultsElement.EnumerateArray())
+            {
+                bucketCost += ReadCostAmount(result);
             }
 
             buckets.Add((dayUtc, bucketCost));
@@ -627,18 +656,22 @@ public sealed class AnthropicAdminUsageClient
     /// <summary>
     /// Reads a single cost result's <c>amount</c> field — a decimal cents string in invariant
     /// culture — and converts it to USD. Non-USD <c>currency</c>, negative amounts, or unparsable
-    /// strings become <see cref="AnthropicAdminApiException"/> (R-019 E4).
+    /// strings become <see cref="AnthropicAdminApiException"/> (R-019 E4, E12c). The amount is
+    /// parsed with <see cref="NumberStyles.AllowDecimalPoint"/> only — no exponent, whitespace or
+    /// sign allowed.
     /// </summary>
     private static decimal ReadCostAmount(JsonElement result)
     {
-        if (result.TryGetProperty("currency", out var currencyElement)
-            && currencyElement.ValueKind == JsonValueKind.String)
+        if (!result.TryGetProperty("currency", out var currencyElement)
+            || currencyElement.ValueKind != JsonValueKind.String)
         {
-            var currency = currencyElement.GetString();
-            if (!string.IsNullOrEmpty(currency) && !string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new AnthropicAdminApiException(ParseErrorMessage);
-            }
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
+        var currency = currencyElement.GetString();
+        if (!string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         if (!result.TryGetProperty("amount", out var amountElement)
@@ -653,7 +686,7 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        if (!decimal.TryParse(amountString, NumberStyles.Float, CultureInfo.InvariantCulture, out var cents))
+        if (!decimal.TryParse(amountString, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var cents))
         {
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }

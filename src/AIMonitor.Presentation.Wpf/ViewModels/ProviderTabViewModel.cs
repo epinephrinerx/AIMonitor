@@ -730,7 +730,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
         var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
         var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
         var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
-        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview && !(isClaude && snapshot.AdminApiConnected);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview && !(isClaude && snapshot.AdminOnly);
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";

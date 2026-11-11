@@ -268,7 +268,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         // three Admin stats and keep the OAuth quota and transcript history.
         if (!string.IsNullOrWhiteSpace(adminKey))
         {
-            quotaSnapshot = await AttachAdminStatsAsync(quotaSnapshot, adminKey, detection, cancellationToken)
+            quotaSnapshot = await AttachAdminStatsAsync(quotaSnapshot, adminKey, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -280,11 +280,11 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
     /// three stats ("API cost today (UTC)", "API cost this month (UTC)", "API tokens this month (UTC)")
     /// with <c>Detail</c> "Anthropic Admin API · billed". On failure, adds one stat ("API usage" =
     /// "Unavailable") with the failure message as <c>Detail</c>. If OAuth failed but Admin succeeded,
-    /// the snapshot is upgraded to <c>Configured = true</c> and <c>AdminApiConnected = true</c> so
-    /// the tab shows no setup card (R-019 E2).
+    /// the snapshot is upgraded to <c>Configured = true</c>, <c>AdminApiConnected = true</c> and
+    /// <c>AdminOnly = true</c> so the tab shows no setup card (R-019 E2, E12a).
     /// </summary>
     private async Task<ProviderSnapshot> AttachAdminStatsAsync(
-        ProviderSnapshot snapshot, string adminKey, DetectionInfo detection, CancellationToken cancellationToken)
+        ProviderSnapshot snapshot, string adminKey, CancellationToken cancellationToken)
     {
         AnthropicAdminUsageResult? result = null;
         string? failureMessage = null;
@@ -296,6 +296,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         }
         catch (AnthropicAdminApiException ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             failureMessage = ex.Message;
         }
         catch (OperationCanceledException)
@@ -305,6 +306,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
         }
         catch (Exception)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             failureMessage = AnthropicAdminUsageClient.ParseErrorMessage;
         }
 
@@ -316,23 +318,34 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
             stats.Add(new Stat("API cost this month (UTC)", FormatUsd(result.MonthCostUsd), "Anthropic Admin API · billed"));
             stats.Add(new Stat("API tokens this month (UTC)", FormatCompactTokens(result.MonthTokens), "Anthropic Admin API · billed"));
 
-            var configured = snapshot.Configured || snapshot.AdminApiConnected || true;
+            var configured = snapshot.Configured || snapshot.AdminApiConnected;
             var adminApiConnected = true;
             var error = snapshot.Error;
             var setupHint = snapshot.SetupHint;
             var valueNote = snapshot.ValueNote;
+            var unauthorized = snapshot.Unauthorized;
+            var fetchedAt = snapshot.FetchedAt;
 
-            // Admin-only mode: OAuth is missing/expired but Admin API succeeded. Show the Admin
-            // stats and the note, with no setup card (R-019 E2).
+            // Admin-only mode: OAuth is missing/expired/rejected (401/403) but Admin API succeeded.
+            // Show the Admin stats and the note, with no setup card (R-019 E2, E12a).
             var oAuthNotConnected = snapshot.Detection is null
-                || snapshot.Detection.State is DetectionState.NotConnected or DetectionState.Expired;
+                || snapshot.Detection.State is DetectionState.NotConnected or DetectionState.Expired
+                || snapshot.Unauthorized;
 
+            bool adminOnly;
             if (oAuthNotConnected && !snapshot.Configured)
             {
+                adminOnly = true;
                 configured = true;
                 error = null;
                 setupHint = "";
+                unauthorized = false;
+                fetchedAt = _clock.UtcNow;
                 valueNote = "Claude Code not signed in — quota unavailable; API usage from Admin key";
+            }
+            else
+            {
+                adminOnly = false;
             }
 
             return new ProviderSnapshot(
@@ -344,12 +357,13 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
                 account: snapshot.Account,
                 error: error,
                 historyError: snapshot.HistoryError,
-                unauthorized: snapshot.Unauthorized,
+                unauthorized: unauthorized,
                 setupHint: setupHint,
                 valueNote: valueNote,
-                fetchedAt: snapshot.FetchedAt,
+                fetchedAt: fetchedAt,
                 detection: snapshot.Detection,
-                adminApiConnected: adminApiConnected);
+                adminApiConnected: adminApiConnected,
+                adminOnly: adminOnly);
         }
         else
         {
@@ -370,13 +384,15 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
                 valueNote: snapshot.ValueNote,
                 fetchedAt: snapshot.FetchedAt,
                 detection: snapshot.Detection,
-                adminApiConnected: false);
+                adminApiConnected: false,
+                adminOnly: false);
         }
     }
 
     /// <summary>
-    /// Formats a token count in compact K/M form (e.g. 1234 → "1.2K", 1234567 → "1.2M"), matching
-    /// the style of other token stats in the UI.
+    /// Formats a token count in compact K/M/B form (e.g. 1234 → "1.2K", 1234567 → "1.2M",
+    /// 1_234_567_890 → "1.2B"), matching the style of other token stats in the UI. Never shows
+    /// "1000K" — values at or above the next threshold round into it (R-019 E12f).
     /// </summary>
     private static string FormatCompactTokens(long tokens)
     {
@@ -387,10 +403,27 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
 
         if (tokens < 1_000_000)
         {
-            return (tokens / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+            var k = tokens / 1000.0;
+            // Avoid "1000K" — when rounding would produce it, push into M.
+            if (k >= 999.95)
+            {
+                return (tokens / 1_000_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "M";
+            }
+            return k.ToString("0.#", CultureInfo.InvariantCulture) + "K";
         }
 
-        return (tokens / 1_000_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "M";
+        if (tokens < 1_000_000_000)
+        {
+            var m = tokens / 1_000_000.0;
+            // Avoid "1000M" — when rounding would produce it, push into B.
+            if (m >= 999.95)
+            {
+                return (tokens / 1_000_000_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "B";
+            }
+            return m.ToString("0.#", CultureInfo.InvariantCulture) + "M";
+        }
+
+        return (tokens / 1_000_000_000.0).ToString("0.#", CultureInfo.InvariantCulture) + "B";
     }
 
     private async Task<ProviderSnapshot> AttachHistoryAsync(

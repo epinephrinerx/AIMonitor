@@ -44,6 +44,15 @@ public sealed record ProviderSnapshot
     /// </summary>
     public bool AdminApiConnected { get; }
 
+    /// <summary>
+    /// True when the Admin API call succeeded and Claude Code OAuth is missing, expired or rejected
+    /// (401/403). In this state the tab has no setup card, no error, no setup hint, no quota meters,
+    /// the note "Claude Code not signed in — quota unavailable; API usage from Admin key",
+    /// <see cref="FetchedAt"/> = clock now and <see cref="Unauthorized"/> false. The tab and the
+    /// Connections card decide admin-only display from this flag alone (R-019 E2, E12a).
+    /// </summary>
+    public bool AdminOnly { get; }
+
     public bool Ok => Configured && Error is null;
 
     public ProviderSnapshot(
@@ -60,7 +69,8 @@ public sealed record ProviderSnapshot
         string valueNote = "",
         DateTimeOffset? fetchedAt = null,
         DetectionInfo? detection = null,
-        bool adminApiConnected = false)
+        bool adminApiConnected = false,
+        bool adminOnly = false)
     {
         ProviderId = DomainGuard.RequireNonBlank(providerId, nameof(providerId));
         Configured = configured;
@@ -77,6 +87,7 @@ public sealed record ProviderSnapshot
         FetchedAt = fetchedAt;
         Detection = detection;
         AdminApiConnected = adminApiConnected;
+        AdminOnly = adminOnly;
     }
 
     /// <summary>

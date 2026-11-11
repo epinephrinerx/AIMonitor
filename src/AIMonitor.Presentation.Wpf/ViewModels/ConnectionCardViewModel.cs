@@ -111,10 +111,10 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     /// <summary>
     /// Updates the card representation from detection telemetry.
     /// When <paramref name="detection"/> is null, behaves as NotConnected with "Checking..." StateWord.
-    /// For Claude, when <paramref name="adminApiConnected"/> is true and OAuth is not connected, the
-    /// SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2).
+    /// For Claude, when <paramref name="adminOnly"/> is true (Admin API succeeded but OAuth is not
+    /// connected), the SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2, E12a).
     /// </summary>
-    public void Update(DetectionInfo? detection, bool adminApiConnected = false)
+    public void Update(DetectionInfo? detection, bool adminOnly = false)
     {
         Detection = detection;
         RefreshColours();
@@ -158,11 +158,12 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             Account = Meta.Tagline;
         }
 
-        // Admin-only mode for Claude: OAuth is not connected but Admin API succeeded (R-019 E2).
+        // Admin-only mode for Claude: OAuth is not connected but Admin API succeeded (R-019 E2, E12a).
+        // The <paramref name="adminOnly"/> flag is the sole decider — the card does not re-derive it
+        // from DetectionState.
         var isClaude = string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase);
-        var oAuthNotConnected = detection.State is DetectionState.NotConnected or DetectionState.Expired;
 
-        if (isClaude && adminApiConnected && oAuthNotConnected)
+        if (isClaude && adminOnly)
         {
             SourceLine = "Admin key connected · Claude Code not signed in";
         }

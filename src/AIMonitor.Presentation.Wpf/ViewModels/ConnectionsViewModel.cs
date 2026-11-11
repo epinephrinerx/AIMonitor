@@ -107,7 +107,7 @@ public sealed class ConnectionsViewModel : ViewModelBase
             {
                 if (snapshot.Detection is not null)
                 {
-                    card.Update(snapshot.Detection, adminApiConnected: snapshot.AdminApiConnected);
+                    card.Update(snapshot.Detection, adminOnly: snapshot.AdminOnly);
                 }
                 else if (card.Detection is null)
                 {
