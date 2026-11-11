@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-10-16
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-11
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -352,6 +352,118 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **ความคืบหน้า:**
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
+
+## R-021 · คำแนะนำการ login ของ agent อื่นนอกจากที่กำหนดไว้
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | หน้า Sign-in / Connections (`ConnectionsPage`) · ชื่อ agent ของ ccusage (`AgentUsagePresenter`) |
+| เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-020]] · [[R-008]] |
+
+**คุณระบุ:**
+> และต้องมีคำแนะนำสำหรับการล็อคอินของ agent อื่นๆนอกจากที่เรากำหนดไว้
+
+**ผมเข้าใจว่า:**
+หน้า Connections มีส่วน "agent อื่น" แสดงคำแนะนำ login ของ agent ที่ ccusage ตรวจเจอแต่ไม่มีแท็บของตัวเอง
+(เช่น GitHub Copilot, Z Code) agent ที่ไม่รู้จักใช้คำแนะนำกลาง ข้อความต้องตรวจสอบกับเอกสารของผู้ให้บริการก่อนใส่
+
+**ไม่รวม:**
+- ไม่สร้างแท็บหรือ gauge ใหม่ และไม่ดึง quota ของ agent เหล่านั้น
+- ไม่ login แทนผู้ใช้และไม่อ่าน credentials ของ agent เหล่านั้น
+
+**ตรวจรับเมื่อ:**
+- [ ] agent ที่ ccusage พบแต่ไม่มีแท็บ แสดงในส่วน "agent อื่น" พร้อมคำแนะนำ login ของตัวเอง
+- [ ] agent id ที่ไม่รู้จักแสดงชื่อดิบพร้อมคำแนะนำกลาง
+- [ ] ไม่มี ccusage หรือไม่พบ agent อื่น → ส่วนนี้บอกสถานะชัดเจน ไม่ว่างเปล่า
+
+## R-020 · เพิ่มการ login ของ OpenCode
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | หน้า Sign-in / Connections · `ProviderMeta` · ตัวตรวจการติดตั้งและ auth ของ opencode (Infrastructure) |
+| เกี่ยวกับ | [[R-015]] · [[R-019]] · [[R-021]] |
+
+**คุณระบุ:**
+> ไม่มีการล็อคอินของ opencode ซึ่งต้องเพิ่มครับ
+
+**ผมเข้าใจว่า:**
+เพิ่มการ์ด OpenCode ในหน้า Sign-in / Connections: ตรวจว่าติดตั้ง opencode ไหม และ login provider ไหนไว้แล้ว
+(อ่านไฟล์ auth ของ opencode แบบอ่านอย่างเดียว แสดงเฉพาะชื่อ provider และชนิด ไม่แสดง secret) พร้อมคำแนะนำ
+`opencode auth login` ยอดใช้จ่ายในแท็บ OpenCode ยังมาจาก ccusage ตาม R-015
+
+**ไม่รวม:**
+- ไม่ login แทนผู้ใช้ ไม่เขียนหรือแก้ไฟล์ของ opencode
+- ไม่เปลี่ยนแหล่งข้อมูลของแท็บ OpenCode (ยังเป็น ccusage)
+- ไม่อ่าน log ของ OpenCode (คงตาม R-015)
+
+**ตรวจรับเมื่อ:**
+- [ ] หน้า Connections มีการ์ด OpenCode บอกสถานะติดตั้ง/ไม่ติดตั้ง และรายชื่อ provider ที่ login ไว้
+- [ ] ไม่มีค่า secret ใดจากไฟล์ auth ปรากฏใน UI, log หรือ settings (มีเทสต์ synthetic)
+- [ ] ไม่พบ opencode หรือไม่ได้ login → แสดงคำแนะนำ `opencode auth login` และไม่ error
+
+## R-019 · หน้า login รองรับ API key ของทุกโปรแกรมที่ดึงยอดได้จริง
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | `ConnectDialog` · `ProviderMeta` · `ProviderConnectionStore` · provider clients (Claude Admin API) |
+| เกี่ยวกับ | [[R-006]] · [[R-012]] · [[R-014]] · [[R-020]] |
+
+**คุณระบุ:**
+> หน้า login ต้องรองรับการใช้งาน api ของทุกโปรแกรม
+
+คำตอบเพิ่มเติม (2026-11-11) เลือกความหมาย: "ใส่ API key ดึงยอดจาก vendor"
+
+**ผมเข้าใจว่า:**
+แต่ละการ์ดในหน้า Sign-in / Connections มีช่อง API key ที่ดึง usage/cost ได้จริงจาก API ของผู้ให้บริการ:
+Claude = Anthropic Admin API key (usage/cost report ของ organization) เพิ่มใหม่ ไม่แทน OAuth ของ Claude Code;
+OpenAI = Admin key เดิม; ผู้ให้บริการที่ไม่มี usage API ด้วย key ธรรมดา การ์ดบอกตรง ๆ ว่ารองรับไม่ได้เพราะอะไร
+key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
+
+**ไม่รวม:**
+- Gemini: ไม่นำ service account / Cloud Monitoring กลับมา (คงตาม R-012)
+- ไม่เปลี่ยน quota gauge เดิมที่มาจาก OAuth / CLI
+- ไม่เดา endpoint: ผู้ให้บริการที่ยืนยันจากเอกสารไม่ได้ว่ามี usage API จะไม่ทำ
+
+**ตรวจรับเมื่อ:**
+- [ ] ใส่ Anthropic Admin key ที่ถูกต้องแล้วแท็บ Claude แสดง usage/cost ของ API (synthetic tests; คุณตรวจด้วย key จริง)
+- [ ] key ผิดรูปแบบหรือถูกปฏิเสธ → ข้อความบอกสาเหตุ ไม่ล้ม และไม่แสดง key
+- [ ] การ์ดที่ไม่รองรับ API key บอกเหตุผลชัดเจน
+- [ ] key ถูกเก็บใน DPAPI ไม่อยู่ใน settings หรือ log
+
+## R-018 · แก้สองจุดจากภาพคู่: ชื่อ gauge ล้นการ์ด และแท็บ AGY ไม่มีสถิติ/กราฟ
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | `Controls/GaugeControl.cs` · แท็บ Gemini / AGY (`ProviderTabViewModel`, ข้อมูล ccusage ของ R-014) · ScreenEvidence |
+| เกี่ยวกับ | [[R-004]] · [[R-005]] · [[R-013]] · [[R-014]] |
+
+**คุณระบุ:**
+> แก้ส่วนที่แจ้งได้เลยครับ
+
+(ส่วนที่แจ้ง = `Docs/STATUS_2026-11-11.md` ข้อ 3: แท็บ Gemini / AGY ไม่มีแถวสถิติและกราฟรายวันแบบ 1.3.3 และชื่อ meter
+"Claude and GPT models · Session/Weekly" ชนกันที่ความกว้าง 1120 px)
+
+**ผมเข้าใจว่า:**
+1. ชื่อและคำอธิบายรองของ gauge ใน dashboard ไม่เกินความกว้างของการ์ด ขึ้นบรรทัดได้สูงสุด 2 บรรทัด ที่เหลือตัดเป็น "…"
+2. แท็บ Gemini / AGY มีแถวสถิติ token และกราฟรายวัน ดึงจาก ccusage agent `antigravity` (agy `/usage` ไม่ให้ข้อมูล token)
+
+**ไม่รวม:**
+- ไม่เปลี่ยนแหล่ง % quota ของ AGY
+- ไม่แก้ widget (ตัด "…" อยู่แล้ว)
+
+**ตรวจรับเมื่อ:**
+- [ ] ชื่อ gauge ยาวไม่ล้นการ์ดที่ 1120 px ทั้ง light/dark (synthetic render)
+- [ ] ชื่อสั้นแสดงเหมือนเดิม
+- [ ] แท็บ AGY มีแถวสถิติและกราฟรายวันเมื่อ ccusage มีข้อมูล `antigravity`
+- [ ] ไม่มีข้อมูล `antigravity` → แท็บ AGY แสดงแบบเดิมไม่ error
 
 ## R-015 · gauge ค่าใช้จ่ายของ OpenCode และ tab OpenCode
 
