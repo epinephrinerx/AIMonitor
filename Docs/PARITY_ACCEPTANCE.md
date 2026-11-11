@@ -195,5 +195,5 @@ must be strictly >95%. Native shell/titlebar/menu and actual DPI captures remain
 - No installer was executed and no real Run key or real credentials were used during local verification.
 - Gemini tab renamed Gemini / AGY and backed by AGY CLI pools (R-012, R-013; owner accepted 2026-10-16).
 - The dashboard tab row adds OpenCode, Overview and All agents (R-014–R-017; owner accepted 2026-11-10); paired screens show the extra tab headers.
-- Paired dashboard screens are rendered without ccusage; the ccusage rows that R-014 adds under existing gauges are not in the paired evidence.
+- Paired Claude and OpenAI dashboards are rendered without ccusage, so the ccusage rows that R-014 adds under existing gauges are not in the paired evidence; paired Gemini / AGY dashboards use synthetic `antigravity` ccusage data (R-018).
 - Owner sign-off and final R-004 score have not been recorded.

@@ -14,6 +14,12 @@ namespace AIMonitor.Presentation.Wpf.Controls;
 internal readonly record struct CompactGaugeLayout(Rect Ring, Rect Title, Rect Subtitle, double Height);
 
 /// <summary>
+/// The dashboard (non-compact) caption/subtitle layout decision (R-018 G3): the maximum text width
+/// the caption and subtitle may span and the number of lines the caption may use.
+/// </summary>
+internal readonly record struct DashboardTextLayout(double MaxTextWidth, int CaptionMaxLines);
+
+/// <summary>
 /// A lightweight, custom-drawn vector gauge control implemented via DrawingContext.
 /// Satisfies ADR-0001: custom-drawn gauge control with native DPI scaling and theme awareness.
 /// </summary>
@@ -159,6 +165,35 @@ public sealed class GaugeControl : FrameworkElement
         return new CompactGaugeLayout(ring, title, subtitle, height);
     }
 
+    /// <summary>
+    /// Pure dashboard caption/subtitle layout decision (R-018 G3/D8), unit-testable without
+    /// rendering. The text box spans <c>width − 8</c> (never below 1); the caption sits at
+    /// <c>center.Y + radius * 0.45</c> and the subtitle keeps a bottom margin of 4. Two caption
+    /// lines are allowed unless, with a subtitle drawn, they would overlap its top
+    /// (<c>captionTop + lines × captionLineHeight &gt; height − subtitleHeight − 4</c>); then the
+    /// caption is reduced to one line, never hidden.
+    /// </summary>
+    internal static DashboardTextLayout ComputeDashboardText(
+        double width, double height, double captionLineHeight, double subtitleHeight, bool hasSubtitle)
+    {
+        double safeWidth = NonNegative(width);
+        double safeHeight = NonNegative(height);
+        double safeCaptionLineHeight = NonNegative(captionLineHeight);
+        double safeSubtitleHeight = NonNegative(subtitleHeight);
+
+        double maxTextWidth = Math.Max(1.0, safeWidth - 8.0);
+        double captionTop = (safeHeight * 0.48) + (Math.Min(safeWidth, safeHeight) * 0.38 * 0.45);
+
+        int captionLines = 2;
+        if (hasSubtitle
+            && captionTop + (captionLines * safeCaptionLineHeight) > safeHeight - safeSubtitleHeight - 4.0)
+        {
+            captionLines = 1;
+        }
+
+        return new DashboardTextLayout(maxTextWidth, captionLines);
+    }
+
     internal static string FormatCaptionText(string title, string valueText, bool showInlineValue)
     {
         if (showInlineValue)
@@ -257,9 +292,14 @@ public sealed class GaugeControl : FrameworkElement
 
         // Title text (e.g. Session or Session 45% when !ShowInlineValue)
         var captionText = FormatCaptionText(Title, ValueText, ShowInlineValue);
-        if (!string.IsNullOrEmpty(captionText))
-        {
-            var titleFormatted = new FormattedText(
+        var hasSubtitle = ShowSubtitle && !string.IsNullOrEmpty(Subtitle);
+        var captionTop = center.Y + radius * 0.45;
+
+        // R-018 G1/G2/G3: build the natural single-line metrics first, then let the pure helper
+        // decide the maximum text width and how many caption lines fit above the subtitle.
+        var titleFormatted = string.IsNullOrEmpty(captionText)
+            ? null
+            : new FormattedText(
                 captionText,
                 CultureInfo.CurrentCulture,
                 System.Windows.FlowDirection.LeftToRight,
@@ -267,23 +307,50 @@ public sealed class GaugeControl : FrameworkElement
                 Math.Max(10, radius * 0.24),
                 textPrimaryBrush,
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
-
-            dc.DrawText(titleFormatted, new Point(center.X - titleFormatted.Width / 2.0, center.Y + radius * 0.45));
-        }
-
-        // Subtitle text (e.g. Resets in 2h) - only if ShowSubtitle is true
-        if (ShowSubtitle && !string.IsNullOrEmpty(Subtitle))
-        {
-            var subFormatted = new FormattedText(
+        var subFormatted = hasSubtitle
+            ? new FormattedText(
                 Subtitle,
                 CultureInfo.CurrentCulture,
                 System.Windows.FlowDirection.LeftToRight,
                 subTypeface,
                 Math.Max(9, radius * 0.18),
                 textSecondaryBrush,
-                VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                VisualTreeHelper.GetDpi(this).PixelsPerDip)
+            : null;
+        var layout = ComputeDashboardText(
+            width,
+            height,
+            titleFormatted?.Height ?? 0.0,
+            subFormatted?.Height ?? 0.0,
+            hasSubtitle);
 
-            dc.DrawText(subFormatted, new Point(center.X - subFormatted.Width / 2.0, height - subFormatted.Height - 4));
+        if (titleFormatted is not null)
+        {
+            if (titleFormatted.Width <= layout.MaxTextWidth)
+            {
+                // D8: a caption that fits on one line keeps the legacy draw call exactly.
+                dc.DrawText(titleFormatted, new Point(center.X - titleFormatted.Width / 2.0, captionTop));
+            }
+            else
+            {
+                // R-018 G1: wrap to at most the allowed line count, trim the rest, centred at x = 4.
+                titleFormatted.MaxTextWidth = layout.MaxTextWidth;
+                titleFormatted.MaxLineCount = layout.CaptionMaxLines;
+                titleFormatted.Trimming = TextTrimming.CharacterEllipsis;
+                titleFormatted.TextAlignment = TextAlignment.Center;
+                dc.DrawText(titleFormatted, new Point(4.0, captionTop));
+            }
+        }
+
+        // Subtitle text (e.g. Resets in 2h) - only if ShowSubtitle is true
+        if (subFormatted is not null)
+        {
+            // R-018 G2: one trimmed line spanning the card width, same bottom position.
+            subFormatted.MaxTextWidth = layout.MaxTextWidth;
+            subFormatted.MaxLineCount = 1;
+            subFormatted.Trimming = TextTrimming.CharacterEllipsis;
+            subFormatted.TextAlignment = TextAlignment.Center;
+            dc.DrawText(subFormatted, new Point(4.0, height - subFormatted.Height - 4));
         }
     }
 

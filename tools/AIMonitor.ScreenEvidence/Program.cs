@@ -49,6 +49,14 @@ internal static class Program
             var main = new MainWindow(vm, session) { Width = 1120, Height = 820 };
             foreach (var tab in vm.ProviderTabs)
             {
+                if (string.Equals(tab.ProviderId, "agy", StringComparison.Ordinal))
+                {
+                    // R-018 D2: dashboard-agy-* is captured once per theme from the agent-usage
+                    // view model below, so the paired AGY screens show the ccusage stats row
+                    // and chart.
+                    continue;
+                }
+
                 vm.SelectedTab = tab;
                 Capture(main, $"dashboard-{tab.ProviderId}-{theme}");
             }
@@ -91,14 +99,20 @@ internal static class Program
             usageVm.RefreshAsync().GetAwaiter().GetResult();
             // The in-memory update may already complete inside RefreshAsync; the loop is the
             // V5 readiness check and pumps background frames instead of blocking on the
-            // agent-usage task.
+            // agent-usage task. R-018 D2 adds the AGY checks: HasHistory and the four new
+            // stat tiles, and Overview now carries the antigravity meter (5 meters).
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (true)
             {
+                var agyStatLabels = usageVm.AgyTab.StatTiles.Select(t => t.Label).ToHashSet(StringComparer.Ordinal);
                 var missing =
                     usageVm.OpenCodeTab.Meters.Count == 0 ? "OpenCode" :
-                    usageVm.OverviewTab.Meters.Count != 4 ? "Overview" :
-                    usageVm.AllAgentsTab.Sessions.Count == 0 ? "All agents" : null;
+                    usageVm.OverviewTab.Meters.Count != 5 ? "Overview" :
+                    usageVm.AllAgentsTab.Sessions.Count == 0 ? "All agents" :
+                    !usageVm.AgyTab.HasHistory ? "AGY history" :
+                    !(agyStatLabels.Contains("Total tokens") && agyStatLabels.Contains("Output tokens")
+                        && agyStatLabels.Contains("Cache reads")
+                        && agyStatLabels.Contains("Equivalent API value")) ? "AGY stats" : null;
                 if (missing is null) break;
                 if (DateTime.UtcNow >= deadline)
                 {
@@ -115,7 +129,7 @@ internal static class Program
 
             usageVm.LastRefreshStatus = "Synthetic fixture · Manual refresh";
             var usageMain = new MainWindow(usageVm, usageSession) { Width = 1120, Height = 820 };
-            foreach (var tabId in new[] { "opencode", "overview", "all-agents" })
+            foreach (var tabId in new[] { "opencode", "overview", "all-agents", "agy" })
             {
                 // Fail closed when the render crosses local midnight.
                 if (DateOnly.FromDateTime(DateTime.Now) != today)
@@ -276,6 +290,7 @@ internal static class Program
             ("claude", "Model A", 4), ("claude", "Model B", 1),
             ("codex", "Model A", 2),
             ("opencode", "Model A", 1), ("opencode", "Model B", 2), ("opencode", "Model X", 1),
+            ("antigravity", "Model C", 1),
             ("copilot", "Model B", 1),
         ];
 
