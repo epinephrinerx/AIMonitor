@@ -1,5 +1,5 @@
 """Regression: the parity report pairs agy/gemini counterparts, lists 2.0-only and
-missing-in-2.0 screens, and preserves owner records (SPEC R-005 V, V3/V10/V12)."""
+missing-in-2.0 screens, and preserves owner records (SPEC R-005 V, V3/V10/V12/V14)."""
 from pathlib import Path
 import json
 import re
@@ -60,9 +60,40 @@ INDEX_CRITERIA = ("Row structure", "Complete elements", "Text",
 PNG_PLACEHOLDER = b"\x89PNG\r\n\x1a\n"
 SECTION_RE = re.compile(r"<section\b.*?</section>", re.DOTALL)
 IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc="([^"]*)"')
-SCORE_SELECT_RE = re.compile(r'<select\b[^>]*\bclass="score"')
+FIGURE_RE = re.compile(r"<figure\b.*?</figure>", re.DOTALL)
+CAPTION_RE = re.compile(r"<figcaption>(.*?)</figcaption>")
+SELECT_RE = re.compile(r"<select\b[^>]*>")
+CLASS_ATTR_RE = re.compile(r'\bclass="([^"]*)"')
 LABEL_TEXT_RE = re.compile(r"<label>(.*?)<select", re.DOTALL)
 PAR_ID_RE = re.compile(r"PAR-(\d+)\.\d+")
+# V14: the two figure captions the spec fixes for every pair section.
+PYTHON_REFERENCE_CAPTION = "Python reference"
+WPF_CAPTION = "C# WPF"
+
+
+def is_score_select(tag):
+    """V14: a scoring control is any <select> whose class attribute contains the
+    token 'score' (whitespace-split), matching what the page's '.score' JS selects;
+    a compound class such as 'score extra' must therefore still count."""
+    match = CLASS_ATTR_RE.search(tag)
+    return match is not None and "score" in match.group(1).split()
+
+
+def count_score_selects(html):
+    """Number of scoring controls in an HTML chunk, counted over the raw text."""
+    return sum(1 for match in SELECT_RE.finditer(html) if is_score_select(match.group(0)))
+
+
+def figure_sources(chunk):
+    """V14: [(figcaption, img src), ...] for every <figure> in the chunk. The list
+    keeps document order, which V14 does not specify; callers key it by caption."""
+    figures = []
+    for figure in FIGURE_RE.findall(chunk):
+        caption = CAPTION_RE.search(figure)
+        src = IMG_SRC_RE.search(figure)
+        figures.append((caption.group(1) if caption else None,
+                        src.group(1) if src else None))
+    return figures
 
 
 class ParityReportTests(unittest.TestCase):
@@ -163,7 +194,8 @@ class ParityReportTests(unittest.TestCase):
             (missing if "No 2.0 render" in row[2] else pair).append(row)
         return pair, missing
 
-    # --- index.html section parsing (V12: assert inside each pair's <section>) ---
+    # --- index.html section parsing (V12/V14: assert inside each pair's <section>
+    # and, for the images, inside the captioned <figure>) ---
 
     def parse_sections(self, index):
         sections = []
@@ -177,7 +209,8 @@ class ParityReportTests(unittest.TestCase):
                 "class": attrs.get("class", ""),
                 "title": heading.group(1) if heading else None,
                 "srcs": IMG_SRC_RE.findall(chunk),
-                "score_selects": len(SCORE_SELECT_RE.findall(chunk)),
+                "figures": figure_sources(chunk),
+                "score_selects": count_score_selects(chunk),
                 "labels": LABEL_TEXT_RE.findall(chunk),
                 "text": " ".join(re.sub(r"<[^>]+>", " ", chunk).split()),
             })
@@ -193,7 +226,10 @@ class ParityReportTests(unittest.TestCase):
         return pair, only
 
     def assert_index_score_selects(self, index, pair_count):
-        """V12: total select.score count equals 5 criteria x number of pairs."""
+        """V12/V14: five scoring controls per pair section, zero in every 2.0-only
+        section, and 5 x pairs over the WHOLE page. Controls are recognised by the
+        'score' class token (not class equality), and the page-wide count is taken
+        over the raw HTML so a control outside every <section> cannot escape."""
         pair, only = self.split_index_sections(index)
         self.assertEqual(len(pair), pair_count, "index pair sections differ from the pair count")
         for section in pair:
@@ -202,8 +238,11 @@ class ParityReportTests(unittest.TestCase):
         for section in only:
             self.assertEqual(section["score_selects"], 0,
                              f"2.0-only {section['title']!r} must not be scored")
-        total = sum(section["score_selects"] for section in pair + only)
-        self.assertEqual(total, 5 * pair_count, "total select.score count is not 5 x pairs")
+        inside = sum(section["score_selects"] for section in pair + only)
+        page = count_score_selects(index)
+        self.assertEqual(inside, 5 * pair_count, "total select.score count is not 5 x pairs")
+        self.assertEqual(page, inside, "scoring controls outside <section> escape the count")
+        self.assertEqual(page, 5 * pair_count, "page-wide scoring-control count is not 5 x pairs")
 
     def index_pair_sections(self, index, expected_labels):
         pair, _ = self.split_index_sections(index)
@@ -214,10 +253,25 @@ class ParityReportTests(unittest.TestCase):
         return by_title
 
     def assert_index_pair_images(self, by_title, label, wpf_name, legacy_name):
-        """V12: the pair's <section> holds exactly its legacy and WPF image src."""
-        srcs = by_title[label]["srcs"]
-        self.assertEqual(sorted(srcs), sorted([f"legacy/{legacy_name}.png", f"wpf/{wpf_name}.png"]),
+        """V12/V14: the pair's <section> holds exactly its legacy and WPF images, and
+        each <img src> sits in its own <figure> identified by caption: 'Python
+        reference' -> legacy/<legacy>.png, 'C# WPF' -> wpf/<wpf>.png. V14 leaves the
+        order of the two figures unspecified, so it is keyed by caption, not position."""
+        section = by_title[label]
+        self.assertEqual(sorted(section["srcs"]), sorted([f"legacy/{legacy_name}.png", f"wpf/{wpf_name}.png"]),
                          f"pair {label!r} shows the wrong images")
+        by_caption = {}
+        for caption, src in section["figures"]:
+            self.assertIsNotNone(caption, f"pair {label!r} has a figure without a figcaption")
+            self.assertIsNotNone(src, f"pair {label!r}: figure {caption!r} has no img src")
+            self.assertNotIn(caption, by_caption, f"pair {label!r} repeats figure caption {caption!r}")
+            by_caption[caption] = src
+        self.assertEqual(sorted(by_caption), sorted([PYTHON_REFERENCE_CAPTION, WPF_CAPTION]),
+                         f"pair {label!r} must hold exactly one figure per caption")
+        self.assertEqual(by_caption[PYTHON_REFERENCE_CAPTION], f"legacy/{legacy_name}.png",
+                         f"pair {label!r}: the 'Python reference' figure must show the legacy render")
+        self.assertEqual(by_caption[WPF_CAPTION], f"wpf/{wpf_name}.png",
+                         f"pair {label!r}: the 'C# WPF' figure must show the WPF render")
 
     def assert_index_only_set(self, index, expected):
         """V12: exact 2.0-only section set; each holds its reason and image, unscoped."""
