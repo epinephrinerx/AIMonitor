@@ -365,6 +365,9 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **คุณระบุ:**
 > และต้องมีคำแนะนำสำหรับการล็อคอินของ agent อื่นๆนอกจากที่เรากำหนดไว้
 
+คำตอบเพิ่มเติม (2026-11-11): ccusage รองรับ 19 agent — ผู้ใช้เลือก "เฉพาะที่ยืนยันแล้ว + ข้อความกลาง"
+(คำแนะนำเฉพาะของ GitHub Copilot CLI และ ZCode ที่ยืนยันจากเอกสารทางการแล้ว ที่เหลือใช้ข้อความกลาง เพิ่มทีหลังได้)
+
 **ผมเข้าใจว่า:**
 หน้า Connections มีส่วน "agent อื่น" แสดงคำแนะนำ login ของ agent ที่ ccusage ตรวจเจอแต่ไม่มีแท็บของตัวเอง
 (เช่น GitHub Copilot, Z Code) agent ที่ไม่รู้จักใช้คำแนะนำกลาง ข้อความต้องตรวจสอบกับเอกสารของผู้ให้บริการก่อนใส่
@@ -390,9 +393,11 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **คุณระบุ:**
 > ไม่มีการล็อคอินของ opencode ซึ่งต้องเพิ่มครับ
 
+คำตอบเพิ่มเติม (2026-11-11): OpenCode รุ่นปัจจุบันเก็บ login ใน SQLite `opencode.db` ไม่ใช่ `auth.json` แล้ว — ผู้ใช้เลือก "รัน opencode auth list"
+
 **ผมเข้าใจว่า:**
 เพิ่มการ์ด OpenCode ในหน้า Sign-in / Connections: ตรวจว่าติดตั้ง opencode ไหม และ login provider ไหนไว้แล้ว
-(อ่านไฟล์ auth ของ opencode แบบอ่านอย่างเดียว แสดงเฉพาะชื่อ provider และชนิด ไม่แสดง secret) พร้อมคำแนะนำ
+(รันคำสั่งอ่านอย่างเดียว `opencode auth list` และใช้ `auth.json` รุ่นเก่าเป็นทางสำรอง แสดงเฉพาะชื่อ provider และชนิด ไม่แสดง secret) พร้อมคำแนะนำ
 `opencode auth login` ยอดใช้จ่ายในแท็บ OpenCode ยังมาจาก ccusage ตาม R-015
 
 **ไม่รวม:**
@@ -417,7 +422,9 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **คุณระบุ:**
 > หน้า login ต้องรองรับการใช้งาน api ของทุกโปรแกรม
 
-คำตอบเพิ่มเติม (2026-11-11) เลือกความหมาย: "ใส่ API key ดึงยอดจาก vendor"
+คำตอบเพิ่มเติม (2026-11-11) เลือกความหมาย: "ใส่ API key ดึงยอดจาก vendor" · หลังค้นเอกสาร ผู้ใช้เลือก "Legacy Usage & Cost"
+(`/v1/organizations/usage_report/messages` และ `/v1/organizations/cost_report`; ต้องเป็นบัญชี organization) · Gemini และ
+OpenCode Go/Console ไม่มี usage API ที่เปิดเผยในเอกสาร → การ์ดบอกว่ารองรับไม่ได้
 
 **ผมเข้าใจว่า:**
 แต่ละการ์ดในหน้า Sign-in / Connections มีช่อง API key ที่ดึง usage/cost ได้จริงจาก API ของผู้ให้บริการ:
@@ -440,7 +447,7 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว |
+| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R018.md`, D1–D9 รับรอง 2026-11-11) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | `Controls/GaugeControl.cs` · แท็บ Gemini / AGY (`ProviderTabViewModel`, ข้อมูล ccusage ของ R-014) · ScreenEvidence |
 | เกี่ยวกับ | [[R-004]] · [[R-005]] · [[R-013]] · [[R-014]] |
