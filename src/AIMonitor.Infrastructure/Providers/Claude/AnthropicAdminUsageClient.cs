@@ -589,6 +589,24 @@ public sealed class AnthropicAdminUsageClient
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
+            if (!bucket.TryGetProperty("ending_at", out var endingAtElement)
+                || endingAtElement.ValueKind != JsonValueKind.String)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            var endingAtText = endingAtElement.GetString();
+            if (string.IsNullOrEmpty(endingAtText)
+                || !HasTimezoneDesignator(endingAtText)
+                || !DateTimeOffset.TryParse(
+                    endingAtText,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out _))
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
             var dayUtc = startingAt.UtcDateTime.Date;
 
             long bucketTokens = 0;
@@ -756,6 +774,24 @@ public sealed class AnthropicAdminUsageClient
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
                 out var startingAt))
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            if (!bucket.TryGetProperty("ending_at", out var endingAtElement)
+                || endingAtElement.ValueKind != JsonValueKind.String)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            var endingAtText = endingAtElement.GetString();
+            if (string.IsNullOrEmpty(endingAtText)
+                || !HasTimezoneDesignator(endingAtText)
+                || !DateTimeOffset.TryParse(
+                    endingAtText,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out _))
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
