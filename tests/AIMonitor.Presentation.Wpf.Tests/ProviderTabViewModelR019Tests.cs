@@ -8,9 +8,11 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// expired or rejected, the Claude tab shows NO setup card (it shows the Admin stats and the E2 note
 /// instead), and it hides the setup card ONLY then. E12a: <c>ProviderSnapshot.AdminOnly</c> is the
 /// single signal the tab keys on; <c>AdminApiConnected</c> keeps meaning "Admin call succeeded" and
-/// must not by itself change the setup card.
+/// must not by itself change the setup card. E13e adds: the tab reports <c>IsConfigured = true</c>
+/// for those admin-only snapshots (the snapshot IS configured — C6/E2), while non-admin-only
+/// unconfigured states keep reporting false.
 ///
-/// <para><b>Aligned API (E11/E12a, read from the merged <c>src/</c>):</b>
+/// <para><b>Aligned API (E11/E12a/E13e, read from the merged <c>src/</c>):</b>
 /// <c>ProviderSnapshot(…, adminApiConnected:, adminOnly:)</c>; the tab reads <c>snapshot.AdminOnly</c>
 /// in <c>UpdateFromSnapshot</c>.</para>
 /// </summary>
@@ -47,6 +49,9 @@ public sealed class ProviderTabViewModelR019Tests
     [Theory]
     // E2/E12a: OAuth missing (NotConnected) or expired, Admin succeeded → AdminOnly → no setup card,
     // the Admin stats and the note, and no quota meters.
+    // E13e: the tab's IsConfigured must be TRUE for these admin-only snapshots — the snapshot IS
+    // configured (C6/E2 "the tab is configured: true"); the old derivation from DetectionState
+    // alone reported the NotConnected leg as false even while showing the Admin stats.
     [InlineData(DetectionState.NotConnected)]
     [InlineData(DetectionState.Expired)]
     public void UpdateFromSnapshot_ClaudeAdminOnly_NoSetupCardStatsAndNote(DetectionState oAuthState)
@@ -55,6 +60,7 @@ public sealed class ProviderTabViewModelR019Tests
 
         tab.UpdateFromSnapshot(AdminOnlySnapshot(oAuthState));
 
+        Assert.True(tab.IsConfigured);
         Assert.False(tab.ShowSetupCard);
         Assert.Equal("", tab.ErrorMessage);
         Assert.Equal(AdminOnlyNote, tab.ValueNote);
@@ -68,7 +74,8 @@ public sealed class ProviderTabViewModelR019Tests
     public void UpdateFromSnapshot_ClaudeNotConnectedWithoutAdminOnly_StillShowsSetupCard()
     {
         // E12a "only then": without the AdminOnly signal the Claude tab keeps R-004's setup card —
-        // nothing here is repainted by R-019 (E10).
+        // nothing here is repainted by R-019 (E10). E13e's IsConfigured lift belongs to AdminOnly
+        // ONLY: without the signal the unconfigured NotConnected state must stay reported false.
         var tab = new ProviderTabViewModel("claude", "Claude");
 
         tab.UpdateFromSnapshot(new ProviderSnapshot(
@@ -78,6 +85,7 @@ public sealed class ProviderTabViewModelR019Tests
             detection: new DetectionInfo("claude", DetectionState.NotConnected)));
 
         Assert.True(tab.ShowSetupCard);
+        Assert.False(tab.IsConfigured);
     }
 
     [Fact]
@@ -86,6 +94,7 @@ public sealed class ProviderTabViewModelR019Tests
         // E12a: the tab keys on AdminOnly ALONE. AdminApiConnected=true ("Admin call succeeded")
         // with AdminOnly=false must not hide the setup card. (A reachable shape: Admin succeeded
         // while the snapshot is otherwise unconfigured — the flag, not the connection, decides.)
+        // E13e likewise: only AdminOnly lifts IsConfigured, never AdminApiConnected alone.
         var tab = new ProviderTabViewModel("claude", "Claude");
 
         tab.UpdateFromSnapshot(new ProviderSnapshot(
@@ -97,6 +106,7 @@ public sealed class ProviderTabViewModelR019Tests
             adminOnly: false));
 
         Assert.True(tab.ShowSetupCard);
+        Assert.False(tab.IsConfigured);
     }
 
     [Fact]

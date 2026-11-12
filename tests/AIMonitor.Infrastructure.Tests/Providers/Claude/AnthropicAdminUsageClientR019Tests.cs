@@ -36,6 +36,23 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 /// (d) cancelled caller token after an Admin failure → OperationCanceledException, and one report
 /// failing cancels its sibling's in-flight request; (e) starting_at/ending_at sent as
 /// "yyyy-MM-ddTHH:mm:ssZ". C5/E9 error texts are pinned verbatim from the spec.</para>
+///
+/// <para>E13 additions pinned below (fix round 2, from the E13 text — expected values from the spec,
+/// not from code): (a) one report failing cancels the shared deadline source AT ONCE — with a long
+/// client timeout the sibling request observes cancellation and GetUsageAsync returns long before
+/// the deadline; (b) has_more true with an empty-string "" cursor → Unavailable before any further
+/// request (request counts pinned), same for null, and the next_page property is REQUIRED on every
+/// page — absent → Unavailable, for usage and for cost alike; (c) any exception while the caller
+/// token is cancelled surfaces as OperationCanceledException with no sentinel anywhere, and JSON
+/// nodes that are not objects (root, bucket, result) → AnthropicAdminApiException, never
+/// InvalidOperationException escaping to the caller; (d) currency compared ordinal against "USD"
+/// (lowercase "usd" → Unavailable) and bucket starting_at/ending_at must carry Z or an offset
+/// (without one → Unavailable, usage and cost); E7 body-read cancellation — a response stream whose
+/// ReadAsync blocks until the token fires, for the caller-cancels and the deadline leg. E13g: the
+/// public DefaultTimeout (20 s) / DefaultMaxResponseBodyBytes (1,000,000) are pinned, and with the
+/// production cap a body of exactly 1,000,000 bytes is accepted while 1,000,001 is Unavailable.
+/// The sibling-cancel tests order their handlers with TaskCompletionSources (the failing report
+/// answers only once the sibling is really blocked), so no test depends on thread timing.</para>
 /// </summary>
 [Trait("Category", "Contract")]
 public sealed class AnthropicAdminUsageClientR019Tests
@@ -102,6 +119,31 @@ public sealed class AnthropicAdminUsageClientR019Tests
         """
         {"data":[{"starting_at":"2026-11-12T00:00:00Z","ending_at":"2026-11-13T00:00:00Z","results":[{"amount":"0.01","currency":"USD"}]},{"starting_at":"2026-11-14T00:00:00Z","ending_at":"2026-11-15T00:00:00Z","results":[{"amount":"100.00","currency":"USD"}]},{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"123.45","currency":"USD"}]}],"has_more":false,"next_page":null}
         """;
+
+    // E13b: valid single-bucket pages whose cursor field is varied by a builder — the same
+    // well-formed data (usage today = 1+1+0+0+1 = 3; cost today = "123.45" cents → 1.2345m) so a
+    // client that WRONGLY accepts a bad/absent cursor completes with a (possibly double-counted)
+    // total instead of Unavailable, and the request-count assertions below decide between
+    // "stopped at page 1" and "went on".
+    private const string UsageTodayBucketValid =
+        """{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}""";
+
+    private const string CostTodayBucketValid =
+        """{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"123.45","currency":"USD"}]}""";
+
+    /// <summary>Usage envelope with <see cref="UsageTodayBucketValid"/> and a chosen cursor field.
+    /// Passing <c>null</c> for <paramref name="nextPageJson"/> omits the next_page property
+    /// entirely (E13b: the property is required on every page).</summary>
+    private static string UsagePageWithCursorField(string? nextPageJson, bool hasMore = true) =>
+        nextPageJson is null
+            ? $$"""{"data":[{{UsageTodayBucketValid}}],"has_more":{{(hasMore ? "true" : "false")}}}"""
+            : $$"""{"data":[{{UsageTodayBucketValid}}],"has_more":{{(hasMore ? "true" : "false")}},"next_page":{{nextPageJson}}}""";
+
+    /// <summary>Cost envelope with <see cref="CostTodayBucketValid"/> and a chosen cursor field.</summary>
+    private static string CostPageWithCursorField(string? nextPageJson, bool hasMore = true) =>
+        nextPageJson is null
+            ? $$"""{"data":[{{CostTodayBucketValid}}],"has_more":{{(hasMore ? "true" : "false")}}}"""
+            : $$"""{"data":[{{CostTodayBucketValid}}],"has_more":{{(hasMore ? "true" : "false")}},"next_page":{{nextPageJson}}}""";
 
     // ---- Shared helpers ----------------------------------------------------------------------
 
@@ -539,26 +581,108 @@ public sealed class AnthropicAdminUsageClientR019Tests
     [Fact]
     public async Task GetUsageAsync_HasMoreWithNullNextPage_FailsUnavailable()
     {
-        const string broken =
-            """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}],"has_more":true,"next_page":null}""";
-        var handler = Respond((_, _) => Success(broken), (_, _) => Success(CostTodayAndYesterday));
+        // E5/E13b: has_more true with a null cursor → Unavailable BEFORE any further request — the
+        // page-2 responder hands back a perfectly valid last page, so a client that wrongly
+        // continues completes successfully instead of failing; the request count pins "exactly one".
+        var handler = Respond(
+            (_, index) => Success(index == 0 ? UsagePageWithCursorField("null") : UsagePageTwo),
+            (_, _) => Success(CostTodayAndYesterday));
         var client = CreateClient(handler);
 
-        // E5: has_more true with a null cursor → the whole Admin result is Unavailable.
         await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
             () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Single(handler.UsageRequests);
     }
 
     [Fact]
     public async Task GetUsageAsync_HasMoreWithEmptyNextPage_FailsUnavailable()
     {
-        const string broken =
-            """{"data":[],"has_more":true,"next_page":""}""";
-        var handler = Respond((_, _) => Success(broken), (_, _) => Success(CostTodayAndYesterday));
+        // E13b (regression of E12c per Reviewer1 N2 / Reviewer2 #3): has_more true with the cursor
+        // "" is as invalid as null — the property must be a NON-EMPTY string when has_more is true.
+        // The old code's seen-cursor set alone accepted a first "" and then RE-FETCHED page 1 (the
+        // URL omits an empty page parameter), summing it a second time when page 2 ends paging.
+        // Page 2 is therefore a valid last page: accepting "" turns into success, not Unavailable.
+        var handler = Respond(
+            (_, index) => Success(index == 0 ? UsagePageWithCursorField("\"\"") : UsagePageTwo),
+            (_, _) => Success(CostTodayAndYesterday));
         var client = CreateClient(handler);
 
         await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
             () => client.GetUsageAsync(CancellationToken.None));
+
+        // Unavailable after exactly one request — the client must not even try the continuation.
+        Assert.Single(handler.UsageRequests);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_CostHasMoreWithEmptyNextPage_FailsAfterOneRequest()
+    {
+        // E13b on the cost report: identical rule — has_more true with "" → Unavailable before any
+        // further request. A valid last page at index 1 exposes acceptance as success.
+        var handler = Respond(
+            (_, _) => Success(UsageTodayOkSinglePage),
+            (_, index) => Success(index == 0 ? CostPageWithCursorField("\"\"") : CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Single(handler.CostRequests);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_CostHasMoreWithNullNextPage_FailsAfterOneRequest()
+    {
+        var handler = Respond(
+            (_, _) => Success(UsageTodayOkSinglePage),
+            (_, index) => Success(index == 0 ? CostPageWithCursorField("null") : CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Single(handler.CostRequests);
+    }
+
+    [Theory]
+    // E13b: the next_page PROPERTY is required on every page — absent → Unavailable. (a) with
+    // has_more true the client cannot continue anyway; (b) with has_more false the page is a valid
+    // terminal page but the envelope is still incomplete per E5's required shapes
+    // (data[], has_more, next_page). Reviewer2 #2 / Inspector B 3: both parsers accepted the
+    // omission as null and SUCCEEDED — the false rows are the discriminating oracles.
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetUsageAsync_UsagePageMissingNextPageProperty_FailsUnavailable(bool hasMore)
+    {
+        var handler = Respond(
+            (_, _) => Success(UsagePageWithCursorField(null, hasMore)),
+            (_, _) => Success(CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.DoesNotContain(KeySentinel, ex.Message, StringComparison.Ordinal);
+        Assert.Single(handler.UsageRequests);
+    }
+
+    [Theory]
+    // E13b on the cost report: same required-property rule (E5 lists next_page for both envelopes).
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetUsageAsync_CostPageMissingNextPageProperty_FailsUnavailable(bool hasMore)
+    {
+        var handler = Respond(
+            (_, _) => Success(UsageTodayOkSinglePage),
+            (_, _) => Success(CostPageWithCursorField(null, hasMore)));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.DoesNotContain(KeySentinel, ex.Message, StringComparison.Ordinal);
+        Assert.Single(handler.CostRequests);
     }
 
     [Fact]
@@ -682,6 +806,35 @@ public sealed class AnthropicAdminUsageClientR019Tests
     }
 
     [Theory]
+    // E13c: JSON nodes that are not objects (root, bucket, result) → Unavailable WITHOUT an
+    // InvalidOperationException escaping to the caller — JsonElement.TryGetProperty on a non-object
+    // node throws InvalidOperationException internally, so the client must recognize the node kind
+    // itself (or otherwise normalize the failure), never let the raw BCL diagnostic surface.
+    // E12b additionally: no inner exception. The exact type asserted by ThrowsAsync IS the pin —
+    // an escaped InvalidOperationException fails this test.
+    [InlineData("[1,2]")]
+    [InlineData("\"just a string\"")]
+    [InlineData("42")]
+    [InlineData("null")]
+    [InlineData("""{"data":[1],"has_more":false,"next_page":null}""")]
+    [InlineData("""{"data":["bucket"],"has_more":false,"next_page":null}""")]
+    [InlineData("""{"data":[null],"has_more":false,"next_page":null}""")]
+    [InlineData("""{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[1]}],"has_more":false,"next_page":null}""")]
+    [InlineData("""{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":["x"]}],"has_more":false,"next_page":null}""")]
+    public async Task GetUsageAsync_UsageNonObjectNodes_FailAsApiExceptionNotInvalidOperation(string malformedJson)
+    {
+        var handler = Respond((_, _) => Success(malformedJson), (_, _) => Success(CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Null(ex.InnerException); // E12b
+        Assert.DoesNotContain("InvalidOperationException", ex.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal); // E8
+    }
+
+    [Theory]
     [InlineData(
         // negative amount
         """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"-5.00","currency":"USD"}]}],"has_more":false,"next_page":null}""")]
@@ -715,6 +868,13 @@ public sealed class AnthropicAdminUsageClientR019Tests
     [InlineData(
         // amount with group separator — InvariantCulture decimal must reject it
         """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"1,234.50","currency":"USD"}]}],"has_more":false,"next_page":null}""")]
+    [InlineData(
+        // E13d: currency is compared ORDINAL against "USD" — the lowercase "usd" row that the
+        // previous OrdinalIgnoreCase comparison accepted is Unavailable (Facts: currency is "USD").
+        """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"123.45","currency":"usd"}]}],"has_more":false,"next_page":null}""")]
+    [InlineData(
+        // E13d: same rule on a mixed-case spelling — anything but the exact "USD" is Unavailable.
+        """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"123.45","currency":"Usd"}]}],"has_more":false,"next_page":null}""")]
     public async Task GetUsageAsync_MalformedCostPayload_FailsNeverZero(string malformedJson)
     {
         var handler = Respond((_, _) => Success(UsageTodayOkSinglePage), (_, _) => Success(malformedJson));
@@ -725,6 +885,73 @@ public sealed class AnthropicAdminUsageClientR019Tests
 
         Assert.False(string.IsNullOrWhiteSpace(ex.Message));
         Assert.DoesNotContain(KeySentinel, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // E13c on the cost report: non-object root/bucket/result nodes → AnthropicAdminApiException,
+    // never the raw InvalidOperationException (E12b: no inner exception either).
+    [InlineData("[1,2]")]
+    [InlineData("null")]
+    [InlineData("""{"data":["bucket"],"has_more":false,"next_page":null}""")]
+    [InlineData("""{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"amount":"123.45","currency":"USD"}]}],"has_more":false,"next_page":1}""")]
+    [InlineData("""{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[1]}],"has_more":false,"next_page":null}""")]
+    public async Task GetUsageAsync_CostNonObjectNodes_FailAsApiExceptionNotInvalidOperation(string malformedJson)
+    {
+        var handler = Respond((_, _) => Success(UsageTodayOkSinglePage), (_, _) => Success(malformedJson));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Null(ex.InnerException);
+        Assert.DoesNotContain("InvalidOperationException", ex.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // E13d: a bucket timestamp must carry Z or an offset — DateTimeOffset.TryParse with
+    // RoundtripKind silently reads a bare "2026-11-15T00:00:00" as LOCAL time (machine-dependent
+    // day), so such a page is Unavailable instead — for starting_at and for ending_at, usage and
+    // cost. The companion test below pins that a real OFFSET remains legal.
+    [InlineData(true, "\"2026-11-15T00:00:00\"", "\"2026-11-16T00:00:00Z\"")]  // starting_at without offset
+    [InlineData(true, "\"2026-11-15T00:00:00Z\"", "\"2026-11-16T00:00:00\"")]  // ending_at without offset
+    [InlineData(false, "\"2026-11-15T00:00:00\"", "\"2026-11-16T00:00:00Z\"")] // cost report, same shapes
+    [InlineData(false, "\"2026-11-15T00:00:00Z\"", "\"2026-11-16T00:00:00\"")] // cost ending_at too
+    public async Task GetUsageAsync_BucketTimestampWithoutOffset_FailsUnavailable(
+        bool usageLeg, string startingAtJson, string endingAtJson)
+    {
+        var page = usageLeg
+            ? $$"""{"data":[{"starting_at":{{startingAtJson}},"ending_at":{{endingAtJson}},"results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}],"has_more":false,"next_page":null}"""
+            : $$"""{"data":[{"starting_at":{{startingAtJson}},"ending_at":{{endingAtJson}},"results":[{"amount":"123.45","currency":"USD"}]}],"has_more":false,"next_page":null}""";
+        var handler = usageLeg
+            ? Respond((_, _) => Success(page), (_, _) => Success(CostTodayAndYesterday))
+            : Respond((_, _) => Success(UsageTodayOkSinglePage), (_, _) => Success(page));
+        var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_BucketTimestampWithNonUtcOffset_IsAcceptedOnItsUtcDay()
+    {
+        // E13d/e companion (guards the new rule from over-rejecting): "must carry Z OR AN OFFSET" —
+        // a +07:00 bucket starting 2026-11-15T00:00+07:00 is 2026-11-14T17:00Z, i.e. UTC day 14:
+        // inside the month (E3), NOT today (clock 2026-11-15 08:00Z). Exact machine-independent
+        // oracles: usage month 3 / today 0; cost month 1.2345m / today 0m.
+        const string usagePage =
+            """{"data":[{"starting_at":"2026-11-15T00:00:00+07:00","ending_at":"2026-11-16T00:00:00+07:00","results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}],"has_more":false,"next_page":null}""";
+        const string costPage =
+            """{"data":[{"starting_at":"2026-11-15T00:00:00+07:00","ending_at":"2026-11-16T00:00:00+07:00","results":[{"amount":"123.45","currency":"USD"}]}],"has_more":false,"next_page":null}""";
+        var handler = Respond((_, _) => Success(usagePage), (_, _) => Success(costPage));
+        var client = CreateClient(handler);
+
+        var result = await client.GetUsageAsync(CancellationToken.None);
+
+        Assert.Equal(3, result.MonthTokens);
+        Assert.Equal(0, result.TodayTokens);
+        Assert.Equal(1.2345m, result.MonthCostUsd);
+        Assert.Equal(0m, result.TodayCostUsd);
     }
 
     [Fact]
@@ -820,6 +1047,56 @@ public sealed class AnthropicAdminUsageClientR019Tests
     }
 
     [Fact]
+    public void ProductionDefaults_AreTwentySecondsAndOneMillionBytes()
+    {
+        // E13g/E7: the production defaults are public so tests pin them: ONE overall deadline of
+        // 20 s (C4's older 15 s is superseded) and a response body cap of 1,000,000 bytes per page.
+        Assert.Equal(TimeSpan.FromSeconds(20), AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.DefaultTimeout);
+        Assert.Equal(1_000_000, AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.DefaultMaxResponseBodyBytes);
+    }
+
+    /// <summary>A valid single-page, no-more usage body padded with an ignored string property so
+    /// that its UTF-8 size is exactly <paramref name="totalBytes"/> (pure ASCII: 1 char = 1 byte).</summary>
+    private static string UsageBodyOfExactSize(int totalBytes)
+    {
+        const string head =
+            """{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}],"has_more":false,"next_page":null,"padding":""" + "\"";
+        const string tail = "\"}";
+        var padLength = totalBytes - head.Length - tail.Length;
+        Assert.True(padLength > 0);
+        var body = head + new string('x', padLength) + tail;
+        Assert.Equal(totalBytes, System.Text.Encoding.UTF8.GetByteCount(body));
+        return body;
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_DefaultCap_BodyOfExactlyOneMillionBytes_IsAccepted()
+    {
+        // E7/E13g: "response body ≤ 1 MB per page" with the production cap of 1,000,000 bytes (NO
+        // maxResponseBodyBytes override): a page of exactly 1,000,000 bytes is still within the cap.
+        var handler = Respond((_, _) => Success(UsageBodyOfExactSize(1_000_000)), (_, _) => Success(CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        var result = await client.GetUsageAsync(CancellationToken.None);
+
+        Assert.Equal(3, result.MonthTokens); // 1+1+0+0+1 — the page really was parsed
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_DefaultCap_BodyOfOneMillionAndOneBytes_FailsUnavailable()
+    {
+        // E7/E13g: one byte over the production cap → Unavailable (fixed safe message, no echo).
+        var handler = Respond((_, _) => Success(UsageBodyOfExactSize(1_000_001)), (_, _) => Success(CostTodayAndYesterday));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.False(string.IsNullOrWhiteSpace(ex.Message));
+        Assert.Null(ex.InnerException);
+    }
+
+    [Fact]
     public async Task GetUsageAsync_AlreadyCancelledToken_ThrowsWithoutAnyRequest()
     {
         var handler = RespondOk();
@@ -857,50 +1134,168 @@ public sealed class AnthropicAdminUsageClientR019Tests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
     }
 
+    [Fact]
+    public async Task GetUsageAsync_CallerCancelsWhileBodyReadBlocks_PropagatesOperationCanceled()
+    {
+        // E7/E13 (Inspector B 6): the CANCELLING BODY-READ path, not just the send — the response
+        // stream's ReadAsync blocks until the token fires. A client that only wires cancellation at
+        // SendAsync would sit here until the deadline and return "Unavailable" instead. The cost
+        // report answers normally so the hanging usage read is the one and only open request when
+        // the caller cancels.
+        var hanging = new HangingReadStream();
+        var handler = new RoutingHandler(
+            (_, _, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(hanging) }),
+            (_, _, _) => Task.FromResult(Success(CostTodayAndYesterday)));
+        var client = CreateClient(handler);
+        using var cts = new CancellationTokenSource();
+
+        var pending = client.GetUsageAsync(cts.Token);
+        await hanging.ReadEntered; // the client is exactly inside the body read now
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_BodyReadBlocksPastDeadline_FailsWithSafeMessageNotCancellation()
+    {
+        // E7 the other way: only the CALLER's cancellation may surface as OperationCanceledException.
+        // Both report bodies hang in ReadAsync until the overall deadline fires; the unwinding of a
+        // timed-out read must become the fixed safe failure, never a cancellation escaping to the
+        // caller and never raw diagnostics (E8: no sentinel anywhere, E12b: no inner exception).
+        var usageHanging = new HangingReadStream();
+        var costHanging = new HangingReadStream();
+        var handler = new RoutingHandler(
+            (_, _, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(usageHanging) }),
+            (_, _, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(costHanging) }));
+        var client = CreateClient(handler, timeout: TimeSpan.FromMilliseconds(100));
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
+        Assert.Null(ex.InnerException);
+    }
+
     // ---- E12d: cancelled caller token after an Admin failure; sibling cancellation ---------------
 
     [Fact]
     public async Task GetUsageAsync_CallerCancelsAfterAdminFailure_ThrowsOperationCanceledNotUnavailable()
     {
-        // E12d: after any Admin failure, if the caller token is cancelled the call throws
+        // E12d/E13c: after any Admin failure, if the caller token is cancelled the call throws
         // OperationCanceledException — the caller is never handed "Unavailable" that it did not ask
-        // for. The usage report fails 401 immediately; the cost page lingers (its fake deliberately
-        // ignores cancellation so the Admin failure — not a cancellation — is what ends the call),
-        // giving the test a wide, deterministic window to cancel the caller in between.
-        var usageEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // for. Deterministic ordering (no wall-clock, no race between the test thread and the
+        // client): the usage handler cancels the CALLER token itself and then answers 401, so by the
+        // time the Admin failure reaches the unwind the caller token is cancelled — the exact state
+        // E12d describes. (The previous shape cancelled from the test thread after the call; the
+        // client fails the 401 synchronously, so the call had already completed with "Unavailable"
+        // before the cancel ever happened — a test race, not a code defect.)
+        using var cts = new CancellationTokenSource();
         var handler = new RoutingHandler(
             (_, _, _) =>
             {
-                usageEntered.TrySetResult();
+                cts.Cancel();
                 return Task.FromResult(Status(HttpStatusCode.Unauthorized));
             },
-            async (_, _, _) =>
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(150), CancellationToken.None).ConfigureAwait(false);
-                return Success(CostTodayAndYesterday);
-            });
+            (_, _, _) => Task.FromResult(Success(CostTodayAndYesterday)));
         var client = CreateClient(handler);
-        using var cts = new CancellationTokenSource();
-
-        var pending = client.GetUsageAsync(cts.Token);
-        await usageEntered.Task;
-        cts.Cancel(); // lands well inside the 150 ms window, before the failure handling completes
 
         // Every surfacing path must end as OperationCanceledException — never the fixed
         // AnthropicAdminApiException message that the tab would render as "Unavailable".
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetUsageAsync(cts.Token));
     }
 
     [Fact]
-    public async Task GetUsageAsync_OneReportFailsWhileOtherPending_SiblingIsCancelledAndStops()
+    public async Task GetUsageAsync_UsageFailsWhileCostSendBlocked_LongDeadline_StopsSiblingBeforeDeadline()
     {
-        // E12d: one report failing cancels its sibling — the still-in-flight sibling request must
-        // observe cancellation instead of running on, and the Admin failure (not a cancellation)
-        // reaches the caller. The usage page fails 401 at once; the cost report paginates and its
-        // page 2 hangs (observing its token) until the client unwinds the refresh.
-        var costPage2SawCancellation = false;
+        // E13a (Reviewer1 N1 / Reviewer2 #1) + E12d: a failing report must cancel the shared linked
+        // token source from INSIDE the failing task, so the sibling stops at once — not after
+        // Task.WhenAll, which only unwinds once the sibling already completed. Prescribed
+        // discriminating shape: a LONG client timeout (30 s), the cost request blocks on a
+        // TaskCompletionSource tied to its own token, usage then fails 401. Deterministic ordering:
+        // the usage handler waits until the cost request is really blocked inside its send before it
+        // answers 401 (otherwise the client would cancel the sibling before it even started and the
+        // sibling "never saw" anything). Both legs: (i) the cost request observed cancellation, and
+        // (ii) GetUsageAsync returned WITHOUT waiting for the deadline — a 10 s guard stands in for
+        // "long before 30 s". Against the pre-E13a code the only thing that ever releases the blocked
+        // cost send is the 30 s deadline, so the guard fires: that is the red this test pins.
+        var costEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var costSawCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var costBlocked = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var handler = new RoutingHandler(
-            (_, _, _) => Task.FromResult(Status(HttpStatusCode.Unauthorized)),
+            async (_, _, _) =>
+            {
+                await costEntered.Task.ConfigureAwait(false); // cost is blocked in its send now
+                return Status(HttpStatusCode.Unauthorized);
+            },
+            async (_, _, token) =>
+            {
+                using var registration = token.Register(() => costBlocked.TrySetCanceled(token));
+                costEntered.TrySetResult();
+                try
+                {
+                    return await costBlocked.Task.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    costSawCancellation.TrySetResult();
+                    throw;
+                }
+            });
+        var client = CreateClient(handler, timeout: TimeSpan.FromSeconds(30));
+
+        var pending = client.GetUsageAsync(CancellationToken.None);
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(KeyRejectedMessage, ex.Message);
+        Assert.True(
+            costSawCancellation.Task.IsCompleted,
+            "the sibling cost request never observed cancellation (E13a)");
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_UsageFailsWhileCostBodyReadBlocked_LongDeadline_StopsSiblingRead()
+    {
+        // E13a/E12d "stops its next send/read": the same sibling-cancel rule on the BODY-READ leg.
+        // The cost report's response body blocks in ReadAsync until its token fires; the usage page
+        // fails 401 only once that read is really in flight. A 30 s deadline cannot be what ends the
+        // read; the failing report's immediate cancel must (10 s guard), and the blocked read must
+        // have seen the cancellation. The Admin failure — not a cancellation — reaches the caller.
+        var costBody = new HangingReadStream();
+        var handler = new RoutingHandler(
+            async (_, _, _) =>
+            {
+                await costBody.ReadEntered.ConfigureAwait(false);
+                return Status(HttpStatusCode.Unauthorized);
+            },
+            (_, _, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(costBody) }));
+        var client = CreateClient(handler, timeout: TimeSpan.FromSeconds(30));
+
+        var pending = client.GetUsageAsync(CancellationToken.None);
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(KeyRejectedMessage, ex.Message);
+        Assert.True(costBody.ReadCancelled.IsCompleted, "the sibling's blocked body read was never cancelled (E13a)");
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_UsageFailsWhileCostPage2Blocked_LongDeadline_SiblingStopsMidPagination()
+    {
+        // E12d/E13a on a PAGED sibling: cost page 1 answers with a cursor, page 2 blocks on a source
+        // tied to its token; usage fails 401 only once page 2 is in flight. The sibling must be
+        // cancelled in the middle of its pagination, long before the 30 s deadline, and never be
+        // asked for a page 3.
+        var costPage2Entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var costPage2Cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var page2Blocked = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new RoutingHandler(
+            async (_, _, _) =>
+            {
+                await costPage2Entered.Task.ConfigureAwait(false);
+                return Status(HttpStatusCode.Unauthorized);
+            },
             async (_, index, token) =>
             {
                 if (index == 0)
@@ -908,25 +1303,80 @@ public sealed class AnthropicAdminUsageClientR019Tests
                     return Success("""{"data":[],"has_more":true,"next_page":"cursor-1"}""");
                 }
 
+                using var registration = token.Register(() => page2Blocked.TrySetCanceled(token));
+                costPage2Entered.TrySetResult();
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
+                    return await page2Blocked.Task.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
-                    costPage2SawCancellation = true;
+                    costPage2Cancelled.TrySetResult();
                     throw;
                 }
-
-                return Success(CostTodayAndYesterday);
             });
-        var client = CreateClient(handler, timeout: TimeSpan.FromMilliseconds(400));
+        var client = CreateClient(handler, timeout: TimeSpan.FromSeconds(30));
 
+        var pending = client.GetUsageAsync(CancellationToken.None);
         var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
-            () => client.GetUsageAsync(CancellationToken.None));
+            () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(KeyRejectedMessage, ex.Message);
-        Assert.True(costPage2SawCancellation, "the sibling cost request was not cancelled");
+        Assert.True(costPage2Cancelled.Task.IsCompleted, "the sibling's page-2 request was not cancelled (E13a)");
+        Assert.Equal(2, handler.CostRequests.Count); // page 1 + the cancelled page 2, no page 3
+    }
+
+    [Theory]
+    // E13c (Reviewer2 #4): while the caller token is cancelled, ANY exception leaving an Admin
+    // request — including a non-HTTP one carrying raw diagnostics — must surface as
+    // OperationCanceledException and never as the raw exception with its sentinel-bearing text
+    // (E7/E8). The old catch filter `when (!caller.IsCancellationRequested)` skipped the
+    // normalization exactly when the caller had cancelled, letting these escape verbatim.
+    // The usage page 2 (after a valid cursor page) cancels the caller and throws: at that point
+    // the cost report is already complete, so the raw exception is the one and only failure
+    // reaching the unwind — deterministic.
+    [InlineData("invalidOperation")]
+    [InlineData("io")]
+    [InlineData("format")]
+    public async Task GetUsageAsync_CallerCancelledWithNonHttpException_SurfacesCancellationWithoutRawText(string kind)
+    {
+        using var cts = new CancellationTokenSource();
+        Exception raw = kind switch
+        {
+            "invalidOperation" => new InvalidOperationException($"cannot get value for property near '{KeySentinel}'"),
+            "io" => new IOException($"stream corrupted at marker {KeySentinel}"),
+            _ => new FormatException($"input not well formed: {KeySentinel}"),
+        };
+        var costResponded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new RoutingHandler(
+            async (_, index, _) =>
+            {
+                if (index == 0)
+                {
+                    // Page only after the cost request is out of the way, so the cancellation
+                    // below races NOTHING else: the raw exception is the failure that reaches the
+                    // unwind.
+                    await costResponded.Task.ConfigureAwait(false);
+                    return Success(UsagePageWithCursorField("\"cursor-1\""));
+                }
+
+                cts.Cancel(); // the caller has gone away ...
+                throw raw;    // ... and this report dies to a non-HTTP exception carrying raw text
+            },
+            (_, _, _) =>
+            {
+                var response = Success(CostTodayAndYesterday);
+                costResponded.TrySetResult();
+                return Task.FromResult(response);
+            });
+        var client = CreateClient(handler);
+
+        // E13c: not the raw exception, not any AnthropicAdminApiException — cancellation, full stop.
+        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetUsageAsync(cts.Token));
+
+        // E8: nothing of the raw diagnostic reaches the caller.
+        Assert.DoesNotContain(raw.Message, ex.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -946,5 +1396,63 @@ public sealed class AnthropicAdminUsageClientR019Tests
         Assert.DoesNotContain(KeySentinel, ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
         Assert.Null(ex.InnerException);
+    }
+
+    /// <summary>A response-body stream whose async reads block until the read token is cancelled —
+    /// the E13 body-read leg (Inspector B 6): cancellation during the send was covered, the read
+    /// path was not. <see cref="ReadEntered"/> completes when a read starts, so the test cancels
+    /// exactly while the client is inside <c>ReadAsync</c>. Bytes never arrive; a released gate
+    /// simply ends the stream (EOF).</summary>
+    private sealed class HangingReadStream : Stream
+    {
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task ReadEntered => _entered.Task;
+
+        /// <summary>Completes when a read was ended by its token (the cancellation reached the read).</summary>
+        public Task ReadCancelled => _cancelled.Task;
+
+        /// <summary>Only for tests that need the read to finish instead of being cancelled.</summary>
+        public void Release() => _blocked.TrySetResult();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _entered.TrySetResult();
+            using (cancellationToken.Register(() =>
+            {
+                _cancelled.TrySetResult();
+                _blocked.TrySetCanceled(cancellationToken);
+            }))
+            {
+                await _blocked.Task.ConfigureAwait(false);
+            }
+
+            return 0; // EOF — only reached when a test releases the gate.
+        }
     }
 }

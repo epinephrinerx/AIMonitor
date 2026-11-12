@@ -18,6 +18,14 @@ public sealed class ProviderMetaTests
         Assert.Equal("sk-ant-admin…", meta.KeyPlaceholder);
         Assert.Equal("", meta.ExtraLabel);
         Assert.Equal("", meta.ExtraPlaceholder);
+        // E10 updated this test from a whole-hint string equality to keyword checks when C1 added
+        // the Admin guidance; the read this replaces (Reviewer2 minor 6) restores the FULL original
+        // first sentence as a prefix pin — the pre-R-019 read-only/no-write guarantee must survive
+        // verbatim while the added Admin guidance may follow it.
+        Assert.StartsWith(
+            "Sign in to Claude Code on this machine (run `claude` in a terminal). This app reads that existing login read-only and never writes to it.",
+            meta.SetupHint,
+            StringComparison.Ordinal);
         Assert.Contains("Admin API key", meta.SetupHint);
         Assert.Contains("sk-ant-admin", meta.SetupHint);
         Assert.Contains("Claude Console", meta.SetupHint);
