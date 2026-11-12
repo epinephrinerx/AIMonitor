@@ -721,10 +721,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_agentUsageRefresher is not null && onlyProviderId is null)
         {
             var force = manual && IsAllAgentsSelected;
-            // D16: the refresher owns delivery, completion, and exception containment.
-            // A context-entered call is recaptured at this refresher call; bare calls use the
+            // The refresher owns delivery, completion, and exception containment.
+            // Context-entered calls deliver on their entry context; bare calls use the
             // view model context captured at construction when one is available.
-            var deliveryContext = entryContext is null ? _uiContext : null;
+            var deliveryContext = entryContext ?? _uiContext;
             _agentUsageTask = _agentUsageRefresher.RefreshAsync(force, deliveryContext);
         }
     }
