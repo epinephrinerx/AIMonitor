@@ -8,46 +8,35 @@ using AIMonitor.TestSupport;
 namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 
 /// <summary>
-/// R-019 (written from Docs/SPEC_R019.md alone): C6 + decisions E1, E2, E6, E7, E8, E10 — the Claude
-/// snapshot composition that calls <c>AnthropicAdminUsageClient</c> when a saved Claude Admin key
-/// exists. Fake <see cref="HttpMessageHandler"/>s and a disposable temp directory only; fixed UTC
-/// clock; InvariantCulture everywhere.
+/// R-019 (Docs/SPEC_R019.md): C6 + decisions E1, E2, E6, E7, E8, E10, E11, E12 — the Claude snapshot
+/// composition that calls <c>AnthropicAdminUsageClient</c> when a saved Claude Admin key exists.
+/// Hand-written fake <see cref="HttpMessageHandler"/>s and a disposable temp directory only; fixed
+/// UTC clock; InvariantCulture everywhere. No real network, key or clock.
 ///
-/// <para><b>Expected API (alignment contract for the Coding Owner after merge).</b> The spec fixes
-/// only the type name <c>AnthropicAdminUsageClient</c> (in
-/// <c>AIMonitor.Infrastructure.Providers.Claude</c>) and the existence of ONE explicit admin-only
-/// signal; everything else below is the test author's best-shape guess:</para>
+/// <para><b>Aligned API (E11/E12: names/signatures read from the merged <c>src/</c>; behaviour still
+/// comes from the spec — where an oracle and the code disagree, the spec decides and the mismatch is
+/// reported, not bent):</b></para>
 /// <code>
-/// // C4 client — the same contract as AnthropicAdminUsageClientR019Tests.h
-/// //   (HttpClient, IClock, TimeSpan? timeout, int? maxResponseBodyBytes)
-/// //   + GetUsageAndCostAsync(string apiKey, CancellationToken) → AnthropicAdminUsageResult
-/// //   + AnthropicAdminUsageException (fixed safe Message on every C5/E4/E5/E7 error path).
-///
-/// // E6 — ClaudeLiveQuotaClient keeps ONE instance across refreshes and reads the saved key at the
-/// // start of every refresh through an injected reader (no key cached between refreshes). Guess:
-/// // two new optional constructor parameters appended after the existing ones:
+/// // E6/E11: ONE ClaudeLiveQuotaClient instance keeps its transcript store and reads the saved key
+/// // at the start of every refresh through the appended optional parameter:
 /// new ClaudeLiveQuotaClient(
 ///     httpClient, claudeConfigDirOverride, userProfileDirectory, clock,
 ///     credentialReader?, timeout?, maxResponseBodyBytes?, transcriptTimeZone?, xdgConfigHome?,
-///     Func&lt;CancellationToken, Task&lt;string?&gt;&gt;? adminKeyReader = null,
-///     AnthropicAdminUsageClient? adminClient = null)   // guess: injectable for tests; App builds it (C8)
-///
-/// // E2 — the one explicit signal. Guess: a new bool ProviderSnapshot property `AdminOnly`
-/// // (false by default; true when the OAuth quota step produced no usable quota AND the Admin call
-/// // succeeded). The tab rule (no setup card, Admin stats + the E2 note) keys on it. The E2 note
-/// // text is asserted as "contained somewhere in the snapshot's texts" so the carrier member
-/// // (ValueNote / Error / a new field) can be chosen by the Writing Owner.
+///     Func&lt;CancellationToken, Task&lt;string?&gt;&gt;? adminKeyReader = null)
+/// // E11: there is NO injectable admin-client parameter — the composition builds
+/// //   new AnthropicAdminUsageClient(httpClient, adminKey, clock) INTERNALLY on the same HttpClient,
+/// //   so the fake below routes the OAuth endpoint and both Admin report paths through one handler.
+/// // E2/E12a signal: ProviderSnapshot.AdminOnly — true only when the Admin call succeeded AND OAuth
+/// //   is missing, expired or rejected (401/403). ProviderSnapshot.AdminApiConnected keeps meaning
+/// //   "Admin succeeded", independent of the AdminOnly flag.
 /// </code>
 ///
 /// <para>Stat strings (E10 verbatim): "API cost today (UTC)", "API cost this month (UTC)",
 /// "API tokens this month (UTC)" with Detail "Anthropic Admin API · billed"; the failure stat is
-/// "API usage" = "Unavailable" with the C5 message as Detail. Money display " $" + N2 invariant —
-/// the existing Claude money formatter (1.2345m → "$1.23", C6/C4); tokens use the house compact
-/// K/M rule ("15067 → 15.1K").</para>
-///
-/// <para><b>Why these tests fail on base 29f4048:</b> none of the above exists until the Writing
-/// Owner's implementation merges; the guard below makes that a per-test failure. Activate the real
-/// bodies with <c>-p:DefineConstants=R019_IMPLEMENTED</c> and align the guessed names.</para>
+/// "API usage" = "Unavailable" with the C5 message as Detail. Money "$" + N2 invariant (1.2345m →
+/// "$1.23"); tokens compact K/M/B with no "1000K" and ≥ 1e9 rendered "B" (E12f). The E2 note text
+/// "Claude Code not signed in — quota unavailable; API usage from Admin key" is pinned as a string;
+/// the carrier member is the Writing Owner's choice, so it is swept across the snapshot's texts.</para>
 /// </summary>
 [Trait("Category", "Contract")]
 public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
@@ -116,51 +105,76 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     private static HttpResponseMessage Success(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body) };
 
-    /// <summary>Hand-written fake OAuth transport: answers /api/oauth/usage, throws (test-visible)
-    /// on anything else — the quota path must keep calling only its own endpoint (C6: OAuth behaviour
-    /// never changes).</summary>
-    private static FakeHttpMessageHandler OAuthHandler(
-        Func<HttpRequestMessage, HttpResponseMessage>? usageResponder = null) =>
-        new((request, token) =>
-        {
-            token.ThrowIfCancellationRequested();
-            if (!request.RequestUri!.AbsolutePath.Contains("oauth/usage", StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Unexpected OAuth-path request {request.RequestUri} — the Claude quota path must "
-                    + "only ever call /api/oauth/usage (C6).");
-            }
+    private static HttpResponseMessage Failure(HttpStatusCode code, string body = "{}") =>
+        new(code) { Content = new StringContent(body) };
 
-            return Task.FromResult(usageResponder?.Invoke(request) ?? Success(ValidUsagePayload));
-        });
-
-    /// <summary>Hand-written fake Admin transport: records every request and answers the two report
-    /// paths; failure modes are injected per path.</summary>
-    private sealed class AdminRecordingHandler : HttpMessageHandler
+    /// <summary>Hand-written fake transport for the WHOLE composed client (E11: the Admin client is
+    /// built internally on the same HttpClient): routes the OAuth usage endpoint and the two Admin
+    /// report paths by URL, records every request per path, and answers per-path overrides. Never
+    /// touches the network.</summary>
+    private sealed class ClaudeAdminHandler : HttpMessageHandler
     {
-        private readonly HttpStatusCode? _failUsageWith;
-        private readonly bool _failCost;
+        public Func<HttpRequestMessage, HttpResponseMessage>? OAuthResponder { get; init; }
 
-        public AdminRecordingHandler(HttpStatusCode? failUsageWith = null, bool failCost = false)
-        {
-            _failUsageWith = failUsageWith;
-            _failCost = failCost;
-        }
+        public Func<HttpRequestMessage, int, HttpResponseMessage>? AdminUsageResponder { get; init; }
 
-        public List<HttpRequestMessage> Requests { get; } = [];
+        public Func<HttpRequestMessage, int, HttpResponseMessage>? AdminCostResponder { get; init; }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        /// <summary>When set, Admin requests hang until cancellation (caller-cancellation tests) and
+        /// this source completes when the first Admin request arrives.</summary>
+        public bool HangAdmin { get; init; }
+
+        /// <summary>When set (ms), the cost responder waits this long ignoring all cancellation, so
+        /// the Admin failure path (not a cancellation) is what ends the refresh (E12d).</summary>
+        public int AdminCostDelayMs { get; init; }
+
+        public TaskCompletionSource? AdminEntered { get; init; }
+
+        public TaskCompletionSource? UsageEntered { get; init; }
+
+        public List<HttpRequestMessage> OAuthRequests { get; } = [];
+
+        public List<HttpRequestMessage> AdminRequests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Requests.Add(request);
-            var isCost = request.RequestUri!.AbsolutePath.Contains("cost_report", StringComparison.Ordinal);
-            HttpResponseMessage response = !isCost && _failUsageWith is not null
-                ? new HttpResponseMessage(_failUsageWith.Value)
-                : isCost && _failCost
-                    ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
-                    : Success(isCost ? AdminCostOk : AdminUsageOk);
-            return Task.FromResult(response);
+
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.Contains("oauth/usage", StringComparison.Ordinal))
+            {
+                // C6: the quota path keeps calling only /api/oauth/usage.
+                OAuthRequests.Add(request);
+                return OAuthResponder?.Invoke(request) ?? Success(ValidUsagePayload);
+            }
+
+            var isCost = path.Contains("cost_report", StringComparison.Ordinal);
+            AdminRequests.Add(request);
+            AdminEntered?.TrySetResult();
+
+            if (HangAdmin)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+
+                // Only reached if the harness forgets to cancel: answer as an ordinary failure so a
+                // wrong test shows up as a clear assertion miss, never as an unexpected exception.
+                return Failure(HttpStatusCode.RequestTimeout);
+            }
+
+            if (isCost)
+            {
+                if (AdminCostDelayMs > 0)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(AdminCostDelayMs), CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+
+                return AdminCostResponder?.Invoke(request, AdminRequests.Count) ?? Success(AdminCostOk);
+            }
+
+            UsageEntered?.TrySetResult();
+            return AdminUsageResponder?.Invoke(request, AdminRequests.Count) ?? Success(AdminUsageOk);
         }
     }
 
@@ -181,31 +195,31 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         }
     }
 
-#if R019_IMPLEMENTED
-    /// <summary>Builds the composed client exactly as the spec's E6/E8 composition intends, with the
-    /// guessed optional constructor parameters (see the file header's alignment contract).</summary>
+    /// <summary>Builds the composed client exactly as E6/E11 intends: one ClaudeLiveQuotaClient with
+    /// the appended <c>adminKeyReader</c>; the Admin client is the implementation's own, on the same
+    /// HttpClient, reading from the same clock.</summary>
     private ClaudeLiveQuotaClient CreateAdminClient(
-        HttpMessageHandler oauthHandler,
-        FakeAdminKeyReader? keyReader = null,
-        HttpMessageHandler? adminHttp = null,
-        HttpStatusCode? adminUsageStatus = null,
-        bool adminCostFails = false)
-    {
-        var reader = keyReader ?? new FakeAdminKeyReader { Key = AdminKey };
-        var adminClient = new AnthropicAdminUsageClient(
-            new HttpClient(adminHttp ?? new AdminRecordingHandler(adminUsageStatus, adminCostFails)),
-            new FakeClock(FixedNow),
-            timeout: TimeSpan.FromSeconds(5));
-        return new ClaudeLiveQuotaClient(
-            new HttpClient(oauthHandler),
+        ClaudeAdminHandler handler,
+        FakeAdminKeyReader? keyReader = null) =>
+        new(
+            new HttpClient(handler),
             _directory,
             _directory,
             new FakeClock(FixedNow),
             timeout: TimeSpan.FromSeconds(5),
             transcriptTimeZone: TimeZoneInfo.Utc,
-            adminKeyReader: reader.ReadAsync,
-            adminClient: adminClient);
-    }
+            adminKeyReader: (keyReader ?? new FakeAdminKeyReader { Key = AdminKey }).ReadAsync);
+
+    /// <summary>The same client with NO Admin wiring at all (the pre-R-019 composition) — the
+    /// "today's behaviour" baseline for the E2 failure legs.</summary>
+    private ClaudeLiveQuotaClient CreateBaselineClient(ClaudeAdminHandler handler) =>
+        new(
+            new HttpClient(handler),
+            _directory,
+            _directory,
+            new FakeClock(FixedNow),
+            timeout: TimeSpan.FromSeconds(5),
+            transcriptTimeZone: TimeZoneInfo.Utc);
 
     private static Stat StatByName(ProviderSnapshot snapshot, string label) =>
         snapshot.Stats.Single(s => s.Label == label)!;
@@ -225,37 +239,18 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         ]);
 
     private static ProviderSnapshotRequest NoHistoryRequest() => ProviderSnapshotRequest.Default;
-#else
-    // The real composition (and the guessed E2/E6/E7 members) only exist after the R-019 merge; this
-    // branch keeps the file compiling on base so the rest of the suite still runs.
-    private ClaudeLiveQuotaClient CreateAdminClient(
-        HttpMessageHandler oauthHandler,
-        FakeAdminKeyReader? keyReader = null,
-        HttpMessageHandler? adminHttp = null,
-        HttpStatusCode? adminUsageStatus = null,
-        bool adminCostFails = false) =>
-        throw new NotSupportedException(R019ActivationMessage("ClaudeLiveQuotaClient admin composition"));
-#endif
-
-    private static string R019ActivationMessage(string what) =>
-        "R-019 not on this branch (base 29f4048): " + what
-        + " — AnthropicAdminUsageClient and the E2/E6 composition members do not exist here. Build with "
-        + "-p:DefineConstants=R019_IMPLEMENTED after the Writing Owner's implementation merges and align "
-        + "the guessed member names (see the file header).";
 
     // ---- C6 / E10 / E1: success appends exactly after the history step --------------------------
 
     [Fact]
     public async Task GetSnapshotAsync_OAuthOkAndAdminOk_AppendsThreeAdminStatsAfterEquivalentValue()
     {
-#if R019_IMPLEMENTED
         // C6 + E1: stats appended AFTER the transcript step (which replaces Stats) — "Equivalent API
         // value" first, then the three Admin rows in C6's order; E10 labels/Detail verbatim.
         WriteCredentials(FixedNow.AddHours(1));
         Directory.CreateDirectory(Path.Combine(_directory, "projects")); // scanned-but-empty history
-        var oauth = OAuthHandler();
-        var admin = new AdminRecordingHandler();
-        var client = CreateAdminClient(oauth, adminHttp: admin);
+        var handler = new ClaudeAdminHandler();
+        var client = CreateAdminClient(handler);
 
         var snapshot = await client.GetSnapshotAsync(
             new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
@@ -279,20 +274,18 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         Assert.Equal("session", snapshot.Meters[0].Kind);
         Assert.True(snapshot.Ok);
         Assert.Null(snapshot.Error);
-        Assert.Equal(1, oauth.CallCount);
+        Assert.Single(handler.OAuthRequests);
 
         // Composition wiring (C4 via C6): one usage + one cost request, carrying the saved key.
-        Assert.Equal(2, admin.Requests.Count);
+        Assert.Equal(2, handler.AdminRequests.Count);
         Assert.All(
-            admin.Requests,
+            handler.AdminRequests,
             r => Assert.Equal(AdminKey, r.Headers.GetValues("x-api-key").Single()));
 
-        // E2 signal is only for admin-ONLY; with a working sign-in it must be false.
+        // E12a: AdminApiConnected = "Admin call succeeded"; the AdminOnly flag stays false because
+        // OAuth is working — a signed-in Claude Code must not be repainted as admin-only.
+        Assert.True(snapshot.AdminApiConnected);
         Assert.False(snapshot.AdminOnly);
-#else
-        Assert.Fail(R019ActivationMessage("the OAuth+Admin success composition"));
-        await Task.CompletedTask;
-#endif
     }
 
     // ---- C6 failure: one "API usage · Unavailable" stat, quota output intact (E1) --------------
@@ -300,11 +293,12 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     [Fact]
     public async Task GetSnapshotAsync_AdminFailsOAuthOk_AddsOnlyUnavailableStatKeepsQuotaAndHistory()
     {
-#if R019_IMPLEMENTED
         WriteCredentials(FixedNow.AddHours(1));
         Directory.CreateDirectory(Path.Combine(_directory, "projects"));
-        var client = CreateAdminClient(
-            OAuthHandler(), adminUsageStatus: HttpStatusCode.Unauthorized);
+        var client = CreateAdminClient(new ClaudeAdminHandler
+        {
+            AdminUsageResponder = (_, _) => Failure(HttpStatusCode.Unauthorized),
+        });
 
         var snapshot = await client.GetSnapshotAsync(
             new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
@@ -323,33 +317,32 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         Assert.True(snapshot.Ok);
         Assert.Null(snapshot.Error);
         Assert.False(snapshot.AdminOnly);
-#else
-        Assert.Fail(R019ActivationMessage("the OAuth-ok + Admin-fail failure stat"));
-        await Task.CompletedTask;
-#endif
+
+        // E12a: "AdminApiConnected" still means "Admin call succeeded" — and this one did not.
+        Assert.False(snapshot.AdminApiConnected);
     }
 
     [Fact]
     public async Task GetSnapshotAsync_CostFailsUsageOk_WholeResultFailsWithSingleUnavailableStat()
     {
-#if R019_IMPLEMENTED
         // E5 cross-check at the composition level: "one report failing while the other succeeds →
         // Unavailable" — no half of the pair may be shown alone.
         WriteCredentials(FixedNow.AddHours(1));
-        var client = CreateAdminClient(OAuthHandler(), adminCostFails: true);
+        var client = CreateAdminClient(new ClaudeAdminHandler
+        {
+            AdminCostResponder = (_, _) => Failure(HttpStatusCode.InternalServerError),
+        });
 
         var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
         var failed = Assert.Single(snapshot.Stats);
         Assert.Equal("API usage", failed.Label);
         Assert.Equal("Unavailable", failed.Value);
-#else
-        Assert.Fail(R019ActivationMessage("the usage-ok + cost-fail Unavailable rule (E5)"));
-        await Task.CompletedTask;
-#endif
+        Assert.False(snapshot.AdminApiConnected);
+        Assert.False(snapshot.AdminOnly);
     }
 
-    // ---- E2: admin-only for OAuth missing / expired / 401, each × Admin success ------------------
+    // ---- E2/E12a: admin-only for OAuth missing / expired / 401, each × Admin success ------------
 
     [Theory]
     [InlineData("missing")]      // no .credentials.json at all
@@ -358,21 +351,21 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     public async Task GetSnapshotAsync_NoUsableOAuthButAdminOk_ShowsThreeStatsFlagAndNoteNoSetupCard(
         string oauthCase)
     {
-#if R019_IMPLEMENTED
-        // E2 matrix, Admin-success leg. One explicit signal (guessed name: ProviderSnapshot.AdminOnly)
-        // plus the note; detection stays truthful; no quota meters; C6: tab configured:true.
+        // E2/E12a matrix, Admin-success leg: AdminOnly = true exactly when the Admin call succeeded
+        // AND OAuth is missing, expired or rejected (401/403). Plus the note; detection stays
+        // truthful; no quota meters; C6: configured:true.
         if (oauthCase is "expired" or "rejected401")
         {
             WriteCredentials(oauthCase == "expired" ? FixedNow.AddHours(-1) : FixedNow.AddHours(1));
         }
 
-        var oauthResponder = oauthCase == "rejected401"
-            ? (Func<HttpRequestMessage, HttpResponseMessage>)
-                (_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))
-            : null;
-        var oauth = OAuthHandler(oauthResponder);
-        var admin = new AdminRecordingHandler();
-        var client = CreateAdminClient(oauth, adminHttp: admin);
+        var handler = new ClaudeAdminHandler
+        {
+            OAuthResponder = oauthCase == "rejected401"
+                ? _ => Failure(HttpStatusCode.Unauthorized)
+                : null,
+        };
+        var client = CreateAdminClient(handler);
 
         var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
@@ -382,7 +375,8 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         Assert.NotNull(StatByName(snapshot, CostMonthLabel));
         Assert.NotNull(StatByName(snapshot, TokensMonthLabel));
 
-        // The E2 signal + note (note carrier member is the WO's choice; text is pinned).
+        // The E12a signal + note (note carrier member is the WO's choice; text is pinned).
+        Assert.True(snapshot.AdminApiConnected); // Admin succeeded — this flag keeps that meaning.
         Assert.True(snapshot.AdminOnly);
         Assert.Contains(AdminOnlyNote, AllSnapshotText(snapshot), StringComparison.Ordinal);
 
@@ -400,14 +394,10 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         if (oauthCase == "missing")
         {
             // C6: with no sign-in but a working Admin key the usage call must not even be attempted.
-            Assert.Equal(0, oauth.CallCount);
+            Assert.Empty(handler.OAuthRequests);
         }
 
-        Assert.Equal(2, admin.Requests.Count);
-#else
-        Assert.Fail(R019ActivationMessage("the admin-only (E2) snapshot for OAuth case '" + oauthCase + "'"));
-        await Task.CompletedTask;
-#endif
+        Assert.Equal(2, handler.AdminRequests.Count);
     }
 
     // ---- E2 matrix, Admin-failure leg: today's behaviour + the Unavailable stat ------------------
@@ -419,7 +409,6 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     public async Task GetSnapshotAsync_NoUsableOAuthAndAdminFails_KeepsTodayBehaviourPlusUnavailableStat(
         string oauthCase)
     {
-#if R019_IMPLEMENTED
         // E2 explicitly requires testing the failure leg: "failure → today's behaviour + the
         // 'API usage · Unavailable' stat". "Today's behaviour" is compared against the same OAuth
         // scenario WITHOUT any Admin wiring (the base composition), so no private message text is
@@ -429,26 +418,20 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
             WriteCredentials(oauthCase == "expired" ? FixedNow.AddHours(-1) : FixedNow.AddHours(1));
         }
 
-        var oauthResponder = oauthCase == "rejected401"
-            ? (Func<HttpRequestMessage, HttpResponseMessage>)
-                (_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))
+        Func<HttpRequestMessage, HttpResponseMessage>? oauthResponder = oauthCase == "rejected401"
+            ? _ => Failure(HttpStatusCode.Unauthorized)
             : null;
 
         // Baseline: plain OAuth-only client (the constructor's existing members only).
-        var baselineOauth = OAuthHandler(oauthResponder);
-        var baseline = new ClaudeLiveQuotaClient(
-            new HttpClient(baselineOauth),
-            _directory,
-            _directory,
-            new FakeClock(FixedNow),
-            timeout: TimeSpan.FromSeconds(5),
-            transcriptTimeZone: TimeZoneInfo.Utc);
+        var baseline = CreateBaselineClient(new ClaudeAdminHandler { OAuthResponder = oauthResponder });
         var baselineSnapshot = await baseline.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
         // Wired: same scenario, Admin key saved but the Admin call rejected (401).
-        var wiredOauth = OAuthHandler(oauthResponder);
-        var client = CreateAdminClient(
-            wiredOauth, adminUsageStatus: HttpStatusCode.Unauthorized);
+        var client = CreateAdminClient(new ClaudeAdminHandler
+        {
+            OAuthResponder = oauthResponder,
+            AdminUsageResponder = (_, _) => Failure(HttpStatusCode.Unauthorized),
+        });
         var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
         // Today's behaviour preserved: same visible quota presentation as the baseline.
@@ -461,16 +444,57 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
             snapshot.Meters.Select(m => m.Kind));
         Assert.Equal(baselineSnapshot.Detection!.State, snapshot.Detection!.State);
 
-        // E2 signal must NOT be set when the Admin call failed, and the failure stat is present.
+        // E12a: neither signal may be set when the Admin call failed, and the failure stat is present.
+        Assert.False(snapshot.AdminApiConnected);
         Assert.False(snapshot.AdminOnly);
         var failed = Assert.Single(snapshot.Stats); // baseline stats are empty here (no history)
         Assert.Equal("API usage", failed.Label);
         Assert.Equal("Unavailable", failed.Value);
         Assert.Equal(KeyRejectedDetail, failed.Detail);
-#else
-        Assert.Fail(R019ActivationMessage("the Admin-fail leg of E2 for OAuth case '" + oauthCase + "'"));
-        await Task.CompletedTask;
-#endif
+    }
+
+    // ---- E12g: admin-only snapshot carries FetchedAt = clock now and Unauthorized false ----------
+
+    [Fact]
+    public async Task GetSnapshotAsync_AdminOnlySnapshot_FetchedAtIsClockNowAndUnauthorizedFalse()
+    {
+        // E12g: the admin-only snapshot (no OAuth sign-in, Admin call succeeded) is a fresh,
+        // usable snapshot: FetchedAt = clock now and Unauthorized = false.
+        var client = CreateAdminClient(new ClaudeAdminHandler());
+
+        var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
+
+        Assert.True(snapshot.AdminOnly);
+        Assert.Equal(FixedNow, snapshot.FetchedAt);
+        Assert.False(snapshot.Unauthorized);
+    }
+
+    // ---- E12f: compact token format boundaries -----------------------------------------------------
+
+    [Theory]
+    // Hand-computed from the spec (E12f / handoff (f): never "1000K"; ≥ 1e9 uses "B"; house compact
+    // 0.# K/M "like other token stats", so exactly 1000 → "1K" and 15067 → "15.1K").
+    [InlineData(1000L, "1K")]                        // exactly 1K
+    [InlineData(15067L, "15.1K")]                    // house compact K (matches the C6 success oracle)
+    [InlineData(999_999L, "1M")]                     // rounding must not print "1000K" → pushed to M
+    [InlineData(1_000_000L, "1M")]                   // exactly 1M
+    [InlineData(1_000_000_000L, "1B")]               // ≥ 1e9 uses B
+    public async Task GetSnapshotAsync_AdminOk_CompactTokensNeverShow1000K_AndBillionsUseB(
+        long monthTokens, string expected)
+    {
+        // E12f pins the "API tokens this month (UTC)" stat value at the K/M and M/B boundaries.
+        WriteCredentials(FixedNow.AddHours(1));
+        var usageBody = $$"""{"data":[{"starting_at":"2026-11-15T00:00:00Z","ending_at":"2026-11-16T00:00:00Z","results":[{"model":"m","uncached_input_tokens":{{monthTokens.ToString(CultureInfo.InvariantCulture)}},"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":0}]}],"has_more":false,"next_page":null}""";
+        var client = CreateAdminClient(new ClaudeAdminHandler
+        {
+            AdminUsageResponder = (_, _) => Success(usageBody),
+        });
+
+        var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
+
+        var value = StatByName(snapshot, TokensMonthLabel).Value;
+        Assert.Equal(expected, value);
+        Assert.NotEqual("1000K", value); // E12f, stated as the rule the spec pins
     }
 
     // ---- E6: one client, key read at the start of every refresh ---------------------------------
@@ -478,13 +502,12 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     [Fact]
     public async Task GetSnapshotAsync_NoSavedAdminKey_MakesNoAdminRequestAndStaysExactlyAsBefore()
     {
-#if R019_IMPLEMENTED
         // C6: Admin is called only when a saved key exists. With no key, the snapshot is exactly the
         // OAuth-only result (R-006/R-008/R-011/R-014 unchanged — E10), while the key WAS read (E6).
         WriteCredentials(FixedNow.AddHours(1));
         var reader = new FakeAdminKeyReader { Key = null };
-        var oauth = OAuthHandler();
-        var client = CreateAdminClient(oauth, keyReader: reader);
+        var handler = new ClaudeAdminHandler();
+        var client = CreateAdminClient(handler, keyReader: reader);
 
         var snapshot = await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
@@ -492,24 +515,21 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         Assert.Empty(snapshot.Stats);
         Assert.Single(snapshot.Meters);
         Assert.False(snapshot.AdminOnly);
-        Assert.Equal(1, oauth.CallCount);
+        Assert.False(snapshot.AdminApiConnected);
+        Assert.Single(handler.OAuthRequests);
+        Assert.Empty(handler.AdminRequests);
         Assert.Equal(1, reader.Reads); // read at the start of the refresh; it just returned nothing
-#else
-        Assert.Fail(R019ActivationMessage("the no-saved-key path (C6) with E6 read counting"));
-        await Task.CompletedTask;
-#endif
     }
 
     [Fact]
     public async Task GetSnapshotAsync_ReadsSavedKeyAtStartOfEveryRefresh_NewestKeyGoesOnTheWire()
     {
-#if R019_IMPLEMENTED
         // E6: no key cached between refreshes — changing the stored key takes effect on the very next
         // refresh of the SAME client instance (the Connect dialog's existing Save → refresh path, C8).
         WriteCredentials(FixedNow.AddHours(1));
         var reader = new FakeAdminKeyReader { Key = AdminKey };
-        var admin = new AdminRecordingHandler();
-        var client = CreateAdminClient(OAuthHandler(), keyReader: reader, adminHttp: admin);
+        var handler = new ClaudeAdminHandler();
+        var client = CreateAdminClient(handler, keyReader: reader);
 
         await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
         const string replacedKey = "sk-an…-ffff";
@@ -517,42 +537,55 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         await client.GetSnapshotAsync(NoHistoryRequest(), CancellationToken.None);
 
         Assert.Equal(2, reader.Reads);                       // once per refresh, never cached
-        var wireKeys = admin.Requests.Select(r => r.Headers.GetValues("x-api-key").Single()).ToArray();
+        var wireKeys = handler.AdminRequests.Select(r => r.Headers.GetValues("x-api-key").Single()).ToArray();
         Assert.Equal([AdminKey, AdminKey, replacedKey, replacedKey], wireKeys); // (usage+cost) × 2
-#else
-        Assert.Fail(R019ActivationMessage("E6 read-on-each-refresh"));
-        await Task.CompletedTask;
-#endif
     }
 
-    // ---- E7: caller cancellation propagates, never becomes "Unavailable" -------------------------
+    // ---- E7/E12d: caller cancellation propagates, never becomes "Unavailable" ---------------------
 
     [Fact]
     public async Task GetSnapshotAsync_CallerCancelsDuringAdminCall_PropagatesOperationCanceled()
     {
-#if R019_IMPLEMENTED
         WriteCredentials(FixedNow.AddHours(1));
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hangingAdmin = new FakeHttpMessageHandler(async (_, token) =>
-        {
-            entered.TrySetResult();
-            await Task.Delay(TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
-            return Success(AdminUsageOk);
-        });
-        var client = CreateAdminClient(OAuthHandler(), adminHttp: hangingAdmin);
+        var handler = new ClaudeAdminHandler { HangAdmin = true, AdminEntered = entered };
+        var client = CreateAdminClient(handler);
         using var cts = new CancellationTokenSource();
 
         var pending = client.GetSnapshotAsync(NoHistoryRequest(), cts.Token);
-        await entered.Task.ConfigureAwait(false);
+        await entered.Task;
         cts.Cancel();
 
         // E7: the caller sees OperationCanceledException — never a snapshot carrying
         // "API usage · Unavailable".
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
-#else
-        Assert.Fail(R019ActivationMessage("E7 caller-cancellation propagation at the composition"));
-        await Task.CompletedTask;
-#endif
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CallerCancelsAfterAdminFailure_PropagatesOperationCanceled()
+    {
+        // E12d at the composition level: after any Admin failure, if the caller token is cancelled
+        // the refresh throws OperationCanceledException instead of rendering "Unavailable". The
+        // usage page fails 401 at once; the cost page lingers 150 ms (ignoring cancellation) so the
+        // failure — not the cancellation — is what the composition handles, and the caller has
+        // cancelled long before that handling completes.
+        WriteCredentials(FixedNow.AddHours(1));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new ClaudeAdminHandler
+        {
+            UsageEntered = entered,
+            AdminCostDelayMs = 150,
+            AdminUsageResponder = (_, _) => Failure(HttpStatusCode.Unauthorized),
+        };
+        var client = CreateAdminClient(handler);
+        using var cts = new CancellationTokenSource();
+
+        var pending = client.GetSnapshotAsync(NoHistoryRequest(), cts.Token);
+        await entered.Task;
+        cts.Cancel(); // well inside the 150 ms window
+
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(async () => await pending);
+        Assert.IsAssignableFrom<OperationCanceledException>(thrown);
     }
 
     // ---- E8: sentinel sweep across every snapshot text --------------------------------------------
@@ -560,18 +593,14 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
     [Fact]
     public async Task GetSnapshotAsync_AdminFailureSnapshotTexts_NeverContainSentinelKeyOrBody()
     {
-#if R019_IMPLEMENTED
         WriteCredentials(FixedNow.AddHours(1));
-        var echoingAdmin = new FakeHttpMessageHandler((_, token) =>
+        Directory.CreateDirectory(Path.Combine(_directory, "projects"));
+        var client = CreateAdminClient(new ClaudeAdminHandler
         {
-            token.ThrowIfCancellationRequested();
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
-            {
-                Content = new StringContent(
-                    $$"""{"error":{"type":"authentication_error","message":"bad key {{AdminKey}} {{BodyEchoMarker}}"}}"""),
-            });
+            AdminUsageResponder = (_, _) => Failure(
+                HttpStatusCode.Unauthorized,
+                "{\"error\":{\"type\":\"authentication_error\",\"message\":\"bad key " + AdminKey + " " + BodyEchoMarker + "\"}}"),
         });
-        var client = CreateAdminClient(OAuthHandler(), adminHttp: echoingAdmin);
 
         var snapshot = await client.GetSnapshotAsync(
             new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
@@ -588,19 +617,15 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
         Assert.Equal("Unavailable", failed.Value);
         Assert.DoesNotContain(AdminKey, failed.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain(BodyEchoMarker, failed.Detail, StringComparison.Ordinal);
-#else
-        Assert.Fail(R019ActivationMessage("the E8 sentinel sweep on Admin failure"));
-        await Task.CompletedTask;
-#endif
     }
 
     [Fact]
     public async Task GetSnapshotAsync_AdminSuccessSnapshotTexts_NeverContainKeyOrHeaderNames()
     {
-#if R019_IMPLEMENTED
         // E8 success side: the key travels only in request headers — nothing lands on the snapshot.
         WriteCredentials(FixedNow.AddHours(1));
-        var client = CreateAdminClient(OAuthHandler(), adminHttp: new AdminRecordingHandler());
+        Directory.CreateDirectory(Path.Combine(_directory, "projects"));
+        var client = CreateAdminClient(new ClaudeAdminHandler());
 
         var snapshot = await client.GetSnapshotAsync(
             new ProviderSnapshotRequest(includeHistory: true), CancellationToken.None);
@@ -612,9 +637,5 @@ public sealed class ClaudeLiveQuotaClientAnthropicAdminR019Tests : IDisposable
 
         // Sanity that the sweep ran against real content: Equivalent + 3 Admin stats.
         Assert.Equal(4, snapshot.Stats.Count);
-#else
-        Assert.Fail(R019ActivationMessage("the E8 sentinel sweep on Admin success"));
-        await Task.CompletedTask;
-#endif
     }
 }
