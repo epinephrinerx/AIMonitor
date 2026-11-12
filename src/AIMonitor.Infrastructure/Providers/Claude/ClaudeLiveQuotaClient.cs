@@ -318,7 +318,10 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
             stats.Add(new Stat("API cost this month (UTC)", FormatUsd(result.MonthCostUsd), "Anthropic Admin API · billed"));
             stats.Add(new Stat("API tokens this month (UTC)", FormatCompactTokens(result.MonthTokens), "Anthropic Admin API · billed"));
 
-            var configured = snapshot.Configured || snapshot.AdminApiConnected;
+            // R-019 E13d: the configured base is snapshot.Configured; the admin-only branch below
+            // overrides it to true when OAuth is not connected. The former `|| snapshot.AdminApiConnected`
+            // expression was dead code (the snapshot under construction cannot already have it set).
+            var configured = snapshot.Configured;
             var adminApiConnected = true;
             var error = snapshot.Error;
             var setupHint = snapshot.SetupHint;

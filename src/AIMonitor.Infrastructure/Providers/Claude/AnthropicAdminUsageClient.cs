@@ -51,9 +51,12 @@ public sealed class AnthropicAdminUsageClient
 
     private const int MaxPageSize = 31;
     private const int MaxPages = 10;
-    private const int DefaultMaxResponseBodyBytes = 1_000_000;
 
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
+    /// <summary>Default cap on each response page, in bytes (R-019 E7). 1,000,000.</summary>
+    public const int DefaultMaxResponseBodyBytes = 1_000_000;
+
+    /// <summary>Default overall deadline for all Admin requests in a refresh (R-019 E7). 20 seconds.</summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan MaxSupportedTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
 
     private static readonly UTF8Encoding StrictUtf8 =
@@ -160,30 +163,37 @@ public sealed class AnthropicAdminUsageClient
         CostReport costReport;
         try
         {
-            var usageTask = FetchUsageReportAsync(monthStartUtc, nowUtc, todayUtc, linkedCts.Token);
-            var costTask = FetchCostReportAsync(monthStartUtc, nowUtc, todayUtc, linkedCts.Token);
+            // R-019 E13a: wrap each report task so its own failure cancels the shared linked CTS
+            // immediately, stopping the sibling's next send/read rather than waiting for WhenAll.
+            var usageTask = CancelSiblingOnFailure(
+                FetchUsageReportAsync(monthStartUtc, nowUtc, todayUtc, linkedCts.Token), linkedCts);
+            var costTask = CancelSiblingOnFailure(
+                FetchCostReportAsync(monthStartUtc, nowUtc, todayUtc, linkedCts.Token), linkedCts);
             await Task.WhenAll(usageTask, costTask).ConfigureAwait(false);
             usageReport = usageTask.Result;
             costReport = costTask.Result;
         }
+        // R-019 E13c: when the caller token is cancelled any exception → OperationCanceledException.
+        // The specific catches below are therefore filtered to the non-cancellation case; a
+        // catch-all for the cancelled case is last.
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new AnthropicAdminApiException(TimeoutMessage);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
         {
-            // Ensure the sibling stops too (R-019 E12d).
             linkedCts.Cancel();
-            cancellationToken.ThrowIfCancellationRequested();
             throw new AnthropicAdminApiException(TransportErrorMessage);
         }
-        catch (AnthropicAdminApiException)
+        catch (AnthropicAdminApiException) when (!cancellationToken.IsCancellationRequested)
         {
-            // One report failed: cancel the sibling so it stops making network calls (R-019 E12d).
             linkedCts.Cancel();
-            cancellationToken.ThrowIfCancellationRequested();
             throw;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -200,6 +210,25 @@ public sealed class AnthropicAdminUsageClient
 
     private sealed record UsageReport(long MonthTokens, long TodayTokens);
     private sealed record CostReport(decimal MonthCost, decimal TodayCost);
+
+    /// <summary>
+    /// Wraps a report task so that, when it faults, the shared <paramref name="linkedCts"/> is
+    /// cancelled immediately. The sibling task is then cancelled on its next send/read rather than
+    /// waiting for <see cref="Task.WhenAll"/> to observe the failure (R-019 E13a). The wrapper
+    /// rethrows whatever the inner task threw.
+    /// </summary>
+    private static async Task<T> CancelSiblingOnFailure<T>(Task<T> task, CancellationTokenSource linkedCts)
+    {
+        try
+        {
+            return await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            linkedCts.Cancel();
+            throw;
+        }
+    }
 
     private async Task<UsageReport> FetchUsageReportAsync(
         DateTime monthStartUtc, DateTime nowUtc, DateTime todayUtc, CancellationToken cancellationToken)
@@ -249,7 +278,9 @@ public sealed class AnthropicAdminUsageClient
                 return new UsageReport(monthTokens, todayTokens);
             }
 
-            if (!seenCursors.Add(nextPage))
+            // R-019 E13b: has_more true with null or empty next_page is Unavailable before any
+            // further request; the cursor must also not repeat (E5).
+            if (string.IsNullOrEmpty(nextPage) || !seenCursors.Add(nextPage))
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
@@ -308,7 +339,9 @@ public sealed class AnthropicAdminUsageClient
                 return new CostReport(monthCost, todayCost);
             }
 
-            if (!seenCursors.Add(nextPage))
+            // R-019 E13b: has_more true with null or empty next_page is Unavailable before any
+            // further request; the cursor must also not repeat (E5).
+            if (string.IsNullOrEmpty(nextPage) || !seenCursors.Add(nextPage))
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
@@ -484,6 +517,13 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
+        // R-019 E13c: non-object root → parse message (TryGetProperty on a non-object throws
+        // InvalidOperationException, which must not leak).
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
         if (!root.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
         {
             throw new AnthropicAdminApiException(ParseErrorMessage);
@@ -496,31 +536,52 @@ public sealed class AnthropicAdminUsageClient
         }
         var hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
 
-        string? nextPage = null;
-        if (root.TryGetProperty("next_page", out var nextPageElement))
+        // R-019 E13b: next_page is required in every page; absent → Unavailable.
+        if (!root.TryGetProperty("next_page", out var nextPageElement))
         {
-            if (nextPageElement.ValueKind == JsonValueKind.String)
-            {
-                nextPage = nextPageElement.GetString();
-            }
-            else if (nextPageElement.ValueKind != JsonValueKind.Null)
-            {
-                throw new AnthropicAdminApiException(ParseErrorMessage);
-            }
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
+        string? nextPage;
+        if (nextPageElement.ValueKind == JsonValueKind.String)
+        {
+            nextPage = nextPageElement.GetString();
+        }
+        else if (nextPageElement.ValueKind == JsonValueKind.Null)
+        {
+            nextPage = null;
+        }
+        else
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         var buckets = new List<(DateTime DayUtc, long Tokens)>();
 
         foreach (var bucket in dataElement.EnumerateArray())
         {
+            // R-019 E13c: non-object bucket → parse message.
+            if (bucket.ValueKind != JsonValueKind.Object)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
             if (!bucket.TryGetProperty("starting_at", out var startingAtElement)
                 || startingAtElement.ValueKind != JsonValueKind.String)
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
+            // R-019 E13d: bucket starting_at must carry a timezone designator (Z or offset);
+            // a bare local timestamp without Z/offset is Unavailable.
+            var startingAtText = startingAtElement.GetString();
+            if (string.IsNullOrEmpty(startingAtText) || !HasTimezoneDesignator(startingAtText))
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
             if (!DateTimeOffset.TryParse(
-                startingAtElement.GetString(),
+                startingAtText,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
                 out var startingAt))
@@ -564,6 +625,13 @@ public sealed class AnthropicAdminUsageClient
 
     private static long ReadTokenField(JsonElement element, string fieldName)
     {
+        // R-019 E13c: TryGetProperty on a non-object throws InvalidOperationException; check
+        // ValueKind first and map to the parse message.
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
         if (!element.TryGetProperty(fieldName, out var fieldElement))
         {
             throw new AnthropicAdminApiException(ParseErrorMessage);
@@ -589,6 +657,12 @@ public sealed class AnthropicAdminUsageClient
 
     private static long ReadNestedTokenField(JsonElement element, string parentField, string childField)
     {
+        // R-019 E13c: check ValueKind before TryGetProperty.
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
         if (!element.TryGetProperty(parentField, out var parentElement)
             || parentElement.ValueKind != JsonValueKind.Object)
         {
@@ -616,6 +690,12 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
+        // R-019 E13c: non-object root → parse message.
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
         if (!root.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
         {
             throw new AnthropicAdminApiException(ParseErrorMessage);
@@ -628,31 +708,51 @@ public sealed class AnthropicAdminUsageClient
         }
         var hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
 
-        string? nextPage = null;
-        if (root.TryGetProperty("next_page", out var nextPageElement))
+        // R-019 E13b: next_page is required in every page; absent → Unavailable.
+        if (!root.TryGetProperty("next_page", out var nextPageElement))
         {
-            if (nextPageElement.ValueKind == JsonValueKind.String)
-            {
-                nextPage = nextPageElement.GetString();
-            }
-            else if (nextPageElement.ValueKind != JsonValueKind.Null)
-            {
-                throw new AnthropicAdminApiException(ParseErrorMessage);
-            }
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
+        string? nextPage;
+        if (nextPageElement.ValueKind == JsonValueKind.String)
+        {
+            nextPage = nextPageElement.GetString();
+        }
+        else if (nextPageElement.ValueKind == JsonValueKind.Null)
+        {
+            nextPage = null;
+        }
+        else
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
         var buckets = new List<(DateTime DayUtc, decimal AmountUsd)>();
 
         foreach (var bucket in dataElement.EnumerateArray())
         {
+            // R-019 E13c: non-object bucket → parse message.
+            if (bucket.ValueKind != JsonValueKind.Object)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
             if (!bucket.TryGetProperty("starting_at", out var startingAtElement)
                 || startingAtElement.ValueKind != JsonValueKind.String)
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
+            // R-019 E13d: bucket starting_at must carry a timezone designator (Z or offset).
+            var startingAtText = startingAtElement.GetString();
+            if (string.IsNullOrEmpty(startingAtText) || !HasTimezoneDesignator(startingAtText))
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
             if (!DateTimeOffset.TryParse(
-                startingAtElement.GetString(),
+                startingAtText,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
                 out var startingAt))
@@ -662,6 +762,8 @@ public sealed class AnthropicAdminUsageClient
 
             var dayUtc = startingAt.UtcDateTime.Date;
 
+            // R-019 E13d: remove the checked block around decimal sums — checked applies to
+            // integral types only and is a no-op on decimal.
             decimal bucketCost = 0m;
             if (!bucket.TryGetProperty("results", out var resultsElement)
                 || resultsElement.ValueKind != JsonValueKind.Array)
@@ -671,17 +773,7 @@ public sealed class AnthropicAdminUsageClient
 
             foreach (var result in resultsElement.EnumerateArray())
             {
-                try
-                {
-                    checked
-                    {
-                        bucketCost += ReadCostAmount(result);
-                    }
-                }
-                catch (OverflowException)
-                {
-                    throw new AnthropicAdminApiException(ParseErrorMessage);
-                }
+                bucketCost += ReadCostAmount(result);
             }
 
             buckets.Add((dayUtc, bucketCost));
@@ -692,13 +784,18 @@ public sealed class AnthropicAdminUsageClient
 
     /// <summary>
     /// Reads a single cost result's <c>amount</c> field — a decimal cents string in invariant
-    /// culture — and converts it to USD. Non-USD <c>currency</c>, negative amounts, or unparsable
-    /// strings become <see cref="AnthropicAdminApiException"/> (R-019 E4, E12c). The amount is
-    /// parsed with <see cref="NumberStyles.AllowDecimalPoint"/> only — no exponent, whitespace or
-    /// sign allowed.
+    /// culture — and converts it to USD. Non-USD <c>currency</c>, or unparsable strings become
+    /// <see cref="AnthropicAdminApiException"/> (R-019 E4, E12c, E13d). The amount is parsed with
+    /// <see cref="NumberStyles.AllowDecimalPoint"/> only — no exponent, whitespace or sign allowed.
     /// </summary>
     private static decimal ReadCostAmount(JsonElement result)
     {
+        // R-019 E13c: check ValueKind before TryGetProperty.
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
+
         if (!result.TryGetProperty("currency", out var currencyElement)
             || currencyElement.ValueKind != JsonValueKind.String)
         {
@@ -706,7 +803,8 @@ public sealed class AnthropicAdminUsageClient
         }
 
         var currency = currencyElement.GetString();
-        if (!string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase))
+        // R-019 E13d: currency comparison is ordinal (not case-insensitive) — the API sends "USD".
+        if (!string.Equals(currency, "USD", StringComparison.Ordinal))
         {
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
@@ -728,11 +826,44 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        if (cents < 0m)
+        // R-019 E13d: remove the cents < 0 check — dead code (AllowDecimalPoint rejects a sign).
+        return cents / 100m;
+    }
+
+    /// <summary>
+    /// RFC 3339 requires a timezone designator: a trailing <c>Z</c>/<c>z</c> for UTC, or a
+    /// <c>+</c>/<c>-</c> offset in the time portion. A bare timestamp such as
+    /// <c>2024-01-01T00:00:00</c> with neither is rejected as Unavailable (R-019 E13d).
+    /// </summary>
+    private static bool HasTimezoneDesignator(string timestamp)
+    {
+        if (timestamp.Length == 0)
         {
-            throw new AnthropicAdminApiException(ParseErrorMessage);
+            return false;
         }
 
-        return cents / 100m;
+        var last = timestamp[timestamp.Length - 1];
+        if (last is 'Z' or 'z')
+        {
+            return true;
+        }
+
+        // Offset is +/-HH:MM or +/-HHMM, appearing after the 'T' separator. Scan the time
+        // portion for a sign character.
+        var tIndex = timestamp.IndexOf('T');
+        if (tIndex < 0)
+        {
+            return false;
+        }
+
+        for (var i = tIndex + 1; i < timestamp.Length; i++)
+        {
+            if (timestamp[i] is '+' or '-')
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

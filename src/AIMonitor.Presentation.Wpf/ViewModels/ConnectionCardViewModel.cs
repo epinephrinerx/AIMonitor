@@ -165,6 +165,14 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
         if (isClaude && adminOnly)
         {
+            // R-019 E13f: admin-only Claude shows "Limited" / "!" only when OAuth is NotConnected.
+            // When OAuth is Expired, the StateWord stays "Expired" (truthful to the detection state).
+            // The Detection itself (credential-file truth) is left unchanged.
+            if (detection.State == DetectionState.NotConnected)
+            {
+                StateWord = "Limited";
+                StateGlyph = "!";
+            }
             SourceLine = "Admin key connected · Claude Code not signed in";
         }
         else
