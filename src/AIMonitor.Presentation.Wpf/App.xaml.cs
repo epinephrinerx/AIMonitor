@@ -128,12 +128,16 @@ public partial class App : System.Windows.Application
 
         _connectionStore = new ProviderConnectionStore(_secretStore!, _settingsSession);
 
+        // Claude client reads the saved Admin API key at the start of each refresh through an
+        // injected reader (R-019 E6). The key is not cached between refreshes; a saved-key change
+        // triggers the existing Changed → refresh path through the connection store.
         var claudeClient = new ClaudeLiveQuotaClient(
             _httpClient,
             Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"),
             userProfile,
             clock,
-            xdgConfigHome: Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
+            xdgConfigHome: Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
+            adminKeyReader: async ct => await _connectionStore.GetClaudeAdminKeyAsync(ct).ConfigureAwait(false));
 
         _openAiClient = new ReconfigurableQuotaClient(
             _connectionStore,
@@ -453,11 +457,13 @@ public partial class App : System.Windows.Application
                 {
                     connection = await ConnectionStore.GetAsync(providerId);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
+                    // Never forward the exception text, headers, response bodies or the key into
+                    // the message (R-019 E8). A generic message keeps the dialog safe to show.
                     System.Windows.MessageBox.Show(
                         _mainWindow?.IsVisible == true ? _mainWindow : null,
-                        $"Failed to load connection settings: {ex.Message}",
+                        "Failed to load connection settings. Please try again.",
                         "Connection Error",
                         MessageBoxButton.OK,
                         MessageBoxImage.Error);
@@ -479,11 +485,13 @@ public partial class App : System.Windows.Application
                     await _mainViewModel.RefreshAsync();
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
+                // Never forward the exception text, headers, response bodies or the key into the
+                // message (R-019 E8). A generic message keeps the dialog safe to show.
                 System.Windows.MessageBox.Show(
                     _mainWindow?.IsVisible == true ? _mainWindow : null,
-                    $"An error occurred: {ex.Message}",
+                    "An error occurred. Please try again.",
                     "Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);

@@ -12,6 +12,7 @@ using AIMonitor.Presentation.Wpf.Theme;
 public sealed class ConnectionCardViewModel : ViewModelBase
 {
     private DetectionInfo? _detection;
+    private bool _adminOnly;
     private string _stateWord = "Checking...";
     private string _stateGlyph = "–";
     private string _account = "Not signed in";
@@ -31,13 +32,24 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
     public Brush StateTint => Solid(StateColour(), 0x24);
 
-    private System.Windows.Media.Color StateColour() => _detection?.State switch
+    private System.Windows.Media.Color StateColour()
     {
-        DetectionState.Connected => ThemePalette.StatusGood,
-        DetectionState.Limited => ThemePalette.StatusWarning,
-        DetectionState.Expired => ThemePalette.StatusSerious,
-        _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
-    };
+        if (_detection is not null
+            && string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase)
+            && _adminOnly
+            && _detection.State != DetectionState.Expired)
+        {
+            return ThemePalette.StatusWarning;
+        }
+
+        return _detection?.State switch
+        {
+            DetectionState.Connected => ThemePalette.StatusGood,
+            DetectionState.Limited => ThemePalette.StatusWarning,
+            DetectionState.Expired => ThemePalette.StatusSerious,
+            _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
+        };
+    }
 
     private static SolidColorBrush Solid(System.Windows.Media.Color colour, byte alpha)
     {
@@ -111,9 +123,13 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     /// <summary>
     /// Updates the card representation from detection telemetry.
     /// When <paramref name="detection"/> is null, behaves as NotConnected with "Checking..." StateWord.
+    /// For Claude, when <paramref name="adminOnly"/> is true (Admin API succeeded but OAuth is not
+    /// connected), E14 displays "Limited" / "!" unless detection is Expired, with the matching chip
+    /// colour. The SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2, E12a).
     /// </summary>
-    public void Update(DetectionInfo? detection)
+    public void Update(DetectionInfo? detection, bool adminOnly = false)
     {
+        _adminOnly = adminOnly;
         Detection = detection;
         RefreshColours();
 
@@ -156,17 +172,37 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             Account = Meta.Tagline;
         }
 
-        var parts = new List<string>(2);
-        if (!string.IsNullOrEmpty(detection.SourceLabel))
-        {
-            parts.Add($"Detected from {detection.SourceLabel}");
-        }
-        if (!string.IsNullOrEmpty(detection.Hint))
-        {
-            parts.Add(detection.Hint);
-        }
+        // Admin-only mode for Claude: OAuth is not connected but Admin API succeeded (R-019 E2, E12a).
+        // The <paramref name="adminOnly"/> flag is the sole decider — the card does not re-derive it
+        // from DetectionState.
+        var isClaude = string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase);
 
-        SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        if (isClaude && adminOnly)
+        {
+            // R-019 E14: admin-only Claude shows "Limited" / "!" except when OAuth is Expired.
+            // Expired stays truthful to the detection state.
+            // The Detection itself (credential-file truth) is left unchanged.
+            if (detection.State != DetectionState.Expired)
+            {
+                StateWord = "Limited";
+                StateGlyph = "!";
+            }
+            SourceLine = "Admin key connected · Claude Code not signed in";
+        }
+        else
+        {
+            var parts = new List<string>(2);
+            if (!string.IsNullOrEmpty(detection.SourceLabel))
+            {
+                parts.Add($"Detected from {detection.SourceLabel}");
+            }
+            if (!string.IsNullOrEmpty(detection.Hint))
+            {
+                parts.Add(detection.Hint);
+            }
+
+            SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        }
 
         if (!Meta.NeedsKey)
         {

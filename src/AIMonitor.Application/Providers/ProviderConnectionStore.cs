@@ -37,7 +37,7 @@ public sealed class ProviderConnectionStore
             return new ProviderConnection(null, "");
         }
 
-        var key = id == "claude" ? null : await _secrets.GetAsync($"providers/{id}/key", cancellationToken).ConfigureAwait(false);
+        var key = await _secrets.GetAsync($"providers/{id}/key", cancellationToken).ConfigureAwait(false);
 
         var extra = "";
         if (_session.Current.Providers.TryGetValue(id, out var pref) && pref.Extra is not null)
@@ -46,6 +46,17 @@ public sealed class ProviderConnectionStore
         }
 
         return new ProviderConnection(key, extra);
+    }
+
+    /// <summary>
+    /// Reads the saved Anthropic Admin API key for Claude, if any. Convenience wrapper around
+    /// <see cref="GetAsync"/> for the Claude Admin API key reader injected into
+    /// <c>ClaudeLiveQuotaClient</c> (R-019 E6).
+    /// </summary>
+    public async Task<string?> GetClaudeAdminKeyAsync(CancellationToken cancellationToken = default)
+    {
+        var connection = await GetAsync("claude", cancellationToken).ConfigureAwait(false);
+        return connection.Key;
     }
 
     /// <summary>
@@ -68,7 +79,7 @@ public sealed class ProviderConnectionStore
     {
         var id = NormalizeProviderId(providerId);
 
-        if (id is "claude" or "agy")
+        if (id == "agy")
         {
             var sanitizedKey = SanitizeKey(typedKey);
             if (!string.IsNullOrEmpty(sanitizedKey))
@@ -81,13 +92,16 @@ public sealed class ProviderConnectionStore
                 throw new ArgumentException("This provider does not support extra settings.", nameof(extra));
             }
 
-            if (id == "agy")
-            {
-                Changed?.Invoke(id);
-                return;
-            }
+            Changed?.Invoke(id);
+            return;
         }
-        else
+
+        // Claude and OpenAI (and Gemini) accept a key like OpenAI; Claude still rejects extra settings.
+        if (id == "claude" && !string.IsNullOrEmpty(extra?.Trim()))
+        {
+            throw new ArgumentException("This provider does not support extra settings.", nameof(extra));
+        }
+
         {
             var sanitizedKey = SanitizeKey(typedKey);
             if (!string.IsNullOrEmpty(sanitizedKey))

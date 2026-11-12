@@ -645,9 +645,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
 
         AccountInfo = !string.IsNullOrEmpty(snapshot.Account) ? $"Account: {snapshot.Account}" : "";
-        var configuredNow = snapshot.Detection is null
-            ? snapshot.Ok
-            : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired;
+        // R-019 E13e: IsConfigured is also true when the snapshot has AdminOnly set (Admin API
+        // succeeded and OAuth is missing, expired or rejected 401/403).
+        var configuredNow = snapshot.AdminOnly
+            || (snapshot.Detection is null
+                ? snapshot.Ok
+                : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired);
         // 1.3.3: the banner is for a failing, configured service; a history gap is reported where the charts would be.
         ErrorMessage = snapshot.Error ?? "";
         HistoryNote = string.IsNullOrEmpty(snapshot.HistoryError) ? "" : $"⚠ {snapshot.HistoryError}";
@@ -725,8 +728,11 @@ public sealed class ProviderTabViewModel : ViewModelBase
         // Every other provider keeps R-004's setup card. Only the OpenCode tab and the Overview
         // tab never show it, so an error-only snapshot shows the error banner instead (E10, R-016
         // I3), and a configured snapshot with no meters does not draw an empty gauge card.
+        // R-019 E13e: configuredNow is true when snapshot.AdminOnly is true, so the setup card is
+        // already hidden for admin-only Claude without a dedicated clause here.
         var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
         var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
@@ -738,7 +744,6 @@ public sealed class ProviderTabViewModel : ViewModelBase
             TabTitle = DisplayName;
         }
 
-        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
         if (isClaude || isOpenAi)
