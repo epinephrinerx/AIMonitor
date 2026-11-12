@@ -23,12 +23,26 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// D11 (round 2, the code is correct): the setter test does not count agy calls — the PRE-EXISTING
 /// follow-up refresh may run them synchronously inside the setter — and the settings-driven test
 /// pumps the sync with the R-017 F13/F24 QueuedSyncContext + Drain pattern instead of Task.Yield.
+/// D14 (round 3): (1) D9 — <see cref="D9_OffThreadRefresh_TabChangesWaitUntilTheCapturedContextDrains"/>
+/// starts the refresh from a <see cref="Task.Run"/> thread under a controlled context and asserts the
+/// OpenCode/Overview/AGY tab changes appear only after that context drains; it FAILS while the handler
+/// runs off-thread (left failing for Writing Owner 1, not weakened). (2) D6 — the stale-snapshot test
+/// re-enables AGY without a new agy result and recomposes from the cached report: the dropped raw
+/// snapshot must not revive the tab. (3) D13 — a controlled AGY composition failure (a daily cost
+/// <c>AgentHistoryBuilder</c> rejects) must leave OpenCode and Overview already updated. (4) D14(6) —
+/// every test in this class now constructs the view model on its own QueuedSyncContext and settles
+/// with an explicit <c>Drain</c> instead of repeated <c>Task.Yield</c> pumping. The view model has no
+/// clock seam (it reads <c>DateTimeOffset.UtcNow</c>/<c>TimeZoneInfo.Local</c> inside, and the
+/// refresher's own clock is not injectable from outside), so the fixture local day still comes from
+/// <c>DateTime.Now</c> — the documented F21 midnight residual; replacing it needs a production seam.
 /// Hand-written fakes as in the R-014/R-015/R-017 view-model tests: no real ccusage, no agy, no
 /// network; F21 — ONE local day captured per test (fixture and assertions read the same value; the
-/// view model's own clock read is the documented midnight residual). The view model is constructed
-/// under xUnit's own synchronization context, so both D9 outcomes are settled: inline when the
-/// handler runs on the captured context, or posted to it — the extra awaits pump the queue before
-/// anything is asserted. Oracles (spec test oracles): today + yesterday antigravity rows — Apr 30
+/// view model's own clock read is the documented midnight residual). Every test builds the view model
+/// on its own QueuedSyncContext, so the settings sync — and, once D9 is fixed, the posted handler
+/// work — settles on an explicit <c>Drain</c>; while the handler still runs on the context captured
+/// by the refresher (a refresh started from the test thread) the <c>AgentUsageTask</c> join already
+/// completes it: that task's signal fires in the handler callback's finally. Oracles (spec test
+/// oracles): today + yesterday antigravity rows — Apr 30
 /// pattern 10,000/500/8,500/$0.50 and May 1 pattern 20,000/1,000/17,000/$1.00 + 10,000/500/8,500/
 /// null → tiles 40K / 2,000 / 34K / "$1.50 + unpriced". The composed behaviour does not exist at the
 /// base commit — these tests are the expected-red R-018 set for the view model.
@@ -90,6 +104,35 @@ public sealed class MainWindowViewModelAgyCompositionTests
         retrievedAt: FixedUtc,
         skippedRows: 0);
 
+    /// <summary>D13 fixture — a report row the AGY composer rejects. Yesterday's antigravity model
+    /// carries a negative <see cref="ModelUsage.CostUsd"/>: <c>ModelUsage</c> itself allows it and
+    /// every other tab call in <c>OnAgentUsageUpdated</c> formats negative money without validating
+    /// (<c>ChartFormat.Money</c> prints "$-0.25"; All agents/Claude/OpenAI/OpenCode/Overview rows and
+    /// the AGY tiles never test the sign), but <c>AgentHistoryBuilder.Build</c> validates each day's
+    /// priced total through <c>UsageHistoryBucket.RequireFiniteNonNegative</c>, so
+    /// <c>AgyUsageComposer.Compose</c> throws inside <c>UpdateAgyTab</c> — the controlled AGY
+    /// composition failure D13 orders against OpenCode/Overview. Today's antigravity row is clean so
+    /// <c>SummaryFor</c> (which runs before the three Update* calls) cannot throw; the opencode row
+    /// gives the OpenCode tab a real 8,000-token history day to prove it was fully updated.</summary>
+    private static AgentUsageReport ReportWithRejectedAgyRow(DateOnly today) => new(
+        daily: [
+            new DailyAgentUsage(today,
+            [
+                Agent("antigravity", Model(ModelA, 20_000, 1_000, 17_000, 1.00m)),
+                Agent("opencode", Model("deepseek", 8_000, 400, 6_800, 0.40m)),
+            ]),
+            new DailyAgentUsage(today.AddDays(-1),
+            [
+                Agent("antigravity", Model(ModelA, 10_000, 500, 8_500, -0.25m)),
+            ]),
+        ],
+        monthly: [],
+        sessions: [],
+        unpricedModels: [],
+        pricing: AgentUsagePricing.OnlineRequested,
+        retrievedAt: FixedUtc,
+        skippedRows: 0);
+
     private static ProviderSnapshot AgySnapshot(
         double sessionPercent = 40.0,
         string account = "paul@google.example") => new(
@@ -111,6 +154,29 @@ public sealed class MainWindowViewModelAgyCompositionTests
 
     private static DashboardOption<string> MetricOption(MainWindowViewModel vm, string metric) =>
         vm.MetricOptions.First(o => o.Value == metric);
+
+    /// <summary>D14(6): the R-017 F13/F24 construction — install the test's own queued context so the
+    /// view model captures it as its UI context, then restore the test thread's context. The settings
+    /// sync (and, once the D9 fix posts the handler work) is settled by an explicit <c>Drain</c>
+    /// instead of racing xUnit's pump with repeated <c>Task.Yield</c>. Extracted from the
+    /// D1_SettingsDriven test, which used it inline in round 2.</summary>
+    private static MainWindowViewModel ConstructViewModel(
+        QueuedSyncContext context,
+        LatestRefreshCoordinator coordinator,
+        SettingsSession session,
+        CachedAgentUsageSource cache)
+    {
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            return new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
 
     private static void AssertComposedTiles(ProviderTabViewModel tab)
     {
@@ -138,12 +204,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(new AppSettings());
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();          // (a): the agy snapshot arrives first — no report stored yet
         await vm.AgentUsageTask!;         // (b): OnAgentUsageUpdated composes with the raw snapshot
-        await Task.Yield();
-        await Task.Yield();               // D9: settle a post to the context captured at construction
+        context.Drain();                  // D14(6): explicit settle of the captured context
 
         var tab = vm.AgyTab;
         Assert.True(tab.HasSnapshot);
@@ -197,12 +263,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(initial);
         store.Release();
         using var session = new SettingsSession(store, initial);
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();                  // D14(6): explicit settle (see the class header)
 
         // D6: AGY disabled → no raw snapshot; Updated never composes for the tab ("today's look").
         Assert.Equal(0, agy.CallCount); // the disabled client was skipped
@@ -217,12 +283,11 @@ public sealed class MainWindowViewModelAgyCompositionTests
         {
             Providers = new Dictionary<string, ProviderPreference> { ["agy"] = new ProviderPreference(true) },
         });
-        await Task.Yield();
+        context.Drain();                  // D14(6): runs the posted settings sync explicitly
 
         // D6 re-detect pin: the quota snapshot CHANGES while ccusage stays cached.
         agy.Next = AgySnapshot(sessionPercent: 55.0, account: "new-account@google.example");
-        await vm.RefreshAsync("agy");
-        await Task.Yield();
+        await vm.RefreshAsync("agy");     // path (a) composes inline in the refresh; no refresher run
 
         // (a) path: the re-detected raw snapshot is composed with the STORED report — HasHistory and
         // the tiles arrive now, the new quota data is kept, and the composed note shows (D9).
@@ -260,12 +325,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(new AppSettings());
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
         Assert.True(vm.AgyTab.HasHistory); // composed while enabled
         var buckets = vm.AgyTab.ChartBuckets;
         var tiles = vm.AgyTab.StatTiles;
@@ -274,12 +339,11 @@ public sealed class MainWindowViewModelAgyCompositionTests
         {
             Providers = new Dictionary<string, ProviderPreference> { ["agy"] = new ProviderPreference(Enabled: false) },
         });
-        await Task.Yield();
+        context.Drain();
 
         await vm.RefreshAsync(); // full refresh without agy: the stored raw snapshot must be dropped
         await vm.AgentUsageTask!; // a cached Updated still fires — composition must not
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
 
         Assert.False(vm.LatestSnapshots.ContainsKey("agy")); // "drop the raw agy snapshot" (D6)
         Assert.Same(buckets, vm.AgyTab.ChartBuckets); // no UpdateFromSnapshot push happened since
@@ -290,12 +354,84 @@ public sealed class MainWindowViewModelAgyCompositionTests
         clock.UtcNow += TimeSpan.FromMinutes(16);
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
 
         Assert.Equal(2, source.ReadCount); // a real second read happened — and still nothing was pushed
         Assert.Same(buckets, vm.AgyTab.ChartBuckets);
         Assert.Same(tiles, vm.AgyTab.StatTiles);
+    }
+
+    // ── D6: re-enable without a new AGY result — the dropped snapshot must not revive ──
+
+    [Fact]
+    public async Task D6_ReEnablingAgyWithoutNewResult_CachedReportRecomposeDoesNotReviveStaleQuota()
+    {
+        // Inspector B finding 2: the test above passes when `_latestRawAgySnapshot = null` is removed,
+        // because the enabled-guard inside UpdateAgyTab masks the retained snapshot. Here the drop
+        // itself is pinned: disable AGY (a refresh drops the raw snapshot), re-enable it WITHOUT any
+        // new agy result, then recompose from the cached report (the D1 settings-driven rebuild) —
+        // with the snapshot really dropped there is nothing to compose, so the tab must not move.
+        // Removing the drop leaves the stale snapshot in place: the recompose pushes it and this
+        // test fails.
+        var agy = new FakeAgyClient(AgySnapshot());
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(DateOnly.FromDateTime(DateTime.Now))));
+        var clock = new FakeClock(FixedUtc);
+        var cache = new CachedAgentUsageSource(source, clock);
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+        [
+            new ProviderClientRegistration("claude", new FixedClient("claude")),
+            new ProviderClientRegistration("openai", new FixedClient("openai")),
+            new ProviderClientRegistration("agy", agy),
+        ]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        store.Release();
+        using var session = new SettingsSession(store, new AppSettings());
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        context.Drain();
+
+        // Composed while enabled; remember the exact pushed lists.
+        Assert.True(vm.AgyTab.HasHistory);
+        AssertComposedTiles(vm.AgyTab);
+        var buckets = vm.AgyTab.ChartBuckets;
+        var tiles = vm.AgyTab.StatTiles;
+        Assert.Equal(14, buckets.Count);
+
+        // Disable AGY and refresh: the raw snapshot is dropped, nothing new is pushed (guard).
+        await session.UpdateAsync(s => s with
+        {
+            Providers = new Dictionary<string, ProviderPreference> { ["agy"] = new ProviderPreference(Enabled: false) },
+        });
+        context.Drain();
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+        context.Drain();
+        Assert.Equal(1, agy.CallCount); // the disabled client is skipped — no new agy result
+        Assert.Same(buckets, vm.AgyTab.ChartBuckets);
+
+        // Re-enable through settings only — no re-detect, no refresh, so no NEW agy result exists.
+        await session.UpdateAsync(s => s with
+        {
+            Providers = new Dictionary<string, ProviderPreference> { ["agy"] = new ProviderPreference(true) },
+        });
+        context.Drain();
+        Assert.Same(buckets, vm.AgyTab.ChartBuckets); // re-enabling alone must not compose
+
+        // Trigger a cached-report update: the settings-driven range sync runs the same rebuild the
+        // D1 test pins (RebuildUsageTabsForViewChange → UpdateAgyTab from the CACHED report).
+        await session.UpdateAsync(s => s with { ChartRangeDays = 30 });
+        context.Drain();
+
+        Assert.Equal(30, vm.SelectedRange.Value); // the settings sync really ran…
+        Assert.Equal(30, vm.OpenCodeTab.ChartBuckets.Count); // …and rebuilt the OpenCode tab…
+        Assert.Same(buckets, vm.AgyTab.ChartBuckets); // …but must NOT recompose the AGY tab:
+        Assert.Same(tiles, vm.AgyTab.StatTiles);      // the stale quota snapshot was dropped (D6).
+        Assert.Equal(14, vm.AgyTab.ChartBuckets.Count); // frozen at the pre-disable 14-day push.
+        Assert.Equal(1, agy.CallCount); // re-enable + recompose never called the agy client
+        Assert.Equal(1, source.ReadCount); // nor did it start a ccusage read
     }
 
     // ── A3/D9: no antigravity data → today's look, client note kept ─────────────
@@ -315,12 +451,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(new AppSettings());
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
 
         // "agy unchanged (no stats, no history — today's look)" + D9 "otherwise the client's note
         // is kept".
@@ -329,6 +465,66 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.Equal(["Requests today"], vm.AgyTab.StatTiles.Select(t => t.Label));
         Assert.Equal(ClientNote, vm.AgyTab.ValueNote);
         Assert.False(vm.AgyTab.ShowSupplementary); // no antigravity ccusage line either (C8/C10)
+    }
+
+    // ── D9: an update arriving OFF the view model's thread must not touch tabs until the captured
+    //    context drains ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task D9_OffThreadRefresh_TabChangesWaitUntilTheCapturedContextDrains()
+    {
+        // Inspector B finding 1. AgentUsageRefresher captures the SYNCHRONIZATION CONTEXT OF WHOEVER
+        // CALLS RefreshAsync (src/.../AgentUsageRefresher.cs:37), not the view model's, so starting
+        // the refresh from a Task.Run thread makes the Updated handler — OnAgentUsageUpdated — run
+        // inline on the thread pool. D9: the handler's tab work must run on the UI thread, posted
+        // through the context the view model captured at construction (inline when none). This test
+        // FAILS against the current code — the "before the drain" asserts catch the off-thread tab
+        // changes — and is left failing per D14(1) for Writing Owner 1; it must not be weakened.
+        var agy = new FakeAgyClient(AgySnapshot());
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(DateOnly.FromDateTime(DateTime.Now))));
+        var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+        [
+            new ProviderClientRegistration("claude", new FixedClient("claude")),
+            new ProviderClientRegistration("openai", new FixedClient("openai")),
+            new ProviderClientRegistration("agy", agy),
+        ]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        store.Release();
+        using var session = new SettingsSession(store, new AppSettings());
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache); // captures the queued context
+
+        // Start the refresh from a thread-pool thread: SynchronizationContext.Current is null there,
+        // so the refresher captures nothing and may only invoke the handler inline, off-thread.
+        await Task.Run(() => vm.RefreshAsync());
+        await vm.AgentUsageTask!; // completes when the Updated handler call returns (posted or inline)
+
+        // The refresh itself (not OnAgentUsageUpdated) already applied path (a): the RAW agy
+        // snapshot pushed while no report was stored. That is allowed to be visible before the
+        // drain; the ccusage-driven tab work below is not.
+        Assert.True(vm.AgyTab.HasSnapshot);
+
+        // D9 — none of the handler's tab changes may have happened yet: the OpenCode and Overview
+        // tabs are ONLY updated from OnAgentUsageUpdated, and the AGY tab only gains its composed
+        // history/tiles/note there.
+        Assert.False(vm.OpenCodeTab.HasSnapshot);
+        Assert.False(vm.OverviewTab.HasSnapshot);
+        Assert.False(vm.AgyTab.HasHistory);
+        Assert.Equal(["Requests today"], vm.AgyTab.StatTiles.Select(t => t.Label));
+        Assert.Equal(ClientNote, vm.AgyTab.ValueNote);
+
+        context.Drain(); // explicit settle: the posted OnAgentUsageUpdated work runs exactly here
+
+        // …and now every D9-pinned tab change exists, composed once with the one cached report.
+        Assert.True(vm.OpenCodeTab.HasSnapshot);
+        Assert.True(vm.OpenCodeTab.HasHistory);
+        Assert.True(vm.OverviewTab.HasSnapshot);
+        Assert.True(vm.AgyTab.HasHistory);
+        AssertComposedTiles(vm.AgyTab);
+        Assert.Equal(ComposedNote, vm.AgyTab.ValueNote);
+        Assert.Equal(1, agy.CallCount); // the off-thread refresh never re-called agy for the compose
+        Assert.Equal(1, source.ReadCount); // and never started an extra ccusage read
     }
 
     // ── D1: range/metric change recomposes AGY synchronously; Overview excluded ─
@@ -348,12 +544,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var store = new BlockingSettingsStore(new AppSettings());
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
         var agyBuckets = vm.AgyTab.ChartBuckets;
         var overviewBuckets = vm.OverviewTab.ChartBuckets;
         Assert.Equal(14, agyBuckets.Count);
@@ -407,23 +603,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         store.Release();
         using var session = new SettingsSession(store, new AppSettings());
 
-        MainWindowViewModel vm;
-        var previous = SynchronizationContext.Current;
         var context = new QueuedSyncContext();
-        SynchronizationContext.SetSynchronizationContext(context);
-        try
-        {
-            vm = new MainWindowViewModel(coordinator, session, agentUsage: cache);
-        }
-        finally
-        {
-            SynchronizationContext.SetSynchronizationContext(previous);
-        }
+        var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
         await vm.AgentUsageTask!;
-        await Task.Yield();
-        await Task.Yield();
+        context.Drain();
         Assert.Equal(14, vm.AgyTab.ChartBuckets.Count);
 
         await session.UpdateAsync(s => s with { ChartRangeDays = 30 });
@@ -436,6 +621,65 @@ public sealed class MainWindowViewModelAgyCompositionTests
         AssertComposedTiles(vm.AgyTab);
         Assert.Equal(1, source.ReadCount);
         Assert.Equal(1, agy.CallCount); // the _syncingFromSettings path never fires the view-change refresh
+    }
+
+    // ── D13: an AGY composition failure must not stop OpenCode/Overview ─────────────────
+
+    [Fact]
+    public async Task D13_AgyCompositionFailure_OpenCodeAndOverviewAlreadyUpdated()
+    {
+        // Inspector B finding 3: these tests pass when UpdateAgyTab is moved before
+        // UpdateOpenCodeTab/UpdateOverviewTab in MainWindowViewModel.OnAgentUsageUpdated (the
+        // refresher swallows every handler exception, so a throw there is silent). The report here
+        // carries a daily cost AgyUsageComposer rejects (see ReportWithRejectedAgyRow): the handler
+        // MUST still have updated the OpenCode and Overview tabs — they run before UpdateAgyTab —
+        // while the AGY tab keeps its pre-handler state (the refresher swallows the throw).
+        var agy = new FakeAgyClient(AgySnapshot());
+        var source = new FakeAgentUsageSource(_ => Task.FromResult(ReportWithRejectedAgyRow(DateOnly.FromDateTime(DateTime.Now))));
+        var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+        [
+            new ProviderClientRegistration("claude", new FixedClient("claude")),
+            new ProviderClientRegistration("openai", new FixedClient("openai")),
+            new ProviderClientRegistration("agy", agy),
+        ]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        store.Release();
+        using var session = new SettingsSession(store, new AppSettings());
+        var context = new QueuedSyncContext();
+        var vm = ConstructViewModel(context, coordinator, session, cache);
+
+        await vm.RefreshAsync();
+        await vm.AgentUsageTask!;
+
+        // Settle any posted handler work. Today the AGY throw happens inside the refresher's own
+        // try/catch (this Drain is a no-op); once D9 posts the handler body to the captured context,
+        // the same throw surfaces HERE instead — the clause pins the tab state, not the catch site,
+        // so the failure is expected and consumed at this seam.
+        try
+        {
+            context.Drain();
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
+
+        // D13 order: OpenCode and Overview were already updated by this handler run…
+        Assert.True(vm.OpenCodeTab.HasSnapshot);
+        Assert.True(vm.OpenCodeTab.HasHistory);
+        Assert.Equal(14, vm.OpenCodeTab.ChartBuckets.Count);
+        Assert.Equal(8_000.0, vm.OpenCodeTab.ChartBuckets[^1].Total); // today's deepseek row
+        Assert.True(vm.OverviewTab.HasSnapshot); // UpdateOverviewTab ran to its push
+
+        // …and only the AGY recompose failed: path (a)'s raw push (report was null then) is still
+        // the tab's state — no history, no added tiles, the client's note kept.
+        Assert.True(vm.AgyTab.HasSnapshot);
+        Assert.False(vm.AgyTab.HasHistory);
+        Assert.Equal(["Requests today"], vm.AgyTab.StatTiles.Select(t => t.Label));
+        Assert.Equal(ClientNote, vm.AgyTab.ValueNote);
+
+        Assert.Equal(1, agy.CallCount); // the failure never retries the agy client…
+        Assert.Equal(1, source.ReadCount); // …and never starts an extra ccusage read
     }
 
     // ── Fakes (hand-written, same as the R-014/R-015/R-017 view-model tests) ────
@@ -483,10 +727,10 @@ public sealed class MainWindowViewModelAgyCompositionTests
 
     /// <summary>R-017 F24 pattern (copied from MainWindowViewModelOpenCodeChartWiringTests): a
     /// <see cref="SynchronizationContext"/> that queues every Post and runs nothing until the test
-    /// calls <see cref="Drain"/>. Installed around the view model's construction so the settings
-    /// sync is posted to a queue the test controls; xUnit's own AsyncTestSyncContext would pump it
-    /// at any await and hide the ordering. D11 wires this into
-    /// <see cref="D1_SettingsDrivenRangeChange_RecomposesAgyTab_NoReads"/>.</summary>
+    /// calls <see cref="Drain"/>. Installed around the view model's construction (D14(6): via
+    /// <see cref="ConstructViewModel"/> in every test here) so the settings sync — and, once the D9
+    /// fix posts the handler work, that too — is posted to a queue the test controls; xUnit's own
+    /// AsyncTestSyncContext would pump it at any await and hide the ordering.</summary>
     private sealed class QueuedSyncContext : SynchronizationContext
     {
         // A posted body that re-posted itself (the loop F23's design forbids) would otherwise hang
