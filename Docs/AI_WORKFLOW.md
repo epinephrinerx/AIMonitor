@@ -15,8 +15,8 @@
 
 ### Agent Roster
 
-เก้าบทบาท (ต้นแบบมีแปด โปรเจกต์นี้เพิ่ม Writing Owner 3) บทบาทละสามช่อง: ตัว agent, model และ effort
-ตั้งค่าโดยผู้ใช้ 2026-11-09 · แก้ WO1/WO2/WO3/Inspector/Reviewer2 เมื่อ 2026-11-10 · แก้ WO3 เมื่อ 2026-11-12 (ผู้ใช้ขอ Reviewer1 = Opus 5.5 แต่ซ้ำกับ Coding Owner จึงคง Fable 5.1 ตามคำตัดสินของผู้ใช้)
+สิบบทบาท (ต้นแบบมีแปด โปรเจกต์นี้เพิ่ม Writing Owner 3 และ 4) บทบาทละสามช่อง: ตัว agent, model และ effort
+ตั้งค่าโดยผู้ใช้ 2026-11-09 · แก้ WO1/WO2/WO3/Inspector/Reviewer2 เมื่อ 2026-11-10 · แก้ WO3 เมื่อ 2026-11-12 (ผู้ใช้ขอ Reviewer1 = Opus 5.5 แต่ซ้ำกับ Coding Owner จึงคง Fable 5.1 ตามคำตัดสินของผู้ใช้) · เพิ่ม WO4 เมื่อ 2026-11-12
 
 - Coding Owner : `Claude Code` (Anthropic)
 - Coding Owner Model : `Claude Opus 5.5`
@@ -30,6 +30,9 @@
 - Writing Owner 3 : `Codex` (เปลี่ยนจาก opencode เมื่อ 2026-11-12)
 - Writing Owner 3 Model : `GPT-6-Luna` (เปลี่ยนจาก opencode-go/kimi-k2.7-code เมื่อ 2026-11-12)
 - Writing Owner 3 Effort : `Medium`
+- Writing Owner 4 : `Claude Code` subagent (Agent tool, model sonnet) (เพิ่มเมื่อ 2026-11-12)
+- Writing Owner 4 Model : `Claude Sonnet 5.5`
+- Writing Owner 4 Effort : `Low`
 - Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
 - Test Author Model : `opencode-go/qwen3.8-flash` (ชั่วคราวตั้งแต่ 2026-11-12: `Claude Sonnet 5.5` ตามคำตัดสินของผู้ใช้ เพราะ OpenCode Go ใช้ครบโควตารายสัปดาห์ — กลับเป็น qwen3.8-flash เมื่อโควตารีเซ็ต)
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
@@ -48,11 +51,13 @@
 
 **กฎของ model**
 
-- **หกโมเดลนี้ต้องไม่ซ้ำกันเลย:** Coding Owner, Writing Owner 1, Writing Owner 2, Writing Owner 3,
-  Reviewer1, Reviewer2 — ผู้เขียนกับผู้ตรวจที่เป็นโมเดลเดียวกันจะมองข้ามข้อผิดพลาด
+- **เจ็ดโมเดลนี้ต้องไม่ซ้ำกันเลย:** Coding Owner, Writing Owner 1, Writing Owner 2, Writing Owner 3,
+  Writing Owner 4, Reviewer1, Reviewer2 — ผู้เขียนกับผู้ตรวจที่เป็นโมเดลเดียวกันจะมองข้ามข้อผิดพลาด
   แบบเดียวกัน และผู้เขียนหลายตัวที่เป็นโมเดลเดียวกันก็ไม่ได้ให้มุมมองที่ต่างกันจริง
-- **Writing Owner ทุกตัวต้องเป็นคนละผู้ให้บริการกับ Coding Owner**
-- **Test Author Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3 หรือ Reviewer1/2** —
+- **Writing Owner ทุกตัวต้องเป็นคนละผู้ให้บริการกับ Coding Owner** — ยกเว้น Writing Owner 4
+  (Claude Sonnet 5.5 ผู้ให้บริการเดียวกับ Coding Owner) ตามคำตัดสินของผู้ใช้ 2026-11-12
+  ชดเชยโดยงานที่ WO4 เขียนต้องผ่าน Reviewer2 (Codex) และ Inspector ขั้น B (Codex) เสมอ
+- **Test Author Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3/4 หรือ Reviewer1/2** —
   สองเหตุผลคนละชั้น: (ก) ซ้ำกับ **Writing Owner** แล้วผู้เขียนเทสต์กับผู้เขียนโค้ด
   เชื่อสมมติฐานชุดเดียวกัน เทสต์จึงผ่านทั้งที่โค้ดผิด · (ข) ซ้ำกับ **Coding Owner**
   แล้วหนักกว่านั้น เพราะ Coding Owner เป็น**ผู้เขียน spec** และ Test Author ดึงค่าที่คาด
@@ -60,7 +65,7 @@
   ช่องว่างนั้นจึงไม่ถูกจับทั้งสองฝั่ง — เป็นเหตุผลเดียวกับที่ Inspector ห้ามซ้ำ Coding Owner
 - **Test Author Model ซ้ำกับ Integrator ได้** เพราะ Integrator ไม่ได้เขียนทั้ง spec
   และโค้ดที่เทสต์ต้องพิสูจน์
-- **Inspector Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3 หรือ Test Author** —
+- **Inspector Model ห้ามซ้ำกับ Coding Owner, Writing Owner 1/2/3/4 หรือ Test Author** —
   Inspector มีหน้าที่หาสิ่งที่บทบาทเหล่านั้นมองไม่เห็น ถ้าเป็นโมเดลเดียวกันก็จะมองไม่เห็นเหมือนกัน
 - **Inspector Model ซ้ำกับ Reviewer ได้ แต่ต้องเป็น session แยกกัน** และ**ควรต่างจาก Reviewer1**
   เพื่อให้มุมมองไม่กระจุกอยู่ที่โมเดลเดียว — ถ้าตั้งให้ซ้ำกับ Reviewer1 ให้บันทึกเหตุผลไว้หนึ่งบรรทัด
@@ -74,6 +79,9 @@
 - Writing Owner 3 (GPT-6-Luna) เป็นตระกูล GPT เดียวกับ Inspector (GPT-6-Sol) และ Reviewer2 (GPT-6.1-Sol) (คนละโมเดล
   จึงไม่ผิดกฎ) — งานที่ WO3 เขียน ให้ Reviewer1 (Fable) รีวิวเสมอและให้ Inspector ขั้น B สร้าง mutant ของตัวเอง
   และสามบทบาทนี้ใช้โควตา Codex ร่วมกัน ถ้า Codex ติดลิมิต ทั้งสามติดพร้อมกัน
+- Writing Owner 4 (Claude Sonnet 5.5) เป็นโมเดลเดียวกับ Integrator และกับ Test Author ชั่วคราว — ระหว่างที่
+  Test Author ยังเป็น Sonnet 5.5 **ห้ามส่งงานโค้ดให้ WO4** (ผู้ใช้ตัดสิน 2026-11-12) WO3 ยังเป็นผู้เขียนหลักไปก่อน
+  เมื่อ Test Author กลับเป็น qwen3.8-flash แล้ว งานที่เคยไป WO3 ให้ส่ง WO4 แทน
 ขอบเขตการทำงานของ agent
 
 - Max Sessions ต่อ agent: `1`
@@ -87,7 +95,7 @@
 - **ต้องแจ้งความคืบหน้าทุก 15 นาที**: ทำอะไรไปแล้ว ติดอะไร
   เหลืออะไร — งานที่เงียบนานกว่านี้ถือว่าไม่รู้สถานะ ไม่ใช่ว่ากำลังคืบหน้า
 - **ถ้า agent อื่นไม่ตอบกลับเกิน 30 นาที ให้สลับไปใช้ agent ตัวถัดไปได้ทันที**
-  ไม่ต้องรอคำอนุมัติ: Writing Owner 1 → 2 → 3 (วนกลับ 1) และ Reviewer1 ↔ Reviewer2
+  ไม่ต้องรอคำอนุมัติ: Writing Owner 1 → 2 → 3 → 4 (วนกลับ 1; ข้าม WO4 ระหว่างที่ Test Author เป็น Sonnet 5.5) และ Reviewer1 ↔ Reviewer2
   **ถ้า Writing Owner 1 หรือ 2 ติดลิมิต (quota/rate limit) ให้ส่งงานนั้นต่อให้ Writing Owner 3 ทันที**
   (ผู้ใช้สั่ง 2026-11-12) ไม่ต้องรอ 30 นาทีหรือคำอนุมัติ
   แล้วบันทึกไว้หนึ่งบรรทัดว่าสลับเมื่อไรเพราะอะไร ถ้าตัวที่ค้างกลับมาตอบทีหลัง
