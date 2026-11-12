@@ -414,7 +414,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว |
+| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ 91fc803 เมื่อ 2026-11-12 · spec `Docs/SPEC_R019.md` E1–E16) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | `ConnectDialog` · `ProviderMeta` · `ProviderConnectionStore` · provider clients (Claude Admin API) |
 | เกี่ยวกับ | [[R-006]] · [[R-012]] · [[R-014]] · [[R-020]] |
@@ -439,9 +439,18 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 
 **ตรวจรับเมื่อ:**
 - [ ] ใส่ Anthropic Admin key ที่ถูกต้องแล้วแท็บ Claude แสดง usage/cost ของ API (synthetic tests; คุณตรวจด้วย key จริง)
-- [ ] key ผิดรูปแบบหรือถูกปฏิเสธ → ข้อความบอกสาเหตุ ไม่ล้ม และไม่แสดง key
-- [ ] การ์ดที่ไม่รองรับ API key บอกเหตุผลชัดเจน
+- [x] key ผิดรูปแบบหรือถูกปฏิเสธ → ข้อความบอกสาเหตุ ไม่ล้ม และไม่แสดง key
+- [x] การ์ดที่ไม่รองรับ API key บอกเหตุผลชัดเจน
 - [ ] key ถูกเก็บใน DPAPI ไม่อยู่ใน settings หรือ log
+
+ผลทดสอบของผม (2026-11-12, Release บน `91fc803`): build 0/0 · เทสต์ 344 + 218 + 1,406 + 758 ผ่านครบ · format สะอาด
+- ข้อ 2: `AnthropicAdminUsageClientR019Tests` / `ClaudeLiveQuotaClientAnthropicAdminR019Tests` (401/403 → การ์ด Limited,
+  timestamp/รูปแบบผิด → `ParseErrorMessage` ไม่มี inner exception ไม่มีข้อความ key)
+- ข้อ 3: `ProviderMetaR019Tests` (Claude: key ธรรมดา/workspace อ่าน usage ไม่ได้ · AGY: Gemini API key อ่าน usage/quota ไม่ได้)
+  — การ์ด OpenCode เป็นของ R-020
+- ข้อ 1 และ 4 ยังต้องให้คุณตรวจ: ใส่ Admin key จริงในแอป แล้วดูว่าไม่มี key ใน `settings.json` หรือ log
+  (เทสต์ synthetic ครอบคลุมการเก็บที่ secret store เดียวกับ OpenAI และ `ToString` ไม่แสดง key แต่ไม่ได้ตรวจ DPAPI บนดิสก์จริง)
+- ความเสี่ยงที่รับไว้: wiring/catch ใน `App.xaml.cs` (ตรวจด้วยมือ) · ±14:30 offset ถูกรับตามสเปก · ค่า fraction และปีขอบไม่มีเทสต์ตรึง
 
 ## R-018 · แก้สองจุดจากภาพคู่: ชื่อ gauge ล้นการ์ด และแท็บ AGY ไม่มีสถิติ/กราฟ
 
