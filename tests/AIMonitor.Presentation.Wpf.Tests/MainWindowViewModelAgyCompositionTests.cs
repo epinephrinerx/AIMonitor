@@ -240,11 +240,16 @@ public sealed class MainWindowViewModelAgyCompositionTests
 
         public FakeAgentUsageSource Source { get; }
 
-        public static Harness Create(Func<DateOnly, Task<AgentUsageReport>> read, AppSettings? settings = null)
+        /// <param name="agyGate">D17: when given, the agy provider call (part of every provider
+        /// refresh) waits for it, so a test can hold a refresh inside the provider step.</param>
+        public static Harness Create(
+            Func<DateOnly, Task<AgentUsageReport>> read,
+            AppSettings? settings = null,
+            Task? agyGate = null)
         {
             settings ??= new AppSettings();
             var today = DateOnly.FromDateTime(DateTime.Now);
-            var agy = new FakeAgyClient(AgySnapshot());
+            var agy = new FakeAgyClient(AgySnapshot()) { Gate = agyGate };
             var source = new FakeAgentUsageSource(_ => read(today));
             var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
             var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
@@ -276,15 +281,12 @@ public sealed class MainWindowViewModelAgyCompositionTests
         }
     }
 
-    /// <summary>Starts <paramref name="action"/> on a pool thread with <paramref name="entry"/> installed
-    /// as its <see cref="SynchronizationContext"/> (the refresh is "entered on" that context) and pumps
-    /// the context like a UI thread — Current == the context while a callback runs, ONE callback per
-    /// pass — until the action's task completes: the view model's own <c>ConfigureAwait(true)</c>
-    /// continuation is posted there. Pumping one callback at a time leaves a handler that the refresher
-    /// posts to the same context queued instead of running it in the same pass.</summary>
-    private static async Task RunOnContextAsync(QueuedSyncContext entry, Func<Task> action)
-    {
-        var task = Task.Run(() =>
+    /// <summary>D17: starts <paramref name="action"/> on a pool thread with <paramref name="entry"/>
+    /// installed as its <see cref="SynchronizationContext"/> (the refresh is "entered on" that context)
+    /// and returns the call's task as soon as the call returns — usually still running, suspended on a
+    /// provider step. Nothing pumps the context here; see <see cref="PumpUntilCompletedAsync"/>.</summary>
+    private static async Task<Task> StartOnContextAsync(QueuedSyncContext entry, Func<Task> action) =>
+        await Task.Run<Task>(() =>
         {
             var previous = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(entry);
@@ -296,17 +298,61 @@ public sealed class MainWindowViewModelAgyCompositionTests
             {
                 SynchronizationContext.SetSynchronizationContext(previous);
             }
-        });
-        var deadline = DateTime.UtcNow + Bound;
-        while (!task.IsCompleted)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "Timed out pumping the entry context.");
-            await Task.Run(entry.DrainOneInstalled);
-            await Task.WhenAny(task, Task.Delay(5));
-        }
+        }).WaitAsync(Bound);
 
-        await task;
-    }
+    /// <summary>D17: pumps <paramref name="entry"/> on ONE worker thread like a UI thread — one callback
+    /// per pass, checking <paramref name="call"/> after each — until the call's task completes (bounded).
+    /// A single serialized pump cannot run a callback that was posted after the call finished.
+    /// <paramref name="installContext"/> false runs the callbacks WITHOUT installing the context as
+    /// <see cref="SynchronizationContext.Current"/>, so code the callback runs sees no context.</summary>
+    private static Task PumpUntilCompletedAsync(QueuedSyncContext entry, Task call, bool installContext = true) =>
+        Task.Run(() =>
+        {
+            var deadline = DateTime.UtcNow + Bound;
+            while (!call.IsCompleted)
+            {
+                Assert.True(DateTime.UtcNow < deadline, "Timed out pumping the entry context.");
+                if (!(installContext ? entry.TryDrainOneInstalled() : entry.DrainOne()))
+                {
+                    Thread.Sleep(1);
+                }
+            }
+
+            return call;
+        }).WaitAsync(Bound + Bound);
+
+    /// <summary>Runs <paramref name="action"/> on a pool thread with <paramref name="entry"/> installed
+    /// and pumps the context like a UI thread — Current == the context while a callback runs, ONE callback
+    /// per pass — until the action's task completes: the view model's own <c>ConfigureAwait(true)</c>
+    /// continuation is posted there. D17 (Reviewer2 test race 2): the entry action AND the pump run on the
+    /// SAME worker, one after the other, so the pump cannot dequeue a callback that is posted while the
+    /// entry thread is still inside the call (e.g. the handler a test means to leave queued); and the
+    /// pump stops as soon as the call's task is complete, so a handler posted by the call stays queued.</summary>
+    private static Task RunOnContextAsync(QueuedSyncContext entry, Func<Task> action) =>
+        Task.Run(() =>
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(entry);
+            try
+            {
+                var call = action();
+                var deadline = DateTime.UtcNow + Bound;
+                while (!call.IsCompleted)
+                {
+                    Assert.True(DateTime.UtcNow < deadline, "Timed out pumping the entry context.");
+                    if (!entry.TryDrainOneInstalled())
+                    {
+                        Thread.Sleep(1);
+                    }
+                }
+
+                return call;
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        }).WaitAsync(Bound + Bound);
 
     /// <summary>D16: waits for <c>AgentUsageTask</c> while pumping the view model's construction
     /// context, bounded. A refresh that starts with no <see cref="SynchronizationContext.Current"/> (any
@@ -782,7 +828,10 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.Equal(1, h.Context.PendingCount);
         AssertNoHandlerTabChanges(h.Vm);
 
-        h.Context.Drain(); // first handler: unblocks the refresher, which re-runs forced
+        // D17 (Reviewer2 test race 1): consume EXACTLY ONE callback — the first handler. Completing it
+        // lets the refresher's continuation run on another thread and enqueue the forced re-run's
+        // handler; a Drain() could pick that one up too and apply the 9,000 total early.
+        Assert.True(h.Context.DrainOne());
         Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
         await WaitUntilAsync(() => first.IsCompleted || h.Context.PendingCount > 0,
             "the forced re-run's handler to be posted (or, in the regression, to run inline)");
@@ -795,6 +844,206 @@ public sealed class MainWindowViewModelAgyCompositionTests
         h.Context.Drain();
         await first.WaitAsync(Bound);
         Assert.Equal(9_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+    }
+
+    // ── D17: the pending-refresh path records its OWN entry context ─────────────────────
+
+    /// <summary>D17(a) helper — a bare refresh whose provider step is blocked on <paramref name="gate"/>,
+    /// then one overlapping refresh per entry of <paramref name="pendingEntries"/> in order (a null entry
+    /// = no context). Each overlapping call only sets <c>_pendingRefresh</c> (and, since D17, records its
+    /// entry context) and returns at once. Then the gate is released from a pool thread and the first
+    /// call is awaited. The refresh that RUNS the pending re-run is the first one, on a pool thread with no
+    /// context, so a re-run that took its context from "whoever runs it" would deliver on the construction
+    /// context regardless of what the pending callers recorded.</summary>
+    private static async Task RunBareFirstWithPendingCallersAsync(
+        Harness h,
+        TaskCompletionSource gate,
+        params QueuedSyncContext?[] pendingEntries)
+    {
+        var first = await Task.Run<Task>(() => h.Vm.RefreshAsync()).WaitAsync(Bound);
+        await WaitUntilAsync(() => h.Agy.CallCount == 1, "the first refresh to reach the blocked provider step");
+        Assert.False(first.IsCompleted);
+
+        foreach (var entry in pendingEntries)
+        {
+            if (entry is null)
+            {
+                await Task.Run(() => h.Vm.RefreshAsync()).WaitAsync(Bound);
+            }
+            else
+            {
+                await RunOnContextAsync(entry, () => h.Vm.RefreshAsync());
+            }
+
+            Assert.False(first.IsCompleted); // an overlapping call only records "pending" and returns
+        }
+
+        Assert.Equal(1, h.Agy.CallCount);
+        Assert.Equal(0, h.Source.ReadCount);
+
+        await Task.Run(() => gate.SetResult());
+        await first.WaitAsync(Bound);
+    }
+
+    [Fact]
+    public async Task D17_PendingRefresh_FirstOnForeignContextBlocked_SecondBare_RerunDeliversOnTheConstructionContext()
+    {
+        // Inspector B round 3 Major. A refresh entered on a FOREIGN context blocks in its provider
+        // step; a second refresh is entered with no context (it only sets _pendingRefresh); the first is
+        // released and runs the re-run itself, on the foreign context it was entered on. D17(a): the
+        // re-run is the PENDING caller's refresh, so its agent-usage delivery follows the context that
+        // caller recorded — none, so the view model's construction context — and not the first caller's
+        // foreign one. The handler stays queued on the construction context (nothing on the foreign
+        // one, no inline run, no tab change) until that context drains.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var h = Harness.Create(today => Task.FromResult(ReportWithOpenCode(today, 8_000)), agyGate: gate.Task);
+        var foreign = new QueuedSyncContext();
+
+        var first = await StartOnContextAsync(foreign, () => h.Vm.RefreshAsync());
+        await WaitUntilAsync(() => h.Agy.CallCount == 1, "the first refresh to reach the blocked provider step");
+        Assert.False(first.IsCompleted);
+
+        await Task.Run(() => h.Vm.RefreshAsync()).WaitAsync(Bound); // bare: sets _pendingRefresh, returns
+        Assert.False(first.IsCompleted);
+        Assert.Equal(0, h.Source.ReadCount);
+
+        gate.SetResult();
+        await PumpUntilCompletedAsync(foreign, first); // the foreign "UI thread" runs the first call and its re-run
+        await WaitUntilAsync(
+            () => h.Context.PendingCount > 0 || foreign.PendingCount > 0 || h.Vm.OpenCodeTab.HasSnapshot,
+            "the re-run's handler to be delivered somewhere");
+
+        Assert.Equal(0, foreign.PendingCount);   // not the first caller's context…
+        Assert.Equal(1, h.Context.PendingCount); // …the construction context, queued
+        AssertNoHandlerTabChanges(h.Vm);
+        Assert.Equal(2, h.Agy.CallCount);        // the first provider step + exactly one re-run
+
+        h.Context.Drain();
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+        Assert.True(h.Vm.AgyTab.HasHistory);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    [Fact]
+    public async Task D17_PendingRefresh_PendingCallerOnAContext_RerunDeliversOnThatContext()
+    {
+        // D17(a): "also records its own entry context" — with a NON-null recorded context the re-run
+        // delivers there (D16: a refresh entered on any context keeps today's behaviour), although the
+        // first refresh, which runs the re-run, was entered bare on a pool thread.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var h = Harness.Create(today => Task.FromResult(ReportWithOpenCode(today, 8_000)), agyGate: gate.Task);
+        var pending = new QueuedSyncContext();
+
+        await RunBareFirstWithPendingCallersAsync(h, gate, pending);
+        await WaitUntilAsync(
+            () => pending.PendingCount > 0 || h.Context.PendingCount > 0 || h.Vm.OpenCodeTab.HasSnapshot,
+            "the re-run's handler to be delivered somewhere");
+
+        Assert.Equal(0, h.Context.PendingCount);
+        Assert.Equal(1, pending.PendingCount);
+        AssertNoHandlerTabChanges(h.Vm);
+
+        pending.Drain();
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.Equal(0, h.Context.PendingCount);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    [Fact]
+    public async Task D17_PendingRefresh_LatestPendingCallerWins_RerunDeliversOnItsContext()
+    {
+        // D17(a): "latest pending caller wins" — two overlapping refreshes on two different contexts;
+        // the re-run delivers on the SECOND one's context only.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var h = Harness.Create(today => Task.FromResult(ReportWithOpenCode(today, 8_000)), agyGate: gate.Task);
+        var earlier = new QueuedSyncContext();
+        var later = new QueuedSyncContext();
+
+        await RunBareFirstWithPendingCallersAsync(h, gate, earlier, later);
+        await WaitUntilAsync(
+            () => later.PendingCount > 0 || earlier.PendingCount > 0 || h.Context.PendingCount > 0 || h.Vm.OpenCodeTab.HasSnapshot,
+            "the re-run's handler to be delivered somewhere");
+
+        Assert.Equal(0, earlier.PendingCount);
+        Assert.Equal(0, h.Context.PendingCount);
+        Assert.Equal(1, later.PendingCount);
+        AssertNoHandlerTabChanges(h.Vm);
+
+        later.Drain();
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.Equal(0, earlier.PendingCount);
+        Assert.Equal(0, h.Context.PendingCount);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    [Fact]
+    public async Task D17_PendingRefresh_LaterBareCaller_ReplacesAnEarlierContext_RerunDeliversOnTheConstructionContext()
+    {
+        // D17(a): latest wins also when the latest caller has NO context ("null → construction
+        // context"): an earlier pending caller's context must not linger.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var h = Harness.Create(today => Task.FromResult(ReportWithOpenCode(today, 8_000)), agyGate: gate.Task);
+        var earlier = new QueuedSyncContext();
+
+        await RunBareFirstWithPendingCallersAsync(h, gate, earlier, null);
+        await WaitUntilAsync(
+            () => earlier.PendingCount > 0 || h.Context.PendingCount > 0 || h.Vm.OpenCodeTab.HasSnapshot,
+            "the re-run's handler to be delivered somewhere");
+
+        Assert.Equal(0, earlier.PendingCount);
+        Assert.Equal(1, h.Context.PendingCount);
+        AssertNoHandlerTabChanges(h.Vm);
+
+        h.Context.Drain();
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    // ── D17: delivery follows the context captured at RefreshAsync ENTRY ────────────────
+
+    [Fact]
+    public async Task D17_ContextEnteredRefresh_DeliversOnTheEntryContext_EvenWhenCurrentIsNullAtTheRefresherCall()
+    {
+        // Inspector B surviving mutant N2 (+ Reviewer1 m2). The refresh is entered on `foreign`, blocks
+        // in its provider step, and the view model's own continuation is later run by a pump that does
+        // NOT install the context (so SynchronizationContext.Current is null when the refresher is
+        // called). The entry-time context decides: the handler is posted to `foreign` — not run inline
+        // because Current happened to be null at the refresher call, and not sent to the construction
+        // context.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var h = Harness.Create(today => Task.FromResult(Report(today)), agyGate: gate.Task);
+        var foreign = new QueuedSyncContext();
+
+        var call = await StartOnContextAsync(foreign, () => h.Vm.RefreshAsync());
+        await WaitUntilAsync(() => h.Agy.CallCount == 1, "the refresh to reach the blocked provider step");
+        Assert.False(call.IsCompleted);
+
+        gate.SetResult();
+        await PumpUntilCompletedAsync(foreign, call, installContext: false);
+        await WaitUntilAsync(
+            () => foreign.PendingCount > 0 || h.Context.PendingCount > 0 || h.Vm.OpenCodeTab.HasSnapshot,
+            "the handler to be delivered somewhere");
+
+        Assert.Equal(1, foreign.PendingCount);   // posted to the entry context…
+        Assert.Equal(0, h.Context.PendingCount); // …not the construction one…
+        AssertNoHandlerTabChanges(h.Vm);         // …and not run inline
+
+        foreign.Drain();
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+        Assert.True(h.Vm.AgyTab.HasHistory);
+        AssertComposedTiles(h.Vm.AgyTab);
+        Assert.Equal(1, h.Source.ReadCount);
     }
 
     // ── D16: an exception thrown by the posted handler stays inside the refresher ───────
@@ -1005,10 +1254,19 @@ public sealed class MainWindowViewModelAgyCompositionTests
 
         public int CallCount => Volatile.Read(ref _callCount);
 
-        public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+        /// <summary>D17: when set, every call waits for it before returning the snapshot (the provider
+        /// step of a refresh is then blocked until the test completes it).</summary>
+        public Task? Gate { get; set; }
+
+        public async Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _callCount);
-            return Task.FromResult(Next);
+            if (Gate is { } gate)
+            {
+                await gate.ConfigureAwait(false);
+            }
+
+            return Next;
         }
     }
 
@@ -1057,12 +1315,13 @@ public sealed class MainWindowViewModelAgyCompositionTests
                 "R-017 F23: OnSettingsChanged must Post to the captured context, never Send.");
 
         /// <summary>D16: runs at most ONE queued callback with this context installed as
-        /// <see cref="SynchronizationContext.Current"/> (as a real UI thread would), restored afterwards.</summary>
-        public void DrainOneInstalled()
+        /// <see cref="SynchronizationContext.Current"/> (as a real UI thread would), restored afterwards.
+        /// Returns false when nothing was queued.</summary>
+        public bool TryDrainOneInstalled()
         {
             if (!_queue.TryDequeue(out var item))
             {
-                return;
+                return false;
             }
 
             var previous = Current;
@@ -1075,6 +1334,22 @@ public sealed class MainWindowViewModelAgyCompositionTests
             {
                 SetSynchronizationContext(previous);
             }
+
+            return true;
+        }
+
+        /// <summary>D17: runs EXACTLY ONE queued callback on the calling thread WITHOUT installing this
+        /// context (like <see cref="Drain"/>) and returns whether there was one. Unlike <see cref="Drain"/>
+        /// it never picks up a callback that another thread enqueues while the first one runs.</summary>
+        public bool DrainOne()
+        {
+            if (!_queue.TryDequeue(out var item))
+            {
+                return false;
+            }
+
+            item.Callback(item.State);
+            return true;
         }
 
         /// <summary>
