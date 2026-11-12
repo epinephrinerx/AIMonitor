@@ -36,6 +36,23 @@ public sealed record ProviderSnapshot
 
     public DetectionInfo? Detection { get; }
 
+    /// <summary>
+    /// True when the Anthropic Admin API produced usable stats for this refresh, regardless of
+    /// whether Claude Code OAuth is also present (R-019 E2). Lets the tab and the Connections card
+    /// show "Admin key connected · Claude Code not signed in" when OAuth is missing but the Admin
+    /// call succeeded.
+    /// </summary>
+    public bool AdminApiConnected { get; }
+
+    /// <summary>
+    /// True when the Admin API call succeeded and Claude Code OAuth is missing, expired or rejected
+    /// (401/403). In this state the tab has no setup card, no error, no setup hint, no quota meters,
+    /// the note "Claude Code not signed in — quota unavailable; API usage from Admin key",
+    /// <see cref="FetchedAt"/> = clock now and <see cref="Unauthorized"/> false. The tab and the
+    /// Connections card decide admin-only display from this flag alone (R-019 E2, E12a).
+    /// </summary>
+    public bool AdminOnly { get; }
+
     public bool Ok => Configured && Error is null;
 
     public ProviderSnapshot(
@@ -51,7 +68,9 @@ public sealed record ProviderSnapshot
         string setupHint = "",
         string valueNote = "",
         DateTimeOffset? fetchedAt = null,
-        DetectionInfo? detection = null)
+        DetectionInfo? detection = null,
+        bool adminApiConnected = false,
+        bool adminOnly = false)
     {
         ProviderId = DomainGuard.RequireNonBlank(providerId, nameof(providerId));
         Configured = configured;
@@ -67,6 +86,8 @@ public sealed record ProviderSnapshot
         ValueNote = valueNote ?? string.Empty;
         FetchedAt = fetchedAt;
         Detection = detection;
+        AdminApiConnected = adminApiConnected;
+        AdminOnly = adminOnly;
     }
 
     /// <summary>

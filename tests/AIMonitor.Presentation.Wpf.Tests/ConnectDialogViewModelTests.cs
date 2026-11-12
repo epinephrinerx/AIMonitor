@@ -39,7 +39,7 @@ public sealed class ConnectDialogViewModelTests
     }
 
     [Fact]
-    public void Constructor_ForClaude_SetsTitleSignIn_AndNeedsKeyFalse()
+    public void Constructor_ForClaude_SetsTitleConnect_AndNeedsKeyTrue()
     {
         var (store, _, _) = CreateConnectionStore();
         var vm = new ConnectDialogViewModel(
@@ -48,8 +48,8 @@ public sealed class ConnectDialogViewModelTests
             new ProviderConnection(null, ""),
             store);
 
-        Assert.Equal("Claude sign-in", vm.Title);
-        Assert.False(vm.NeedsKey);
+        Assert.Equal("Connect Claude", vm.Title);
+        Assert.True(vm.NeedsKey);
         Assert.False(vm.CanBrowse);
     }
 
@@ -290,7 +290,7 @@ public sealed class ConnectDialogViewModelTests
     }
 
     [Fact]
-    public async Task SaveCommand_ForClaude_DoesNotCallStore_AndDoesNotCloseDialog()
+    public async Task SaveCommand_ForClaude_CallsStoreAndClosesDialog()
     {
         var (store, secretStore, _) = CreateConnectionStore();
         var vm = new ConnectDialogViewModel(
@@ -302,11 +302,12 @@ public sealed class ConnectDialogViewModelTests
         var closeInvoked = false;
         vm.RequestClose += _ => closeInvoked = true;
 
+        vm.Key = "sk-ant-admin-test-key";
         await vm.SaveAsync();
 
-        Assert.False(closeInvoked);
-        Assert.Equal(0, secretStore.SetCalls);
-        Assert.Equal(0, secretStore.RemoveCalls);
+        Assert.True(closeInvoked);
+        Assert.Equal(1, secretStore.SetCalls);
+        Assert.Equal("sk-ant-admin-test-key", secretStore.Secrets["providers/claude/key"]);
     }
 
     [Fact]

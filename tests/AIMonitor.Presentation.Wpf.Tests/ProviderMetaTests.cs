@@ -12,15 +12,15 @@ public sealed class ProviderMetaTests
         Assert.Equal("claude", meta.Id);
         Assert.Equal("Claude", meta.DisplayName);
         Assert.Equal("C", meta.BadgeLetter);
-        Assert.Equal("Claude Code · full quota", meta.Tagline);
-        Assert.False(meta.NeedsKey);
-        Assert.Equal("", meta.KeyLabel);
-        Assert.Equal("", meta.KeyPlaceholder);
+        Assert.Equal("Claude Code · full quota · optional API usage", meta.Tagline);
+        Assert.True(meta.NeedsKey);
+        Assert.Equal("Admin API key (optional; API usage and cost)", meta.KeyLabel);
+        Assert.Equal("sk-ant-admin…", meta.KeyPlaceholder);
         Assert.Equal("", meta.ExtraLabel);
         Assert.Equal("", meta.ExtraPlaceholder);
-        Assert.Equal(
-            "Sign in to Claude Code on this machine (run `claude` in a terminal). This app reads that existing login read-only and never writes to it.",
-            meta.SetupHint);
+        Assert.Contains("Admin API key", meta.SetupHint);
+        Assert.Contains("sk-ant-admin", meta.SetupHint);
+        Assert.Contains("Claude Console", meta.SetupHint);
     }
 
     [Fact]

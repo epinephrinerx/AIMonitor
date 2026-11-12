@@ -18,8 +18,8 @@ public sealed class ConnectionCardViewModelTests
         Assert.Equal("Checking...", claudeCard.StateWord);
         Assert.Equal("–", claudeCard.StateGlyph);
         Assert.Equal("Not signed in", claudeCard.Account);
-        Assert.Equal("Claude Code · full quota", claudeCard.SourceLine);
-        Assert.Equal("Sign-in help", claudeCard.ConnectButtonText);
+        Assert.Equal("Claude Code · full quota · optional API usage", claudeCard.SourceLine);
+        Assert.Equal("Connect...", claudeCard.ConnectButtonText);
 
         var openAiCard = new ConnectionCardViewModel(ProviderMeta.OpenAi);
         Assert.Equal("Checking...", openAiCard.StateWord);
@@ -70,18 +70,18 @@ public sealed class ConnectionCardViewModelTests
     }
 
     [Fact]
-    public void Update_ForClaude_AlwaysRendersSignInHelpButton_RegardlessOfState()
+    public void Update_ForClaude_RendersConnectOrChangeButtonLikeOtherKeyedProviders()
     {
         var card = new ConnectionCardViewModel(ProviderMeta.Claude);
 
         card.Update(new DetectionInfo("claude", DetectionState.Connected));
-        Assert.Equal("Sign-in help", card.ConnectButtonText);
+        Assert.Equal("Change...", card.ConnectButtonText);
 
         card.Update(new DetectionInfo("claude", DetectionState.NotConnected));
-        Assert.Equal("Sign-in help", card.ConnectButtonText);
+        Assert.Equal("Connect...", card.ConnectButtonText);
 
         card.Update(new DetectionInfo("claude", DetectionState.Expired));
-        Assert.Equal("Sign-in help", card.ConnectButtonText);
+        Assert.Equal("Connect...", card.ConnectButtonText);
     }
 
     [Fact]

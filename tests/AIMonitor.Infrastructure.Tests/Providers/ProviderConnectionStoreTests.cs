@@ -31,7 +31,7 @@ public sealed class ProviderConnectionStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_ForClaude_AlwaysReturnsNullKeyAndCurrentExtra()
+    public async Task GetAsync_ForClaude_ReturnsStoredKeyAndCurrentExtra()
     {
         var (settingsStore, _) = CreateSettingsStore();
         var initial = new AppSettings
@@ -44,15 +44,15 @@ public sealed class ProviderConnectionStoreTests : IDisposable
         using var session = new SettingsSession(settingsStore, initial);
         var secretStore = new TestSecretStore(new Dictionary<string, string>
         {
-            ["providers/claude/key"] = "should-not-be-read"
+            ["providers/claude/key"] = "sk-ant-admin-test-key"
         });
         var connectionStore = new ProviderConnectionStore(secretStore, session);
 
         var connection = await connectionStore.GetAsync("claude");
 
-        Assert.Null(connection.Key);
+        Assert.Equal("sk-ant-admin-test-key", connection.Key);
         Assert.Equal("synthetic-extra", connection.Extra);
-        Assert.Equal(0, secretStore.GetCalls);
+        Assert.Equal(1, secretStore.GetCalls);
     }
 
     [Fact]
@@ -329,14 +329,19 @@ public sealed class ProviderConnectionStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_ForClaude_WhenTypedKeyProvided_ThrowsArgumentException()
+    public async Task SaveAsync_ForClaude_WhenTypedKeyProvided_SavesKeyAndRejectsExtra()
     {
         var (settingsStore, _) = CreateSettingsStore();
         using var session = new SettingsSession(settingsStore, new AppSettings());
-        var connectionStore = new ProviderConnectionStore(new TestSecretStore(), session);
+        var secretStore = new TestSecretStore();
+        var connectionStore = new ProviderConnectionStore(secretStore, session);
+
+        // Claude accepts a key (R-019 C2) but still rejects extra settings.
+        await connectionStore.SaveAsync("claude", typedKey: "sk-ant-admin-test", clearRequested: false, extra: null);
+        Assert.Equal("sk-ant-admin-test", secretStore.Secrets["providers/claude/key"]);
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => connectionStore.SaveAsync("claude", typedKey: "sk-claude", clearRequested: false, extra: null));
+            () => connectionStore.SaveAsync("claude", typedKey: null, clearRequested: false, extra: "some-extra"));
     }
 
     [Fact]
