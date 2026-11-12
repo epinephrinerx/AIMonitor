@@ -333,7 +333,7 @@ public sealed class ClaudeLiveQuotaClient : IProviderQuotaClient
                 || snapshot.Unauthorized;
 
             bool adminOnly;
-            if (oAuthNotConnected && !snapshot.Configured)
+            if (oAuthNotConnected)
             {
                 adminOnly = true;
                 configured = true;
