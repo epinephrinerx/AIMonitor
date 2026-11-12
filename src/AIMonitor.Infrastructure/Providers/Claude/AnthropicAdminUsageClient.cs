@@ -838,7 +838,7 @@ public sealed class AnthropicAdminUsageClient
             timestamp,
             formats.ToArray(),
             CultureInfo.InvariantCulture,
-            DateTimeStyles.None,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
             out var parsed))
         {
             return parsed;
