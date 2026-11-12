@@ -225,16 +225,23 @@ public sealed class AnthropicAdminUsageClient
 
             var (bucketTokens, hasMore, nextPage) = ParseUsagePage(body);
 
-            checked
+            try
             {
-                foreach (var (dayUtc, tokens) in bucketTokens)
+                checked
                 {
-                    monthTokens += tokens;
-                    if (dayUtc == todayUtc)
+                    foreach (var (dayUtc, tokens) in bucketTokens)
                     {
-                        todayTokens += tokens;
+                        monthTokens += tokens;
+                        if (dayUtc == todayUtc)
+                        {
+                            todayTokens += tokens;
+                        }
                     }
                 }
+            }
+            catch (OverflowException)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
             if (!hasMore)
@@ -277,13 +284,23 @@ public sealed class AnthropicAdminUsageClient
 
             var (bucketCosts, hasMore, nextPage) = ParseCostPage(body);
 
-            foreach (var (dayUtc, amountUsd) in bucketCosts)
+            try
             {
-                monthCost += amountUsd;
-                if (dayUtc == todayUtc)
+                checked
                 {
-                    todayCost += amountUsd;
+                    foreach (var (dayUtc, amountUsd) in bucketCosts)
+                    {
+                        monthCost += amountUsd;
+                        if (dayUtc == todayUtc)
+                        {
+                            todayCost += amountUsd;
+                        }
+                    }
                 }
+            }
+            catch (OverflowException)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
             if (!hasMore)
@@ -522,11 +539,21 @@ public sealed class AnthropicAdminUsageClient
 
             foreach (var result in resultsElement.EnumerateArray())
             {
-                bucketTokens += ReadTokenField(result, "uncached_input_tokens");
-                bucketTokens += ReadTokenField(result, "cache_read_input_tokens");
-                bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_5m_input_tokens");
-                bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_1h_input_tokens");
-                bucketTokens += ReadTokenField(result, "output_tokens");
+                try
+                {
+                    checked
+                    {
+                        bucketTokens += ReadTokenField(result, "uncached_input_tokens");
+                        bucketTokens += ReadTokenField(result, "cache_read_input_tokens");
+                        bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_5m_input_tokens");
+                        bucketTokens += ReadNestedTokenField(result, "cache_creation", "ephemeral_1h_input_tokens");
+                        bucketTokens += ReadTokenField(result, "output_tokens");
+                    }
+                }
+                catch (OverflowException)
+                {
+                    throw new AnthropicAdminApiException(ParseErrorMessage);
+                }
             }
 
             buckets.Add((dayUtc, bucketTokens));
@@ -644,7 +671,17 @@ public sealed class AnthropicAdminUsageClient
 
             foreach (var result in resultsElement.EnumerateArray())
             {
-                bucketCost += ReadCostAmount(result);
+                try
+                {
+                    checked
+                    {
+                        bucketCost += ReadCostAmount(result);
+                    }
+                }
+                catch (OverflowException)
+                {
+                    throw new AnthropicAdminApiException(ParseErrorMessage);
+                }
             }
 
             buckets.Add((dayUtc, bucketCost));
