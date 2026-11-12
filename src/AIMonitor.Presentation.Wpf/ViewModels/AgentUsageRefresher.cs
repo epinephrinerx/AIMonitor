@@ -15,6 +15,7 @@ public sealed class AgentUsageRefresher
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _running;
     private bool _pendingForce;
+    private SynchronizationContext? _pendingForceContext;
 
     public AgentUsageRefresher(CachedAgentUsageSource source, Func<DateTimeOffset> utcNow, TimeZoneInfo zone)
     {
@@ -32,9 +33,9 @@ public sealed class AgentUsageRefresher
     /// Reads agent usage, forcing a fresh read when <paramref name="force"/> is <c>true</c>.
     /// A forced call waits for an in-flight read and then runs once more.
     /// </summary>
-    public async Task RefreshAsync(bool force)
+    public async Task RefreshAsync(bool force, SynchronizationContext? context = null)
     {
-        var capturedContext = SynchronizationContext.Current;
+        var capturedContext = context ?? SynchronizationContext.Current;
 
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -44,6 +45,7 @@ public sealed class AgentUsageRefresher
                 if (force)
                 {
                     _pendingForce = true;
+                    _pendingForceContext = capturedContext;
                 }
 
                 return;
@@ -68,6 +70,8 @@ public sealed class AgentUsageRefresher
                     if (_pendingForce)
                     {
                         _pendingForce = false;
+                        capturedContext = _pendingForceContext;
+                        _pendingForceContext = null;
                         force = true;
                         continue;
                     }
