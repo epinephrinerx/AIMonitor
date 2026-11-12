@@ -1063,6 +1063,171 @@ public sealed class AnthropicAdminUsageClientR019Tests
         }
     }
 
+    // ---- E16: exact bucket-timestamp grammar (usage and cost, starting_at and ending_at) ----
+    // Grammar: yyyy-MM-ddTHH:mm:ss, optional "." + 1-9 digits, then "Z" or ±hh:mm (hh 00-14,
+    // mm 00-59, colon required); HH 00-23; uppercase T/Z; nothing before or after. Converted to
+    // UTC, so every expectation below is a hand-computed UTC value (clock = 2026-11-15 08:00Z,
+    // today = UTC day 15) that does not depend on the machine's zone (this machine is UTC+07:00).
+
+    public static TheoryData<bool, bool, string> E16Rejections()
+    {
+        var data = new TheoryData<bool, bool, string>();
+        foreach (var bad in new[]
+        {
+            "2026-11-15T00:00:00+0700",             // offset without colon
+            "2026-11-15T00:00:00-0500",             // same, negative
+            "2026-11-15T00:00:00+7:00",             // one-digit offset hour
+            "2026-11-15T00:00:00-7:00",
+            "2026-11-15T00:00:00+07",               // offset without minutes
+            "2026-11-15T00:00:00+07:00:00",         // offset with seconds
+            "2026-11-15T00:00:00.Z",                // dot without digits
+            "2026-11-15T00:00:00.+07:00",           // dot without digits before an offset
+            "2026-11-15T24:00:00Z",                 // hour 24
+            "2026-11-15T24:00:00+07:00",            // hour 24 with an offset
+            "2026-11-15T00:60:00Z",                 // minute 60
+            "2026-11-15T00:00:00.1234567890Z",      // 10 fraction digits
+            "2026-11-15T00:00:00.1234567890+07:00", // 10 fraction digits before an offset
+            "2026-11-15t00:00:00Z",                 // lowercase t
+            "2026-11-15T00:00:00z",                 // lowercase z
+            "2026-11-15T00:00:00Z ",                // trailing space
+            "2026-11-15T00:00:00Z\\n",              // trailing newline (JSON escape)
+            " 2026-11-15T00:00:00Z",                // leading space
+            "\\t2026-11-15T00:00:00Z",              // leading tab (JSON escape)
+            "2026-11-15T00:00:00 Z",                // space before the zone
+            "2026-11-15T00:00:00ZZ",                // trailing garbage
+            "2026-11-15T00:00:00+15:00",            // offset hour 15
+            "2026-11-15T00:00:00-15:00",
+            "2026-11-15T00:00:00+07:60",            // offset minute 60
+            "2026-11-15T00:00:00-05:60",
+            "2026-11-15T00:00:00",                  // missing zone
+            "2026-11-15T00:00:00.123",              // missing zone after a fraction
+            "2026-13-15T00:00:00Z",                 // month 13 (not a calendar date)
+            "2026-02-30T00:00:00Z",                 // day 30 of February
+            "2026-11-15T00:00:60Z",                 // second 60
+            "2026-11-15T0:00:00Z",                  // one-digit hour (fixed width)
+            "2026-11-15T00:0:00Z",                  // one-digit minute
+            "2026-11-15T00:00:0Z",                  // one-digit second
+            "2026-11-5T00:00:00Z",                  // one-digit day
+            "2026-1-15T00:00:00Z",                  // one-digit month
+            "26-11-15T00:00:00Z",                   // two-digit year
+            "2026-11-15T00:00:00+07:0",             // one-digit offset minute
+            "\\uFF12026-11-15T00:00:00Z",           // fullwidth digit (JSON escape): ASCII digits only
+        })
+        {
+            foreach (var usageLeg in new[] { true, false })
+            {
+                foreach (var inStartingAt in new[] { true, false })
+                {
+                    data.Add(usageLeg, inStartingAt, bad);
+                }
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(E16Rejections))]
+    public async Task GetUsageAsync_E16MalformedBucketTimestamp_FailsWithParseErrorMessage(
+        bool usageLeg, bool inStartingAt, string badTimestamp)
+    {
+        var page = inStartingAt
+            ? BucketPage(usageLeg, badTimestamp, Day16Z)
+            : BucketPage(usageLeg, Day15Z, badTimestamp);
+        var client = CreateClient(BucketHandler(usageLeg, page));
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Equal(AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.ParseErrorMessage, ex.Message);
+        Assert.Null(ex.InnerException);
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
+    }
+
+    private static async Task AssertStartingAtOnUtcDayAsync(string startingAt, bool isToday)
+    {
+        // Usage oracle: 1+1+0+0+1 = 3 tokens per bucket. Cost oracle: "123.45" cents = 1.2345m.
+        foreach (var usageLeg in new[] { true, false })
+        {
+            var client = CreateClient(BucketHandler(usageLeg, BucketPage(usageLeg, startingAt, Day16Z)));
+
+            var result = await client.GetUsageAsync(CancellationToken.None);
+
+            if (usageLeg)
+            {
+                Assert.Equal(3, result.MonthTokens);
+                Assert.Equal(isToday ? 3 : 0, result.TodayTokens);
+            }
+            else
+            {
+                Assert.Equal(1.2345m, result.MonthCostUsd);
+                Assert.Equal(isToday ? 1.2345m : 0m, result.TodayCostUsd);
+            }
+        }
+    }
+
+    [Theory]
+    // 1, 7, 8 and 9 fraction digits, UTC. A fraction on 00:00:00 stays on day 15; a fraction on
+    // 23:59:59 stays on day 14 (truncated or kept, never rounded up into day 15).
+    [InlineData("2026-11-15T00:00:00.1Z", true)]
+    [InlineData("2026-11-15T00:00:00.1234567Z", true)]
+    [InlineData("2026-11-15T00:00:00.12345678Z", true)]
+    [InlineData("2026-11-15T00:00:00.123456789Z", true)]
+    [InlineData("2026-11-14T23:59:59.9Z", false)]
+    [InlineData("2026-11-14T23:59:59.9999999Z", false)]
+    [InlineData("2026-11-14T23:59:59.99999999Z", false)]
+    [InlineData("2026-11-14T23:59:59.999999999Z", false)]
+    // Fractions together with an offset.
+    [InlineData("2026-11-15T07:00:00.123456789+07:00", true)]     // = 2026-11-15T00:00:00.123456789Z
+    [InlineData("2026-11-15T06:59:59.999999999+07:00", false)]    // = 2026-11-14T23:59:59.999999999Z
+    // +07:00 / -05:30 mapped to the right UTC day.
+    [InlineData("2026-11-15T07:00:00+07:00", true)]               // = 11-15T00:00Z
+    [InlineData("2026-11-15T06:59:59+07:00", false)]              // = 11-14T23:59:59Z
+    [InlineData("2026-11-14T18:30:00-05:30", true)]               // = 11-15T00:00Z (18:30 + 5:30)
+    [InlineData("2026-11-14T18:29:59-05:30", false)]              // = 11-14T23:59:59Z
+    [InlineData("2026-11-15T05:45:00+05:45", true)]               // nonzero offset minutes: = 11-15T00:00Z
+    [InlineData("2026-11-15T05:44:59+05:45", false)]              // = 11-14T23:59:59Z
+    // Offset hour 14 is the legal maximum, both signs.
+    [InlineData("2026-11-15T14:00:00+14:00", true)]               // = 11-15T00:00Z
+    [InlineData("2026-11-14T10:00:00-14:00", true)]               // = 11-15T00:00Z (10:00 + 14:00)
+    [InlineData("2026-11-15T13:59:59+14:00", false)]              // = 11-14T23:59:59Z
+    [InlineData("2026-11-15T14:30:00+14:30", true)]               // hh 14 with mm 30 is inside the grammar: = 11-15T00:00Z
+    [InlineData("2026-11-14T09:30:00-14:30", true)]               // = 11-15T00:00Z (09:30 + 14:30)
+    // Hour 23 is legal; Z is UTC, not the machine's zone (UTC+07:00 here).
+    [InlineData("2026-11-14T23:59:59Z", false)]
+    public async Task GetUsageAsync_E16ValidBucketStartingAt_IsMappedToItsUtcDay(string startingAt, bool isToday) =>
+        await AssertStartingAtOnUtcDayAsync(startingAt, isToday);
+
+    [Theory]
+    [InlineData("2026-11-16T00:00:00.1Z")]
+    [InlineData("2026-11-16T00:00:00.1234567Z")]
+    [InlineData("2026-11-16T00:00:00.12345678Z")]
+    [InlineData("2026-11-16T00:00:00.123456789Z")]
+    [InlineData("2026-11-15T23:59:59Z")]                  // hour 23
+    [InlineData("2026-11-16T07:00:00.123456789+07:00")]   // fraction + offset
+    [InlineData("2026-11-15T18:30:00-05:30")]             // negative offset with minutes
+    [InlineData("2026-11-16T14:00:00+14:00")]             // maximum offset hour
+    public async Task GetUsageAsync_E16ValidBucketEndingAt_IsAccepted(string endingAt)
+    {
+        foreach (var usageLeg in new[] { true, false })
+        {
+            var client = CreateClient(BucketHandler(usageLeg, BucketPage(usageLeg, Day15Z, endingAt)));
+
+            var result = await client.GetUsageAsync(CancellationToken.None);
+
+            if (usageLeg)
+            {
+                Assert.Equal(3, result.MonthTokens);
+                Assert.Equal(3, result.TodayTokens);
+            }
+            else
+            {
+                Assert.Equal(1.2345m, result.MonthCostUsd);
+                Assert.Equal(1.2345m, result.TodayCostUsd);
+            }
+        }
+    }
+
     [Fact]
     public async Task GetUsageAsync_TokenSumOverflowsLong_FailsNotWraps()
     {
