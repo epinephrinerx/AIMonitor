@@ -610,13 +610,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
-    public async Task RefreshAsync(string? onlyProviderId = null, bool manual = false)
-    {
-        // Capture before the first await so a bare provider refresh can pass the view model context
-        // captured at construction to the agent-usage refresher.
-        var entryContext = SynchronizationContext.Current;
-        await RefreshCoreAsync(onlyProviderId, manual, entryContext);
-    }
+    // Capture the entry context here.
+    public Task RefreshAsync(string? onlyProviderId = null, bool manual = false) =>
+        RefreshCoreAsync(onlyProviderId, manual, SynchronizationContext.Current);
 
     private async Task RefreshCoreAsync(
         string? onlyProviderId,
