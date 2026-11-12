@@ -31,7 +31,7 @@
 - Writing Owner 3 Model : `GPT-6-Luna` (เปลี่ยนจาก opencode-go/kimi-k2.7-code เมื่อ 2026-11-12)
 - Writing Owner 3 Effort : `Medium`
 - Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
-- Test Author Model : `opencode-go/qwen3.8-flash`
+- Test Author Model : `opencode-go/qwen3.8-flash` (ชั่วคราวตั้งแต่ 2026-11-12: `Claude Sonnet 5.5` ตามคำตัดสินของผู้ใช้ เพราะ OpenCode Go ใช้ครบโควตารายสัปดาห์ — กลับเป็น qwen3.8-flash เมื่อโควตารีเซ็ต)
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
 - Inspector : `Codex` ผู้ตรวจ spec และตรวจเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.7
 - Inspector Model : `GPT-6-Sol` (เปลี่ยนจาก opencode qwen3.7-plus เมื่อ 2026-11-10)
