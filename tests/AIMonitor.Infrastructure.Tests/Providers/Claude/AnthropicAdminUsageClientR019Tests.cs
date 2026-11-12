@@ -954,6 +954,115 @@ public sealed class AnthropicAdminUsageClientR019Tests
         Assert.Equal(0m, result.TodayCostUsd);
     }
 
+    // ---- E15c: one strict bucket-timestamp parser (usage and cost, starting_at and ending_at) ----
+
+    private const string Day15Z = "2026-11-15T00:00:00Z";
+    private const string Day16Z = "2026-11-16T00:00:00Z";
+
+    private static string BucketPage(bool usageLeg, string startingAt, string endingAt) => usageLeg
+        ? $$"""{"data":[{"starting_at":"{{startingAt}}","ending_at":"{{endingAt}}","results":[{"model":"m","uncached_input_tokens":1,"cache_read_input_tokens":1,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1}]}],"has_more":false,"next_page":null}"""
+        : $$"""{"data":[{"starting_at":"{{startingAt}}","ending_at":"{{endingAt}}","results":[{"amount":"123.45","currency":"USD"}]}],"has_more":false,"next_page":null}""";
+
+    private static RoutingHandler BucketHandler(bool usageLeg, string page) => usageLeg
+        ? Respond((_, _) => Success(page), (_, _) => Success(CostTodayAndYesterday))
+        : Respond((_, _) => Success(UsageTodayOkSinglePage), (_, _) => Success(page));
+
+    public static TheoryData<bool, bool, string> StrictTimestampRejections()
+    {
+        // E15c: ISO 8601 yyyy-MM-ddTHH:mm:ss (+ optional fraction) ending in Z or ±hh:mm, parsed
+        // exactly; anything else is Unavailable.
+        var data = new TheoryData<bool, bool, string>();
+        foreach (var bad in new[]
+        {
+            "Tue, 03-Nov-2026 00:00:00",   // free-form text a lenient TryParse accepts
+            "Thu 2026-11-05 00:00:00",     // weekday prefix
+            "2026-11-15t00:00:00Z",        // lowercase t
+            "2026-11-15 00:00:00+00:00",   // space separator
+            "2026-11-15T00:00:00",         // no zone
+        })
+        {
+            foreach (var usageLeg in new[] { true, false })
+            {
+                foreach (var inStartingAt in new[] { true, false })
+                {
+                    data.Add(usageLeg, inStartingAt, bad);
+                }
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(StrictTimestampRejections))]
+    public async Task GetUsageAsync_NonIsoBucketTimestamp_FailsUnavailable(bool usageLeg, bool inStartingAt, string badTimestamp)
+    {
+        var page = inStartingAt
+            ? BucketPage(usageLeg, badTimestamp, Day16Z)
+            : BucketPage(usageLeg, Day15Z, badTimestamp);
+        var client = CreateClient(BucketHandler(usageLeg, page));
+
+        var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
+            () => client.GetUsageAsync(CancellationToken.None));
+
+        Assert.Null(ex.InnerException);
+        Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // Clock 2026-11-15 08:00Z (today = UTC day 15; month = November). Usage oracle: 3 tokens per
+    // bucket; cost oracle: 1.2345 USD per bucket.
+    [InlineData("2026-11-15T00:00:00Z", true)]
+    [InlineData("2026-11-14T23:59:59Z", false)]    // the second before: catches a local-zone shift either way
+    [InlineData("2026-11-15T00:00:00.123Z", true)]
+    [InlineData("2026-11-15T07:00:00+07:00", true)]    // = 2026-11-15T00:00Z
+    [InlineData("2026-11-14T17:00:00-07:00", true)]    // = 2026-11-15T00:00Z, negative offset
+    [InlineData("2026-11-15T06:59:59+07:00", false)]   // = 2026-11-14T23:59:59Z, the day before
+    public async Task GetUsageAsync_IsoBucketTimestamp_IsAcceptedOnItsUtcDay(string startingAt, bool isToday)
+    {
+        foreach (var usageLeg in new[] { true, false })
+        {
+            var client = CreateClient(BucketHandler(usageLeg, BucketPage(usageLeg, startingAt, Day16Z)));
+
+            var result = await client.GetUsageAsync(CancellationToken.None);
+
+            if (usageLeg)
+            {
+                Assert.Equal(3, result.MonthTokens);
+                Assert.Equal(isToday ? 3 : 0, result.TodayTokens);
+            }
+            else
+            {
+                Assert.Equal(1.2345m, result.MonthCostUsd);
+                Assert.Equal(isToday ? 1.2345m : 0m, result.TodayCostUsd);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("2026-11-16T00:00:00Z")]
+    [InlineData("2026-11-16T00:00:00.123Z")]
+    [InlineData("2026-11-16T07:00:00+07:00")]
+    public async Task GetUsageAsync_IsoBucketEndingAt_IsAccepted(string endingAt)
+    {
+        // E15c applies to ending_at too: the same three accepted shapes there.
+        foreach (var usageLeg in new[] { true, false })
+        {
+            var client = CreateClient(BucketHandler(usageLeg, BucketPage(usageLeg, Day15Z, endingAt)));
+
+            var result = await client.GetUsageAsync(CancellationToken.None);
+
+            if (usageLeg)
+            {
+                Assert.Equal(3, result.MonthTokens);
+            }
+            else
+            {
+                Assert.Equal(1.2345m, result.MonthCostUsd);
+            }
+        }
+    }
+
     [Fact]
     public async Task GetUsageAsync_TokenSumOverflowsLong_FailsNotWraps()
     {
@@ -1022,7 +1131,7 @@ public sealed class AnthropicAdminUsageClientR019Tests
         var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
             () => client.GetUsageAsync(CancellationToken.None));
 
-        Assert.False(string.IsNullOrWhiteSpace(ex.Message));
+        Assert.Equal(AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.TimeoutMessage, ex.Message);
         Assert.DoesNotContain(KeySentinel, ex.Message, StringComparison.Ordinal);
     }
 
@@ -1053,6 +1162,29 @@ public sealed class AnthropicAdminUsageClientR019Tests
         // 20 s (C4's older 15 s is superseded) and a response body cap of 1,000,000 bytes per page.
         Assert.Equal(TimeSpan.FromSeconds(20), AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.DefaultTimeout);
         Assert.Equal(1_000_000, AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.DefaultMaxResponseBodyBytes);
+    }
+
+    [Fact]
+    public void Timeout_WithoutExplicitTimeout_IsTwentySeconds()
+    {
+        // E15b: the effective deadline is exposed as a public read-only Timeout; with no timeout
+        // argument it is the E7 production default of 20 s (literal, not DefaultTimeout).
+        var client = new AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient(
+            new HttpClient(RespondOk()), KeySentinel, new FakeClock(NowMidMonthUtc));
+
+        Assert.Equal(TimeSpan.FromSeconds(20), client.Timeout);
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(1500)]
+    [InlineData(45_000)]
+    public void Timeout_WithExplicitTimeout_IsThatValue(int milliseconds)
+    {
+        // E15b: "(constructor timeout ?? DefaultTimeout)" — an explicit value wins.
+        var client = CreateClient(RespondOk(), timeout: TimeSpan.FromMilliseconds(milliseconds));
+
+        Assert.Equal(TimeSpan.FromMilliseconds(milliseconds), client.Timeout);
     }
 
     /// <summary>A valid single-page, no-more usage body padded with an ignored string property so
@@ -1173,6 +1305,7 @@ public sealed class AnthropicAdminUsageClientR019Tests
         var ex = await Assert.ThrowsAsync<AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminApiException>(
             () => client.GetUsageAsync(CancellationToken.None));
 
+        Assert.Equal(AIMonitor.Infrastructure.Providers.Claude.AnthropicAdminUsageClient.TimeoutMessage, ex.Message);
         Assert.DoesNotContain(KeySentinel, ex.ToString(), StringComparison.Ordinal);
         Assert.Null(ex.InnerException);
     }

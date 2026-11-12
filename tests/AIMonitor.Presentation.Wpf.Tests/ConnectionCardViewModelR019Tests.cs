@@ -1,5 +1,7 @@
 using AIMonitor.Domain;
+using AIMonitor.Presentation.Wpf.Theme;
 using AIMonitor.Presentation.Wpf.ViewModels;
+using SolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
@@ -72,6 +74,10 @@ public sealed class ConnectionCardViewModelR019Tests
         Assert.NotEqual("✓", card.StateGlyph);
         Assert.Contains(AdminOnlyStatus, card.SourceLine, StringComparison.Ordinal);
         Assert.Equal(state, card.Detection!.State); // still credential-file truth (E13f)
+
+        // E15a: never green — the chip colour follows the displayed Limited state, not Connected's green.
+        Assert.NotEqual(ThemePalette.StatusGood, BrushColour(card.StateBrush));
+        Assert.NotEqual(ThemePalette.StatusGood, BrushColour(card.StateTint));
     }
 
     [Fact]
@@ -135,5 +141,71 @@ public sealed class ConnectionCardViewModelR019Tests
         Assert.Equal("Connected", card.StateWord);
         Assert.Equal("✓", card.StateGlyph);
         Assert.DoesNotContain(AdminOnlyStatus, card.SourceLine, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DetectionState.Connected)]
+    [InlineData(DetectionState.Limited)]
+    [InlineData(DetectionState.NotConnected)]
+    public void Update_ClaudeAdminOnly_WithNonExpiredDetection_ChipColoursEqualTheLimitedColour(DetectionState state)
+    {
+        // E15a: when the E14 override shows "Limited", StateBrush / StateTint follow the displayed
+        // state: the existing Limited/warning colour (ThemePalette.StatusWarning).
+        var card = new ConnectionCardViewModel(ProviderMeta.Claude);
+
+        card.Update(
+            new DetectionInfo("claude", state, "claude_code", "Claude Code", "org-user"),
+            adminOnly: true);
+
+        Assert.Equal(ThemePalette.StatusWarning, BrushColour(card.StateBrush));
+        Assert.Equal(ThemePalette.StatusWarning, BrushColour(card.StateTint));
+        Assert.Equal(0xFF, ((SolidColorBrush)card.StateBrush).Color.A);
+        Assert.True(((SolidColorBrush)card.StateTint).Color.A < 0xFF); // a tint of the same colour
+    }
+
+    [Fact]
+    public void Update_ClaudeAdminOnly_ChipColoursMatchAPlainLimitedCard()
+    {
+        // E15a "the existing Limited/warning colour": identical to a genuine Limited detection card.
+        var plain = new ConnectionCardViewModel(ProviderMeta.Claude);
+        plain.Update(new DetectionInfo("claude", DetectionState.Limited, "claude_code", "Claude Code"));
+        var adminOnly = new ConnectionCardViewModel(ProviderMeta.Claude);
+        adminOnly.Update(new DetectionInfo("claude", DetectionState.Connected, "claude_code", "Claude Code"), adminOnly: true);
+
+        Assert.Equal(((SolidColorBrush)plain.StateBrush).Color, ((SolidColorBrush)adminOnly.StateBrush).Color);
+        Assert.Equal(((SolidColorBrush)plain.StateTint).Color, ((SolidColorBrush)adminOnly.StateTint).Color);
+    }
+
+    [Fact]
+    public void Update_ClaudeAdminOnly_WithExpiredDetection_KeepsTheExpiredColour()
+    {
+        // E15a: only the non-Expired states follow Limited; Expired keeps the Expired colour.
+        var card = new ConnectionCardViewModel(ProviderMeta.Claude);
+
+        card.Update(
+            new DetectionInfo("claude", DetectionState.Expired, "claude_code", "Claude Code", "org-user"),
+            adminOnly: true);
+
+        Assert.Equal(ThemePalette.StatusSerious, BrushColour(card.StateBrush));
+        Assert.Equal(ThemePalette.StatusSerious, BrushColour(card.StateTint));
+    }
+
+    [Fact]
+    public void Update_ClaudeConnectedWithoutAdminOnly_StaysGreen()
+    {
+        // E15a touches admin-only cards only: a normal Connected card keeps StatusGood.
+        var card = new ConnectionCardViewModel(ProviderMeta.Claude);
+
+        card.Update(new DetectionInfo("claude", DetectionState.Connected, "claude_code", "Claude Code"), adminOnly: false);
+
+        Assert.Equal(ThemePalette.StatusGood, BrushColour(card.StateBrush));
+        Assert.Equal(ThemePalette.StatusGood, BrushColour(card.StateTint));
+    }
+
+    // RGB only: StateTint is the same colour at a lower alpha (ConnectionCardViewModel.Solid).
+    private static System.Windows.Media.Color BrushColour(System.Windows.Media.Brush brush)
+    {
+        var c = ((SolidColorBrush)brush).Color;
+        return System.Windows.Media.Color.FromRgb(c.R, c.G, c.B);
     }
 }
