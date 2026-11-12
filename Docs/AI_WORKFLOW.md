@@ -16,7 +16,7 @@
 ### Agent Roster
 
 เก้าบทบาท (ต้นแบบมีแปด โปรเจกต์นี้เพิ่ม Writing Owner 3) บทบาทละสามช่อง: ตัว agent, model และ effort
-ตั้งค่าโดยผู้ใช้ 2026-11-09 · แก้ WO1/WO2/WO3/Inspector/Reviewer2 เมื่อ 2026-11-10 (ผู้ใช้ขอ Reviewer1 = Opus 5.5 แต่ซ้ำกับ Coding Owner จึงคง Fable 5.1 ตามคำตัดสินของผู้ใช้)
+ตั้งค่าโดยผู้ใช้ 2026-11-09 · แก้ WO1/WO2/WO3/Inspector/Reviewer2 เมื่อ 2026-11-10 · แก้ WO3 เมื่อ 2026-11-12 (ผู้ใช้ขอ Reviewer1 = Opus 5.5 แต่ซ้ำกับ Coding Owner จึงคง Fable 5.1 ตามคำตัดสินของผู้ใช้)
 
 - Coding Owner : `Claude Code` (Anthropic)
 - Coding Owner Model : `Claude Opus 5.5`
@@ -27,9 +27,9 @@
 - Writing Owner 2 : `opencode`
 - Writing Owner 2 Model : `opencode-go/qwen3.7-plus` (เปลี่ยนจาก kimi-k2.7-code เมื่อ 2026-11-10)
 - Writing Owner 2 Effort : `High` (`opencode run` ไม่มี flag กำหนด effort)
-- Writing Owner 3 : `opencode`
-- Writing Owner 3 Model : `opencode-go/kimi-k2.7-code` (เปลี่ยนจาก deepseek-v4.1-flash เมื่อ 2026-11-10)
-- Writing Owner 3 Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
+- Writing Owner 3 : `Codex` (เปลี่ยนจาก opencode เมื่อ 2026-11-12)
+- Writing Owner 3 Model : `GPT-6-Luna` (เปลี่ยนจาก opencode-go/kimi-k2.7-code เมื่อ 2026-11-12)
+- Writing Owner 3 Effort : `Medium`
 - Test Author : `opencode` ผู้เขียนเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.6
 - Test Author Model : `opencode-go/qwen3.8-flash`
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
@@ -71,6 +71,9 @@
   แต่อาจเชื่อสมมติฐานเดียวกัน — เฟสที่ Writing Owner 2 เขียน ให้ Inspector ขั้น B สร้าง mutant ของตัวเองเสมอ
 - Inspector (GPT-6-Sol) กับ Reviewer2 (GPT-6.1-Sol) เป็นตระกูล GPT ทั้งคู่ (คนละโมเดล คนละ session) — ไม่ผิดกฎ
 - Writing Owner 1 (glm-5.3-flash) เดิมเป็น Reviewer2 — งานที่ Reviewer2 เดิมเคยรีวิวไว้ไม่ต้องให้ WO1 แก้
+- Writing Owner 3 (GPT-6-Luna) เป็นตระกูล GPT เดียวกับ Inspector (GPT-6-Sol) และ Reviewer2 (GPT-6.1-Sol) (คนละโมเดล
+  จึงไม่ผิดกฎ) — งานที่ WO3 เขียน ให้ Reviewer1 (Fable) รีวิวเสมอและให้ Inspector ขั้น B สร้าง mutant ของตัวเอง
+  และสามบทบาทนี้ใช้โควตา Codex ร่วมกัน ถ้า Codex ติดลิมิต ทั้งสามติดพร้อมกัน
 ขอบเขตการทำงานของ agent
 
 - Max Sessions ต่อ agent: `1`
@@ -85,6 +88,8 @@
   เหลืออะไร — งานที่เงียบนานกว่านี้ถือว่าไม่รู้สถานะ ไม่ใช่ว่ากำลังคืบหน้า
 - **ถ้า agent อื่นไม่ตอบกลับเกิน 30 นาที ให้สลับไปใช้ agent ตัวถัดไปได้ทันที**
   ไม่ต้องรอคำอนุมัติ: Writing Owner 1 → 2 → 3 (วนกลับ 1) และ Reviewer1 ↔ Reviewer2
+  **ถ้า Writing Owner 1 หรือ 2 ติดลิมิต (quota/rate limit) ให้ส่งงานนั้นต่อให้ Writing Owner 3 ทันที**
+  (ผู้ใช้สั่ง 2026-11-12) ไม่ต้องรอ 30 นาทีหรือคำอนุมัติ
   แล้วบันทึกไว้หนึ่งบรรทัดว่าสลับเมื่อไรเพราะอะไร ถ้าตัวที่ค้างกลับมาตอบทีหลัง
   ให้ยึดงานของตัวที่รับช่วงไปแล้วเป็นหลัก และอย่าให้สองตัวแก้ไฟล์เดียวกัน
 - **Coding Owner, Test Author และ Inspector ไม่สลับเอง** ถ้าตัวใดไม่ตอบกลับเกิน 30 นาที
