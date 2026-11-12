@@ -12,6 +12,7 @@ using AIMonitor.Presentation.Wpf.Theme;
 public sealed class ConnectionCardViewModel : ViewModelBase
 {
     private DetectionInfo? _detection;
+    private bool _adminOnly;
     private string _stateWord = "Checking...";
     private string _stateGlyph = "–";
     private string _account = "Not signed in";
@@ -31,13 +32,24 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
     public Brush StateTint => Solid(StateColour(), 0x24);
 
-    private System.Windows.Media.Color StateColour() => _detection?.State switch
+    private System.Windows.Media.Color StateColour()
     {
-        DetectionState.Connected => ThemePalette.StatusGood,
-        DetectionState.Limited => ThemePalette.StatusWarning,
-        DetectionState.Expired => ThemePalette.StatusSerious,
-        _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
-    };
+        if (_detection is not null
+            && string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase)
+            && _adminOnly
+            && _detection.State != DetectionState.Expired)
+        {
+            return ThemePalette.StatusWarning;
+        }
+
+        return _detection?.State switch
+        {
+            DetectionState.Connected => ThemePalette.StatusGood,
+            DetectionState.Limited => ThemePalette.StatusWarning,
+            DetectionState.Expired => ThemePalette.StatusSerious,
+            _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
+        };
+    }
 
     private static SolidColorBrush Solid(System.Windows.Media.Color colour, byte alpha)
     {
@@ -112,10 +124,12 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     /// Updates the card representation from detection telemetry.
     /// When <paramref name="detection"/> is null, behaves as NotConnected with "Checking..." StateWord.
     /// For Claude, when <paramref name="adminOnly"/> is true (Admin API succeeded but OAuth is not
-    /// connected), the SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2, E12a).
+    /// connected), E14 displays "Limited" / "!" unless detection is Expired, with the matching chip
+    /// colour. The SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2, E12a).
     /// </summary>
     public void Update(DetectionInfo? detection, bool adminOnly = false)
     {
+        _adminOnly = adminOnly;
         Detection = detection;
         RefreshColours();
 
@@ -165,10 +179,10 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
         if (isClaude && adminOnly)
         {
-            // R-019 E13f: admin-only Claude shows "Limited" / "!" only when OAuth is NotConnected.
-            // When OAuth is Expired, the StateWord stays "Expired" (truthful to the detection state).
+            // R-019 E14: admin-only Claude shows "Limited" / "!" except when OAuth is Expired.
+            // Expired stays truthful to the detection state.
             // The Detection itself (credential-file truth) is left unchanged.
-            if (detection.State == DetectionState.NotConnected)
+            if (detection.State != DetectionState.Expired)
             {
                 StateWord = "Limited";
                 StateGlyph = "!";

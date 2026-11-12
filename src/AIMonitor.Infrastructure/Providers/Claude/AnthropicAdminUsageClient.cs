@@ -93,6 +93,9 @@ public sealed class AnthropicAdminUsageClient
     private readonly TimeSpan _timeout;
     private readonly int _maxResponseBodyBytes;
 
+    /// <summary>Effective overall deadline for this client's Admin requests.</summary>
+    public TimeSpan Timeout => _timeout;
+
     /// <param name="httpClient">Caller-owned; this client sends requests through it but never disposes it.</param>
     /// <param name="adminKey">The saved Admin API key. Must be non-empty and non-whitespace.</param>
     /// <param name="clock">Used for "now" and the UTC month start.</param>
@@ -183,12 +186,10 @@ public sealed class AnthropicAdminUsageClient
         }
         catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
         {
-            linkedCts.Cancel();
             throw new AnthropicAdminApiException(TransportErrorMessage);
         }
         catch (AnthropicAdminApiException) when (!cancellationToken.IsCancellationRequested)
         {
-            linkedCts.Cancel();
             throw;
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
@@ -197,7 +198,6 @@ public sealed class AnthropicAdminUsageClient
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            linkedCts.Cancel();
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
@@ -317,15 +317,12 @@ public sealed class AnthropicAdminUsageClient
 
             try
             {
-                checked
+                foreach (var (dayUtc, amountUsd) in bucketCosts)
                 {
-                    foreach (var (dayUtc, amountUsd) in bucketCosts)
+                    monthCost += amountUsd;
+                    if (dayUtc == todayUtc)
                     {
-                        monthCost += amountUsd;
-                        if (dayUtc == todayUtc)
-                        {
-                            todayCost += amountUsd;
-                        }
+                        todayCost += amountUsd;
                     }
                 }
             }
@@ -572,22 +569,15 @@ public sealed class AnthropicAdminUsageClient
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
-            // R-019 E13d: bucket starting_at must carry a timezone designator (Z or offset);
-            // a bare local timestamp without Z/offset is Unavailable.
-            var startingAtText = startingAtElement.GetString();
-            if (string.IsNullOrEmpty(startingAtText) || !HasTimezoneDesignator(startingAtText))
+            var startingAt = ParseBucketTimestamp(startingAtElement.GetString());
+
+            if (!bucket.TryGetProperty("ending_at", out var endingAtElement)
+                || endingAtElement.ValueKind != JsonValueKind.String)
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
-            if (!DateTimeOffset.TryParse(
-                startingAtText,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind,
-                out var startingAt))
-            {
-                throw new AnthropicAdminApiException(ParseErrorMessage);
-            }
+            _ = ParseBucketTimestamp(endingAtElement.GetString());
 
             var dayUtc = startingAt.UtcDateTime.Date;
 
@@ -744,21 +734,15 @@ public sealed class AnthropicAdminUsageClient
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
-            // R-019 E13d: bucket starting_at must carry a timezone designator (Z or offset).
-            var startingAtText = startingAtElement.GetString();
-            if (string.IsNullOrEmpty(startingAtText) || !HasTimezoneDesignator(startingAtText))
+            var startingAt = ParseBucketTimestamp(startingAtElement.GetString());
+
+            if (!bucket.TryGetProperty("ending_at", out var endingAtElement)
+                || endingAtElement.ValueKind != JsonValueKind.String)
             {
                 throw new AnthropicAdminApiException(ParseErrorMessage);
             }
 
-            if (!DateTimeOffset.TryParse(
-                startingAtText,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind,
-                out var startingAt))
-            {
-                throw new AnthropicAdminApiException(ParseErrorMessage);
-            }
+            _ = ParseBucketTimestamp(endingAtElement.GetString());
 
             var dayUtc = startingAt.UtcDateTime.Date;
 
@@ -830,40 +814,36 @@ public sealed class AnthropicAdminUsageClient
         return cents / 100m;
     }
 
-    /// <summary>
-    /// RFC 3339 requires a timezone designator: a trailing <c>Z</c>/<c>z</c> for UTC, or a
-    /// <c>+</c>/<c>-</c> offset in the time portion. A bare timestamp such as
-    /// <c>2024-01-01T00:00:00</c> with neither is rejected as Unavailable (R-019 E13d).
-    /// </summary>
-    private static bool HasTimezoneDesignator(string timestamp)
+    private static DateTimeOffset ParseBucketTimestamp(string? timestamp)
     {
-        if (timestamp.Length == 0)
+        if (timestamp is null)
         {
-            return false;
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        var last = timestamp[timestamp.Length - 1];
-        if (last is 'Z' or 'z')
+        const string dateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss";
+        var formats = new List<string>(16)
         {
-            return true;
+            dateTimeFormat + "'Z'",
+            dateTimeFormat + "zzz",
+        };
+        for (var digits = 1; digits <= 7; digits++)
+        {
+            var fractional = dateTimeFormat + "." + new string('F', digits);
+            formats.Add(fractional + "'Z'");
+            formats.Add(fractional + "zzz");
         }
 
-        // Offset is +/-HH:MM or +/-HHMM, appearing after the 'T' separator. Scan the time
-        // portion for a sign character.
-        var tIndex = timestamp.IndexOf('T');
-        if (tIndex < 0)
+        if (DateTimeOffset.TryParseExact(
+            timestamp,
+            formats.ToArray(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsed))
         {
-            return false;
+            return parsed;
         }
 
-        for (var i = tIndex + 1; i < timestamp.Length; i++)
-        {
-            if (timestamp[i] is '+' or '-')
-            {
-                return true;
-            }
-        }
-
-        return false;
+        throw new AnthropicAdminApiException(ParseErrorMessage);
     }
 }
