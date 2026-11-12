@@ -5,7 +5,8 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 
 /// <summary>
 /// Owns the cadence of ccusage reads for the "All agents" tab. Keeps at most one read in flight,
-/// raises <see cref="Updated"/> on the caller's synchronization context, and swallows all exceptions.
+/// raises <see cref="Updated"/> on the supplied context (or the current context when none is supplied),
+/// and swallows all exceptions.
 /// </summary>
 public sealed class AgentUsageRefresher
 {
@@ -31,7 +32,9 @@ public sealed class AgentUsageRefresher
 
     /// <summary>
     /// Reads agent usage, forcing a fresh read when <paramref name="force"/> is <c>true</c>.
-    /// A forced call waits for an in-flight read and then runs once more.
+    /// A forced call waits for an in-flight read and then runs once more. <paramref name="context"/>
+    /// selects where that call's update is delivered; when omitted, <see cref="SynchronizationContext.Current"/>
+    /// is captured. A forced rerun without its own context inherits the in-flight run's context.
     /// </summary>
     public async Task RefreshAsync(bool force, SynchronizationContext? context = null)
     {
@@ -70,7 +73,7 @@ public sealed class AgentUsageRefresher
                     if (_pendingForce)
                     {
                         _pendingForce = false;
-                        capturedContext = _pendingForceContext;
+                        capturedContext = _pendingForceContext ?? capturedContext;
                         _pendingForceContext = null;
                         force = true;
                         continue;
