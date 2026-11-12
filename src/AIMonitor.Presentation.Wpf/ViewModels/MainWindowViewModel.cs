@@ -32,6 +32,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private DateTimeOffset? _lastSuccess;
     private bool _showComposedStatus;
     private Task? _agentUsageTask;
+    // D15 (R-018): the context the refresh chain was entered on, captured before the first await
+    // of RefreshAsync so it describes the caller's thread, not the continuation's.
+    private SynchronizationContext? _agentUsageEntryContext;
     private AgentUsageReport? _lastAgentUsageReport;
     private AgentUsageUnavailableException? _lastAgentUsageError;
     // R-018 A3: the latest raw AGY quota snapshot, kept so ccusage updates and chart range/metric
@@ -440,6 +443,41 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
     {
+        // D15 (R-018, Inspector B finding 1): the refresher raises Updated on the refresh caller's
+        // captured context, so a refresh started off the UI thread would otherwise run every tab
+        // touch below on a pool thread. The context captured in the constructor (F23) is the UI
+        // thread's, so the tab work runs there:
+        // • the update arrives on a synchronization context (the refresher posted it to the
+        //   refresh caller's captured context) → run inline, exactly as before this change; the
+        //   refresher's signal fires in its posted callback's finally, so `await vm.AgentUsageTask`
+        //   still means "tab work done";
+        // • the refresh chain was entered on a synchronization context → the update belongs to
+        //   that chain; run inline the same way (under xUnit the update itself arrives bare
+        //   because the pump does not set Current, and the pre-existing tab tests join
+        //   AgentUsageTask before any drain — they must stay green unchanged);
+        // • a bare update from a refresh chain entered bare (off the UI thread) is the D9
+        //   violation: post the work to the captured context and return; it settles when that
+        //   context runs its queue (Drain in the D9 test);
+        // • no context captured at construction (plain tests) → inline, as before.
+        if (_uiContext is null
+            || SynchronizationContext.Current is not null
+            || _agentUsageEntryContext is not null)
+        {
+            OnAgentUsageUpdatedCore(lastGood, lastError);
+            return;
+        }
+
+        _uiContext.Post(_ => OnAgentUsageUpdatedCore(lastGood, lastError), null);
+    }
+
+    /// <summary>
+    /// The agent-usage tab work, carried by <see cref="OnAgentUsageUpdated"/>'s delivery gate:
+    /// E2's stored pair, I8's one now/today pair, and the D13 order (OpenCode, Overview, then AGY
+    /// last, so an AGY composition failure cannot stop the other tabs). Runs where the gate
+    /// delivered it — on the UI thread in the app, on the test's join path as before this change.
+    /// </summary>
+    private void OnAgentUsageUpdatedCore(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
         // E2: keep the last pair so a live budget change can rebuild the OpenCode tab without
         // running ccusage again.
         _lastAgentUsageReport = lastGood;
@@ -610,6 +648,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
     public async Task RefreshAsync(string? onlyProviderId = null, bool manual = false)
     {
+        // D15: the context the refresh chain was entered on, captured before the first await so it
+        // describes the caller's thread — not the continuation this method resumes on.
+        var entryContext = SynchronizationContext.Current;
+
         if (IsRefreshing)
         {
             _pendingRefresh = true;
@@ -704,6 +746,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_agentUsageRefresher is not null && onlyProviderId is null)
         {
             var force = manual && IsAllAgentsSelected;
+            // D15: the entry context travels with this refresh chain, so OnAgentUsageUpdated can
+            // tell a bare update from a chain that was itself entered bare.
+            _agentUsageEntryContext = entryContext;
             _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
         }
     }
