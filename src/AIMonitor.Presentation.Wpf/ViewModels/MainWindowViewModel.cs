@@ -34,6 +34,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private Task? _agentUsageTask;
     private AgentUsageReport? _lastAgentUsageReport;
     private AgentUsageUnavailableException? _lastAgentUsageError;
+    // R-018 A3: the latest raw AGY quota snapshot, kept so ccusage updates and chart range/metric
+    // changes can recompose the AGY tab without starting an agy refresh or a ccusage read.
+    private Domain.ProviderSnapshot? _latestRawAgySnapshot;
     private IReadOnlyDictionary<string, decimal> _agentBudgets =
         new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
     private string _lastProviderTabId;
@@ -232,7 +235,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (value is not null && SetProperty(ref _selectedMetric, value))
             {
-                RebuildOpenCodeTabForViewChange();
+                RebuildUsageTabsForViewChange();
                 if (!_syncingFromSettings)
                 {
                     _ = ApplyViewChangeAsync(s => s with { ChartMetric = value.Value });
@@ -249,7 +252,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (value is not null && SetProperty(ref _selectedRange, value))
             {
-                RebuildOpenCodeTabForViewChange();
+                RebuildUsageTabsForViewChange();
                 if (!_syncingFromSettings)
                 {
                     _ = ApplyViewChangeAsync(s => s with { ChartRangeDays = value.Value });
@@ -437,6 +440,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
     {
+        // The refresher posts this handler to the context captured for its current run.
+        OnAgentUsageUpdatedCore(lastGood, lastError);
+    }
+
+    /// <summary>
+    /// The agent-usage tab work, delivered by the refresher:
+    /// E2's stored pair, I8's one now/today pair, and the D13 order (OpenCode, Overview, then AGY
+    /// last, so an AGY composition failure cannot stop the other tabs).
+    /// </summary>
+    private void OnAgentUsageUpdatedCore(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
         // E2: keep the last pair so a live budget change can rebuild the OpenCode tab without
         // running ccusage again.
         _lastAgentUsageReport = lastGood;
@@ -452,6 +466,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         AgyTab.SetAgentUsage(AgentUsagePresenter.SummaryFor(lastGood, "antigravity", today));
         UpdateOpenCodeTab(today, now);
         UpdateOverviewTab(today, now);
+        // R-018 A3/D13: recompose the AGY tab from the raw snapshot and the fresh report, after
+        // OpenCode/Overview so an AGY failure cannot stop the other tabs.
+        UpdateAgyTab(today, now);
     }
 
     /// <summary>
@@ -562,22 +579,52 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Rebuilds the OpenCode tab from the cached ccusage pair when the chart range or metric changes
-    /// (F1). It never starts a ccusage read. The range/metric setters call this synchronously so the
-    /// chart is already correct before the follow-up settings save/refresh runs.
+    /// Recomposes the AGY tab from the raw AGY snapshot and the cached ccusage report (R-018 A3).
+    /// Never starts an agy refresh or a ccusage read; with no raw snapshot the tab is left as it
+    /// is. Call on the UI thread.
     /// </summary>
-    private void RebuildOpenCodeTabForViewChange()
+    private void UpdateAgyTab(DateOnly today, DateTimeOffset now)
     {
-        // I8: one now/today pair shared by both ccusage-backed builders.
+        // D13: with AGY disabled in the current settings, never compose for it; the tab keeps its
+        // last state. A missing "agy" entry counts as enabled (same rule as the refresh path).
+        if (_settingsSession.Current.Providers.GetValueOrDefault("agy") is { Enabled: false })
+        {
+            return;
+        }
+
+        if (_latestRawAgySnapshot is not { } rawAgy)
+        {
+            return;
+        }
+
+        AgyTab.UpdateFromSnapshot(
+            AgyUsageComposer.Compose(rawAgy, _lastAgentUsageReport, today, ChartRangeDays, _selectedMetric.Value),
+            now);
+    }
+
+    /// <summary>
+    /// Rebuilds the OpenCode tab and recomposes the AGY tab from the cached ccusage pair when the
+    /// chart range or metric changes (F1, R-018 D1). It never starts a ccusage read. The range/
+    /// metric setters call this synchronously so the charts are already correct before the
+    /// follow-up settings save/refresh runs.
+    /// </summary>
+    private void RebuildUsageTabsForViewChange()
+    {
+        // I8: one now/today pair shared by every ccusage-backed builder.
         var now = DateTimeOffset.UtcNow;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
         UpdateOpenCodeTab(today, now);
+        UpdateAgyTab(today, now);
         // I15: do not rebuild Overview on chart range/metric changes.
     }
 
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
     public async Task RefreshAsync(string? onlyProviderId = null, bool manual = false)
     {
+        // Capture before the first await so a bare provider refresh can pass the view model context
+        // captured at construction to the agent-usage refresher.
+        var entryContext = SynchronizationContext.Current;
+
         if (IsRefreshing)
         {
             _pendingRefresh = true;
@@ -591,11 +638,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         try
         {
             var settings = _settingsSession.Current;
+            var disabledProviders = new HashSet<string>(
+                settings.Providers.Where(p => !p.Value.Enabled).Select(p => p.Key),
+                StringComparer.OrdinalIgnoreCase);
             var req = new ProviderSnapshotRequest(
                 historyDays: settings.ChartRangeDays,
                 metric: settings.ChartMetric,
                 includeHistory: true,
-                disabledProviders: settings.Providers.Where(p => !p.Value.Enabled).Select(p => p.Key),
+                disabledProviders: disabledProviders,
                 onlyProviderId: onlyProviderId);
             var requestId = Interlocked.Increment(ref _requestIdCounter);
             var result = await _refreshCoordinator.QueueAsync(requestId, req).ConfigureAwait(true);
@@ -614,10 +664,26 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             _latestSnapshots = snapshots;
 
+            // I8: one now/today pair for the AGY composition in this refresh (R-018 A3).
+            var now = DateTimeOffset.UtcNow;
+            var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).DateTime);
+
             // Update tab ViewModels
             if (result.Snapshots.TryGetValue("claude", out var claudeSnap)) ClaudeTab.UpdateFromSnapshot(claudeSnap);
             if (result.Snapshots.TryGetValue("openai", out var openAiSnap)) OpenAiTab.UpdateFromSnapshot(openAiSnap);
-            if (result.Snapshots.TryGetValue("agy", out var agySnap)) AgyTab.UpdateFromSnapshot(agySnap);
+            if (disabledProviders.Contains("agy"))
+            {
+                // D6/D13: AGY disabled in Settings (check the provider id, not the agent id) —
+                // drop the raw snapshot and never compose for it.
+                _latestRawAgySnapshot = null;
+            }
+            else if (result.Snapshots.TryGetValue("agy", out var agySnap))
+            {
+                // A3: keep the raw AGY snapshot so ccusage updates and chart view changes can
+                // recompose the tab without another agy read.
+                _latestRawAgySnapshot = agySnap;
+                UpdateAgyTab(today, now);
+            }
 
             // Update connections page view model with latest snapshot detections.
             // In AIMonitor, re-detect triggers a unified refresh across all providers in a single pass.
@@ -653,7 +719,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_agentUsageRefresher is not null && onlyProviderId is null)
         {
             var force = manual && IsAllAgentsSelected;
-            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
+            // D16: the refresher owns delivery, completion, and exception containment.
+            // Calls entered on a context retain its Current capture; bare calls use the
+            // view model context captured at construction when one is available.
+            var deliveryContext = entryContext is null ? _uiContext : null;
+            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force, deliveryContext);
         }
     }
 }

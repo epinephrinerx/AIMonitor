@@ -18,17 +18,21 @@ SUPPLEMENTARY_REASON = "R-010/R-011 supplementary details"
 ONLY_SECTION_TITLE = "2.0 only \u2014 not in 1.3.3, not scored for parity"
 
 # V3.3/V12 text oracles. The three new exception bullets are the exact spec text
-# (V3.3); the retained bullets, the 36 functional-area names, the five visual
-# criteria and the subcriteria total are the unchanged text of the generated base
-# file Docs/PARITY_ACCEPTANCE.md at b913799, which V9 establishes was produced by
-# the unmodified generator. INDEX_CRITERIA is that base rendering of the five
-# criteria as the index page labels each pair's five scoring selects.
+# (V3.3); the third is the R-018 D3 replacement text — paired Claude/OpenAI dashboards stay
+# without ccusage while the paired Gemini / AGY screens use synthetic `antigravity` data — and
+# the generator in scripts/build_parity_report.py must emit it verbatim. The retained bullets,
+# the 36 functional-area names, the five visual criteria and the subcriteria total are the
+# unchanged text of the generated base file Docs/PARITY_ACCEPTANCE.md at b913799, which V9
+# establishes was produced by the unmodified generator. INDEX_CRITERIA is that base rendering
+# of the five criteria as the index page labels each pair's five scoring selects.
 STATUS_NEW_REF = "STATUS_2026-11-11.md"
 STATUS_OLD_REF = "STATUS_2026-10-14.md"
 NEW_EXCEPTION_BULLETS = (
     "- Gemini tab renamed Gemini / AGY and backed by AGY CLI pools (R-012, R-013; owner accepted 2026-10-16).",
     "- The dashboard tab row adds OpenCode, Overview and All agents (R-014\u2013R-017; owner accepted 2026-11-10); paired screens show the extra tab headers.",
-    "- Paired dashboard screens are rendered without ccusage; the ccusage rows that R-014 adds under existing gauges are not in the paired evidence.",
+    "- Paired Claude and OpenAI dashboards are rendered without ccusage, so the ccusage rows that R-014 adds "
+    "under existing gauges are not in the paired evidence; paired Gemini / AGY dashboards use synthetic "
+    "`antigravity` ccusage data (R-018).",
 )
 BASE_EXCEPTION_BULLETS = (
     "- Optional installer download/run differs from the original read-only update-check contract; owner approval pending.",

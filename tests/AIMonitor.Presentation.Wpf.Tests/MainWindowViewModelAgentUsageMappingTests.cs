@@ -4,6 +4,7 @@ using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.ViewModels;
 using AIMonitor.TestSupport;
+using System.Collections.Concurrent;
 
 namespace AIMonitor.Presentation.Wpf.Tests;
 
@@ -11,7 +12,13 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// C9 — the tab → agent map { claude: claude, openai: codex, agy: antigravity } applied by
 /// MainWindowViewModel when the ccusage report arrives (P4 call sites, decision C5), driven through a
 /// fake CachedAgentUsageSource. C23: awaiting <c>vm.AgentUsageTask</c> means the Updated handler has
-/// already run, so the tabs are updated when it completes. Written from the spec only (§5.6).
+/// already run, so the tabs are updated when it completes — and D14(6): the view model is built on a
+/// QueuedSyncContext so an explicit <c>Drain</c> after the join also settles the handler work if it
+/// gets posted to the view model's captured context (the D9 fix); there was no <c>Task.Yield</c>
+/// pumping to replace here. The view model has no clock seam (its <c>today</c> comes from an internal
+/// <c>DateTimeOffset.UtcNow</c>/<c>TimeZoneInfo.Local</c> pair and the refresher's clock is not
+/// injectable from outside), so the fixture day stays <c>DateTime.Now</c> — the documented F21
+/// midnight residual; a fixed clock here needs a production seam. Written from the spec only (§5.6).
 /// TokensText/CostText oracles follow C11 and the P3.1 rules (ChartFormat.Compact / ChartFormat.Money /
 /// CostText of a single priced model): 1,000 → "1,000", 2,000 → "2,000", 3,500 → "3,500",
 /// 9,999 → "9,999", 12,900 → "12.9K", 10,000 → "10K"; $1.23, $0.50, $2.00, $10.50, $11.00, $12.00.
@@ -60,13 +67,26 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
         await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: agentUsage);
+        var context = new QueuedSyncContext();
+        MainWindowViewModel vm;
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            vm = new MainWindowViewModel(coordinator, session, agentUsage: agentUsage);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
 
         await vm.RefreshAsync();
 
         // C23: the task completes only after the Updated handler ran, so the tabs are updated now.
+        // D14(6): the explicit drain also settles the handler body if it gets posted to the view
+        // model's captured context (the D9 fix) instead of running inline; a no-op against today.
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         AssertCcusageRows(vm.ClaudeTab, "1,000 · $1.23", "9,999 · $10.50"); // C9: claude ← claude
         AssertCcusageRows(vm.OpenAiTab, "2,000 · $0.50", "12.9K · $11.00"); // C9: openai ← codex
@@ -76,7 +96,18 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
         // enter the tiles).
         Assert.Equal(2, vm.AgyTab.SupplementaryRows.Count);
         Assert.False(vm.AgyTab.HasResetInfo); // C19: ccusage-only has no reset part
-        Assert.Equal("Requests today", Assert.Single(vm.AgyTab.StatTiles).Label);
+
+        // R-018 C9/D11 oracle: the tab now shows the COMPOSED snapshot — the agy stat followed by
+        // the four R-018 tiles. Hand-computed from this test's own data (antigravity daily row
+        // 3,500 total / 0 output / 0 cache reads; one priced model, $2.00): ChartFormat.Compact
+        // gives "3,500" (below 10K keeps the grouped plain form), "0", "0"; CostText over all-priced
+        // models is Money(2.00) = "$2.00" with no " + unpriced".
+        var agyTiles = vm.AgyTab.StatTiles;
+        Assert.Equal(
+            ["Requests today", "Total tokens", "Output tokens", "Cache reads", "Equivalent API value"],
+            agyTiles.Select(t => t.Label));
+        Assert.Equal(["128", "3,500", "0", "0", "$2.00"], agyTiles.Select(t => t.Value));
+        Assert.Equal("ccusage · equivalent API price", agyTiles[^1].Detail);
 
         // C9: "opencode" has no tab — its line appears nowhere (no 700-token / $0.10 value).
         foreach (var tab in vm.ProviderTabs)
@@ -109,11 +140,22 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
         await using var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(registrations));
         var store = new BlockingSettingsStore(new AppSettings());
         using var session = new SettingsSession(store, new AppSettings());
-        var vm = new MainWindowViewModel(coordinator, session, agentUsage: new CachedAgentUsageSource(fake, clock));
+        var context = new QueuedSyncContext();
+        MainWindowViewModel vm;
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            vm = new MainWindowViewModel(coordinator, session, agentUsage: new CachedAgentUsageSource(fake, clock));
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
 
         await vm.RefreshAsync();
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         foreach (var tab in vm.ProviderTabs)
         {
@@ -131,7 +173,7 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
 
         await vm.RefreshAsync();
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         Assert.Equal(2, fake.ReadCount);
 
@@ -201,5 +243,60 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
 
         public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
             => Handler(request, cancellationToken);
+    }
+
+    /// <summary>D16: waits for <c>vm.AgentUsageTask</c> while pumping the view model's captured context,
+    /// bounded. A refresh entered with no <see cref="SynchronizationContext.Current"/> (a test
+    /// continuation after an await — xUnit's context is gone after the first hop) now has its handler
+    /// POSTED to that context, so awaiting the task without draining it first would hang.</summary>
+    private static async Task SettleAgentUsageAsync(MainWindowViewModel vm, QueuedSyncContext context)
+    {
+        var task = vm.AgentUsageTask!;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (!task.IsCompleted)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for AgentUsageTask while pumping the captured context.");
+            context.Drain();
+            await Task.WhenAny(task, Task.Delay(5));
+        }
+
+        await task;
+        context.Drain();
+    }
+
+    /// <summary>R-017 F24 pattern (same hand-written context as MainWindowViewModelOpenCodeChartWiringTests
+    /// and MainWindowViewModelAgyCompositionTests): queues every Post, runs nothing until the test calls
+    /// <see cref="Drain"/>. Installed around the view model's construction so the D14(6) settles are
+    /// explicit drains of a queue the test controls rather than races with xUnit's own pump.</summary>
+    private sealed class QueuedSyncContext : SynchronizationContext
+    {
+        // A posted body that re-posted itself would otherwise hang the test run; fail fast instead.
+        private const int DrainGuard = 64;
+
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+        /// <summary>
+        /// Runs the queued callbacks FIFO on the calling thread WITHOUT installing this context —
+        /// the posted body must not depend on Current.
+        /// </summary>
+        public void Drain()
+        {
+            for (var run = 0; _queue.TryDequeue(out var item); run++)
+            {
+                if (run >= DrainGuard)
+                {
+                    throw new InvalidOperationException(
+                        "The posted work re-posted to its own context: the queue never drains (R-017 F23 pattern).");
+                }
+
+                item.Callback(item.State);
+            }
+        }
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Enqueue((d, state));
+
+        public override void Send(SendOrPostCallback d, object? state) =>
+            throw new InvalidOperationException(
+                "R-017 F23: view-model context work must Post, never Send.");
     }
 }
