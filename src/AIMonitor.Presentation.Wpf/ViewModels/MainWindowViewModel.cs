@@ -440,6 +440,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void OnAgentUsageUpdated(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
     {
+        // The refresher posts this handler to the context captured for its current run.
+        OnAgentUsageUpdatedCore(lastGood, lastError);
+    }
+
+    /// <summary>
+    /// The agent-usage tab work, delivered by the refresher:
+    /// E2's stored pair, I8's one now/today pair, and the D13 order (OpenCode, Overview, then AGY
+    /// last, so an AGY composition failure cannot stop the other tabs).
+    /// </summary>
+    private void OnAgentUsageUpdatedCore(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
         // E2: keep the last pair so a live budget change can rebuild the OpenCode tab without
         // running ccusage again.
         _lastAgentUsageReport = lastGood;
@@ -610,6 +621,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     /// <param name="onlyProviderId">Refresh just this service ("Re-detect" on its card); null refreshes all.</param>
     public async Task RefreshAsync(string? onlyProviderId = null, bool manual = false)
     {
+        // Capture before the first await so a bare provider refresh can pass the view model context
+        // captured at construction to the agent-usage refresher.
+        var entryContext = SynchronizationContext.Current;
+
         if (IsRefreshing)
         {
             _pendingRefresh = true;
@@ -704,7 +719,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_agentUsageRefresher is not null && onlyProviderId is null)
         {
             var force = manual && IsAllAgentsSelected;
-            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force);
+            // D16: the refresher owns delivery, completion, and exception containment.
+            // Calls entered on a context retain its Current capture; bare calls use the
+            // view model context captured at construction when one is available.
+            var deliveryContext = entryContext is null ? _uiContext : null;
+            _agentUsageTask = _agentUsageRefresher.RefreshAsync(force, deliveryContext);
         }
     }
 }
