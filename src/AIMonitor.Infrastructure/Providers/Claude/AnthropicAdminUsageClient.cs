@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AIMonitor.Application.Time;
 
 namespace AIMonitor.Infrastructure.Providers.Claude;
@@ -61,6 +62,11 @@ public sealed class AnthropicAdminUsageClient
 
     private static readonly UTF8Encoding StrictUtf8 =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    private static readonly Regex BucketTimestampPattern = new(
+        @"\A(?<year>[0-9]{4})-(?<month>[0-9]{2})-(?<day>[0-9]{2})T(?<hour>[0-9]{2}):(?<minute>[0-9]{2}):(?<second>[0-9]{2})(?:\.(?<fraction>[0-9]{1,9}))?(?<zone>Z|(?<sign>[+-])(?<offsetHour>[0-9]{2}):(?<offsetMinute>[0-9]{2}))\z",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
 
     /// <summary>Returned when the stored Admin key is rejected by the API.</summary>
     public const string UnauthorizedMessage =
@@ -821,29 +827,55 @@ public sealed class AnthropicAdminUsageClient
             throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        const string dateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss";
-        var formats = new List<string>(16)
+        Match match;
+        try
         {
-            dateTimeFormat + "'Z'",
-            dateTimeFormat + "zzz",
-        };
-        for (var digits = 1; digits <= 7; digits++)
+            match = BucketTimestampPattern.Match(timestamp);
+        }
+        catch (RegexMatchTimeoutException)
         {
-            var fractional = dateTimeFormat + "." + new string('F', digits);
-            formats.Add(fractional + "'Z'");
-            formats.Add(fractional + "zzz");
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        if (DateTimeOffset.TryParseExact(
-            timestamp,
-            formats.ToArray(),
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-            out var parsed))
+        if (!match.Success)
         {
-            return parsed;
+            throw new AnthropicAdminApiException(ParseErrorMessage);
         }
 
-        throw new AnthropicAdminApiException(ParseErrorMessage);
+        var year = int.Parse(match.Groups["year"].Value, CultureInfo.InvariantCulture);
+        var month = int.Parse(match.Groups["month"].Value, CultureInfo.InvariantCulture);
+        var day = int.Parse(match.Groups["day"].Value, CultureInfo.InvariantCulture);
+        var hour = int.Parse(match.Groups["hour"].Value, CultureInfo.InvariantCulture);
+        var minute = int.Parse(match.Groups["minute"].Value, CultureInfo.InvariantCulture);
+        var second = int.Parse(match.Groups["second"].Value, CultureInfo.InvariantCulture);
+        var fraction = match.Groups["fraction"].Value;
+        var fractionalTicks = fraction.Length == 0
+            ? 0
+            : int.Parse((fraction + "0000000")[..7], CultureInfo.InvariantCulture);
+        var offsetMinutes = 0;
+
+        if (match.Groups["zone"].Value != "Z")
+        {
+            var offsetHour = int.Parse(match.Groups["offsetHour"].Value, CultureInfo.InvariantCulture);
+            var offsetMinute = int.Parse(match.Groups["offsetMinute"].Value, CultureInfo.InvariantCulture);
+            if (offsetHour > 14 || offsetMinute > 59)
+            {
+                throw new AnthropicAdminApiException(ParseErrorMessage);
+            }
+
+            offsetMinutes = (offsetHour * 60 + offsetMinute)
+                * (match.Groups["sign"].Value == "+" ? 1 : -1);
+        }
+
+        try
+        {
+            var localTime = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified)
+                .AddTicks(fractionalTicks);
+            return new DateTimeOffset(localTime.AddMinutes(-offsetMinutes), TimeSpan.Zero);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new AnthropicAdminApiException(ParseErrorMessage);
+        }
     }
 }
