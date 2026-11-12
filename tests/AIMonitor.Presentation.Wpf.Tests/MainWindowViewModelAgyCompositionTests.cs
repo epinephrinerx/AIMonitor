@@ -35,13 +35,21 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// clock seam (it reads <c>DateTimeOffset.UtcNow</c>/<c>TimeZoneInfo.Local</c> inside, and the
 /// refresher's own clock is not injectable from outside), so the fixture local day still comes from
 /// <c>DateTime.Now</c> — the documented F21 midnight residual; replacing it needs a production seam.
+/// D16 (round 4, replaces the D15 mechanism): the view model hands the context it captured at
+/// construction to the refresher per call when a refresh is entered with no context, so the Updated
+/// handler is posted there and <c>AgentUsageTask</c> completes only after the tab work ran. The D9
+/// test now asserts the task is NOT complete before <c>Drain()</c>; new tests cover entry on another
+/// context (today's behaviour), overlapping bare + UI refreshes (also the <c>_pendingForce</c> re-run)
+/// and a handler exception delivered as posted work (contained, no throw from <c>Drain()</c>); every
+/// wait is bounded. Because xUnit's own context is gone after the first await, a test continuation
+/// that refreshes again is "entered with no context" too, so the older tests no longer await the task
+/// and THEN drain: <c>SettleAgentUsageAsync</c> pumps the construction context until the task completes.
 /// Hand-written fakes as in the R-014/R-015/R-017 view-model tests: no real ccusage, no agy, no
 /// network; F21 — ONE local day captured per test (fixture and assertions read the same value; the
 /// view model's own clock read is the documented midnight residual). Every test builds the view model
-/// on its own QueuedSyncContext, so the settings sync — and, once D9 is fixed, the posted handler
-/// work — settles on an explicit <c>Drain</c>; while the handler still runs on the context captured
-/// by the refresher (a refresh started from the test thread) the <c>AgentUsageTask</c> join already
-/// completes it: that task's signal fires in the handler callback's finally. Oracles (spec test
+/// on its own QueuedSyncContext, so the settings sync and the posted handler work settle on an
+/// explicit <c>Drain</c> (D16: <c>AgentUsageTask</c> completes in the handler callback's finally,
+/// i.e. only once that context has run it). Oracles (spec test
 /// oracles): today + yesterday antigravity rows — Apr 30
 /// pattern 10,000/500/8,500/$0.50 and May 1 pattern 20,000/1,000/17,000/$1.00 + 10,000/500/8,500/
 /// null → tiles 40K / 2,000 / 34K / "$1.50 + unpriced". The composed behaviour does not exist at the
@@ -108,7 +116,10 @@ public sealed class MainWindowViewModelAgyCompositionTests
     /// carries a negative <see cref="ModelUsage.CostUsd"/>: <c>ModelUsage</c> itself allows it and
     /// every other tab call in <c>OnAgentUsageUpdated</c> formats negative money without validating
     /// (<c>ChartFormat.Money</c> prints "$-0.25"; All agents/Claude/OpenAI/OpenCode/Overview rows and
-    /// the AGY tiles never test the sign), but <c>AgentHistoryBuilder.Build</c> validates each day's
+    /// the AGY tiles never test the sign). The negative cost DELIBERATELY BYPASSES the ccusage parser:
+    /// SPEC_R014 rejects a negative parsed cost (the row would be skipped), so a real ccusage report
+    /// never carries it — but the view model must not rely on parser validation, so this is the
+    /// controlled injection seam for "the AGY composition throws" (D16). <c>AgentHistoryBuilder.Build</c> validates each day's
     /// priced total through <c>UsageHistoryBucket.RequireFiniteNonNegative</c>, so
     /// <c>AgyUsageComposer.Compose</c> throws inside <c>UpdateAgyTab</c> — the controlled AGY
     /// composition failure D13 orders against OpenCode/Overview. Today's antigravity row is clean so
@@ -124,6 +135,24 @@ public sealed class MainWindowViewModelAgyCompositionTests
             new DailyAgentUsage(today.AddDays(-1),
             [
                 Agent("antigravity", Model(ModelA, 10_000, 500, 8_500, -0.25m)),
+            ]),
+        ],
+        monthly: [],
+        sessions: [],
+        unpricedModels: [],
+        pricing: AgentUsagePricing.OnlineRequested,
+        retrievedAt: FixedUtc,
+        skippedRows: 0);
+
+    /// <summary>D16 fixture — a clean report with one OpenCode row of the given token total on the
+    /// local day (and today's clean antigravity row), so the OpenCode chart's last bucket shows the
+    /// total and a second report with another total makes a later handler run observable.</summary>
+    private static AgentUsageReport ReportWithOpenCode(DateOnly today, long openCodeTokens) => new(
+        daily: [
+            new DailyAgentUsage(today,
+            [
+                Agent("antigravity", Model(ModelA, 20_000, 1_000, 17_000, 1.00m)),
+                Agent("opencode", Model("deepseek", openCodeTokens, 400, 0, 0.40m)),
             ]),
         ],
         monthly: [],
@@ -178,6 +207,139 @@ public sealed class MainWindowViewModelAgyCompositionTests
         }
     }
 
+    /// <summary>Upper bound for every wait on the D16 tests: generous for a loaded machine, finite so a
+    /// regression fails with a timeout instead of hanging the run.</summary>
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
+
+    /// <summary>D16: the view model, its own QueuedSyncContext (captured at construction) and the
+    /// fakes behind it, built the way every test here builds them (default settings unless given).
+    /// <paramref name="read"/> receives the test's one local day and is the ccusage read.</summary>
+    private sealed class Harness : IDisposable
+    {
+        private readonly SettingsSession _session;
+
+        private Harness(
+            MainWindowViewModel vm,
+            QueuedSyncContext context,
+            FakeAgyClient agy,
+            FakeAgentUsageSource source,
+            SettingsSession session)
+        {
+            Vm = vm;
+            Context = context;
+            Agy = agy;
+            Source = source;
+            _session = session;
+        }
+
+        public MainWindowViewModel Vm { get; }
+
+        public QueuedSyncContext Context { get; }
+
+        public FakeAgyClient Agy { get; }
+
+        public FakeAgentUsageSource Source { get; }
+
+        public static Harness Create(Func<DateOnly, Task<AgentUsageReport>> read, AppSettings? settings = null)
+        {
+            settings ??= new AppSettings();
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var agy = new FakeAgyClient(AgySnapshot());
+            var source = new FakeAgentUsageSource(_ => read(today));
+            var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
+            var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+            [
+                new ProviderClientRegistration("claude", new FixedClient("claude")),
+                new ProviderClientRegistration("openai", new FixedClient("openai")),
+                new ProviderClientRegistration("agy", agy),
+            ]));
+            var store = new BlockingSettingsStore(settings);
+            store.Release();
+            var session = new SettingsSession(store, settings);
+            var context = new QueuedSyncContext();
+            var vm = ConstructViewModel(context, coordinator, session, cache);
+            return new Harness(vm, context, agy, source, session);
+        }
+
+        public void Dispose() => _session.Dispose();
+    }
+
+    /// <summary>Polls a condition with a finite bound (no fixed sleep): the awaited effect is a post to
+    /// a queue or a task completion that may arrive from another thread a moment later.</summary>
+    private static async Task WaitUntilAsync(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow + Bound;
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for {what}.");
+            await Task.Delay(5);
+        }
+    }
+
+    /// <summary>Starts <paramref name="action"/> on a pool thread with <paramref name="entry"/> installed
+    /// as its <see cref="SynchronizationContext"/> (the refresh is "entered on" that context) and pumps
+    /// the context like a UI thread — Current == the context while a callback runs, ONE callback per
+    /// pass — until the action's task completes: the view model's own <c>ConfigureAwait(true)</c>
+    /// continuation is posted there. Pumping one callback at a time leaves a handler that the refresher
+    /// posts to the same context queued instead of running it in the same pass.</summary>
+    private static async Task RunOnContextAsync(QueuedSyncContext entry, Func<Task> action)
+    {
+        var task = Task.Run(() =>
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(entry);
+            try
+            {
+                return action();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        });
+        var deadline = DateTime.UtcNow + Bound;
+        while (!task.IsCompleted)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Timed out pumping the entry context.");
+            await Task.Run(entry.DrainOneInstalled);
+            await Task.WhenAny(task, Task.Delay(5));
+        }
+
+        await task;
+    }
+
+    /// <summary>D16: waits for <c>AgentUsageTask</c> while pumping the view model's construction
+    /// context, bounded. A refresh that starts with no <see cref="SynchronizationContext.Current"/> (any
+    /// test continuation after an await — xUnit's context is gone after the first hop) now has its
+    /// handler POSTED to that context, so awaiting the task without draining it would hang. Replaces the
+    /// round-3 "await the task, then Drain()" pair; an exception from a drained callback propagates.</summary>
+    private static async Task SettleAgentUsageAsync(MainWindowViewModel vm, QueuedSyncContext context)
+    {
+        var task = vm.AgentUsageTask!;
+        var deadline = DateTime.UtcNow + Bound;
+        while (!task.IsCompleted)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for AgentUsageTask while pumping the construction context.");
+            context.Drain();
+            await Task.WhenAny(task, Task.Delay(5));
+        }
+
+        await task;
+        context.Drain();
+    }
+
+    /// <summary>The D9 "before the drain" picture: <c>OnAgentUsageUpdated</c> has not touched any tab —
+    /// OpenCode/Overview only ever change there, and AGY keeps the path (a) raw push without
+    /// history, composed tiles or the composed note.</summary>
+    private static void AssertNoHandlerTabChanges(MainWindowViewModel vm)
+    {
+        Assert.False(vm.OpenCodeTab.HasSnapshot);
+        Assert.False(vm.OverviewTab.HasSnapshot);
+        Assert.False(vm.AgyTab.HasHistory);
+        Assert.Equal(["Requests today"], vm.AgyTab.StatTiles.Select(t => t.Label));
+        Assert.Equal(ClientNote, vm.AgyTab.ValueNote);
+    }
+
     private static void AssertComposedTiles(ProviderTabViewModel tab)
     {
         Assert.Equal(["Requests today", "Total tokens", "Output tokens", "Cache reads", "Equivalent API value"],
@@ -208,8 +370,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();          // (a): the agy snapshot arrives first — no report stored yet
-        await vm.AgentUsageTask!;         // (b): OnAgentUsageUpdated composes with the raw snapshot
-        context.Drain();                  // D14(6): explicit settle of the captured context
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         var tab = vm.AgyTab;
         Assert.True(tab.HasSnapshot);
@@ -267,8 +428,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();                  // D14(6): explicit settle (see the class header)
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         // D6: AGY disabled → no raw snapshot; Updated never composes for the tab ("today's look").
         Assert.Equal(0, agy.CallCount); // the disabled client was skipped
@@ -329,8 +489,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
         Assert.True(vm.AgyTab.HasHistory); // composed while enabled
         var buckets = vm.AgyTab.ChartBuckets;
         var tiles = vm.AgyTab.StatTiles;
@@ -342,8 +501,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         context.Drain();
 
         await vm.RefreshAsync(); // full refresh without agy: the stored raw snapshot must be dropped
-        await vm.AgentUsageTask!; // a cached Updated still fires — composition must not
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         Assert.False(vm.LatestSnapshots.ContainsKey("agy")); // "drop the raw agy snapshot" (D6)
         Assert.Same(buckets, vm.AgyTab.ChartBuckets); // no UpdateFromSnapshot push happened since
@@ -353,8 +511,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         // Even a fresh ccusage read (cache expired) must not compose for the disabled tab.
         clock.UtcNow += TimeSpan.FromMinutes(16);
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         Assert.Equal(2, source.ReadCount); // a real second read happened — and still nothing was pushed
         Assert.Same(buckets, vm.AgyTab.ChartBuckets);
@@ -390,8 +547,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         // Composed while enabled; remember the exact pushed lists.
         Assert.True(vm.AgyTab.HasHistory);
@@ -407,8 +563,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         });
         context.Drain();
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
         Assert.Equal(1, agy.CallCount); // the disabled client is skipped — no new agy result
         Assert.Same(buckets, vm.AgyTab.ChartBuckets);
 
@@ -455,8 +610,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
 
         // "agy unchanged (no stats, no history — today's look)" + D9 "otherwise the client's note
         // is kept".
@@ -467,64 +621,220 @@ public sealed class MainWindowViewModelAgyCompositionTests
         Assert.False(vm.AgyTab.ShowSupplementary); // no antigravity ccusage line either (C8/C10)
     }
 
-    // ── D9: an update arriving OFF the view model's thread must not touch tabs until the captured
-    //    context drains ────────────────────────────────────────────────────────────────────────
+    // ── D9/D16: an update arriving OFF the view model's thread is delivered on its captured context ──
 
     [Fact]
     public async Task D9_OffThreadRefresh_TabChangesWaitUntilTheCapturedContextDrains()
     {
-        // Inspector B finding 1. AgentUsageRefresher captures the SYNCHRONIZATION CONTEXT OF WHOEVER
-        // CALLS RefreshAsync (src/.../AgentUsageRefresher.cs:37), not the view model's, so starting
-        // the refresh from a Task.Run thread makes the Updated handler — OnAgentUsageUpdated — run
-        // inline on the thread pool. D9: the handler's tab work must run on the UI thread, posted
-        // through the context the view model captured at construction (inline when none). This test
-        // FAILS against the current code — the "before the drain" asserts catch the off-thread tab
-        // changes — and is left failing per D14(1) for Writing Owner 1; it must not be weakened.
-        var agy = new FakeAgyClient(AgySnapshot());
-        var source = new FakeAgentUsageSource(_ => Task.FromResult(Report(DateOnly.FromDateTime(DateTime.Now))));
-        var cache = new CachedAgentUsageSource(source, new FakeClock(FixedUtc));
-        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
-        [
-            new ProviderClientRegistration("claude", new FixedClient("claude")),
-            new ProviderClientRegistration("openai", new FixedClient("openai")),
-            new ProviderClientRegistration("agy", agy),
-        ]));
-        var store = new BlockingSettingsStore(new AppSettings());
-        store.Release();
-        using var session = new SettingsSession(store, new AppSettings());
-        var context = new QueuedSyncContext();
-        var vm = ConstructViewModel(context, coordinator, session, cache); // captures the queued context
+        // D16 (replaces D15). AgentUsageRefresher captures the SYNCHRONIZATION CONTEXT OF WHOEVER
+        // CALLS RefreshAsync, so a refresh started from a Task.Run thread (Current == null) used to
+        // run the Updated handler — OnAgentUsageUpdated — inline on the thread pool. D16: the view
+        // model passes the context it captured at construction to the refresher for that call, so the
+        // refresher posts the handler there and completes AgentUsageTask only after the tab work ran.
+        // Hence BEFORE Drain(): the task is not complete and no handler tab change exists; AFTER
+        // Drain(): the task completes (bounded wait, so a regression fails instead of hanging) and
+        // every tab is updated. Fails against the pre-D16 code (inline handler) and must not be weakened.
+        using var h = Harness.Create(today => Task.FromResult(Report(today)));
 
-        // Start the refresh from a thread-pool thread: SynchronizationContext.Current is null there,
-        // so the refresher captures nothing and may only invoke the handler inline, off-thread.
-        await Task.Run(() => vm.RefreshAsync());
-        await vm.AgentUsageTask!; // completes when the Updated handler call returns (posted or inline)
+        // Start the refresh from a thread-pool thread: Current is null there.
+        await Task.Run(() => h.Vm.RefreshAsync());
+        var task = h.Vm.AgentUsageTask!;
+        await WaitUntilAsync(() => task.IsCompleted || h.Context.PendingCount > 0,
+            "the handler to be posted to the captured context (or, in the regression, to run inline)");
 
         // The refresh itself (not OnAgentUsageUpdated) already applied path (a): the RAW agy
-        // snapshot pushed while no report was stored. That is allowed to be visible before the
-        // drain; the ccusage-driven tab work below is not.
-        Assert.True(vm.AgyTab.HasSnapshot);
+        // snapshot pushed while no report was stored. That is allowed to be visible before the drain.
+        Assert.True(h.Vm.AgyTab.HasSnapshot);
 
-        // D9 — none of the handler's tab changes may have happened yet: the OpenCode and Overview
-        // tabs are ONLY updated from OnAgentUsageUpdated, and the AGY tab only gains its composed
-        // history/tiles/note there.
-        Assert.False(vm.OpenCodeTab.HasSnapshot);
-        Assert.False(vm.OverviewTab.HasSnapshot);
-        Assert.False(vm.AgyTab.HasHistory);
-        Assert.Equal(["Requests today"], vm.AgyTab.StatTiles.Select(t => t.Label));
-        Assert.Equal(ClientNote, vm.AgyTab.ValueNote);
+        // D16: the task means "tab work done" — it must NOT complete before the captured context runs it.
+        Assert.False(task.IsCompleted);
+        Assert.Equal(1, h.Context.PendingCount); // exactly the posted handler
+        AssertNoHandlerTabChanges(h.Vm);
 
-        context.Drain(); // explicit settle: the posted OnAgentUsageUpdated work runs exactly here
+        h.Context.Drain(); // the posted OnAgentUsageUpdated work runs exactly here
+        await task.WaitAsync(Bound);
 
         // …and now every D9-pinned tab change exists, composed once with the one cached report.
-        Assert.True(vm.OpenCodeTab.HasSnapshot);
-        Assert.True(vm.OpenCodeTab.HasHistory);
-        Assert.True(vm.OverviewTab.HasSnapshot);
-        Assert.True(vm.AgyTab.HasHistory);
-        AssertComposedTiles(vm.AgyTab);
-        Assert.Equal(ComposedNote, vm.AgyTab.ValueNote);
-        Assert.Equal(1, agy.CallCount); // the off-thread refresh never re-called agy for the compose
-        Assert.Equal(1, source.ReadCount); // and never started an extra ccusage read
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.True(h.Vm.OpenCodeTab.HasHistory);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+        Assert.True(h.Vm.AgyTab.HasHistory);
+        AssertComposedTiles(h.Vm.AgyTab);
+        Assert.Equal(ComposedNote, h.Vm.AgyTab.ValueNote);
+        Assert.Equal(1, h.Agy.CallCount); // the off-thread refresh never re-called agy for the compose
+        Assert.Equal(1, h.Source.ReadCount); // and never started an extra ccusage read
+    }
+
+    // ── D16: a refresh entered on another context keeps today's behaviour ───────────────
+
+    [Fact]
+    public async Task D16_RefreshEnteredOnAnotherContext_HandlerIsPostedThereNotRunInline()
+    {
+        // D16: "A refresh entered on any context keeps today's behaviour" — only a refresh entered
+        // with NO context gets the view model's construction context. So a refresh entered on a second
+        // controlled context (a different "dispatcher" than the one the view model was built on, and
+        // installed while its callbacks run) has its handler delivered through THAT context by the
+        // refresher: posted (not run inline off the posting thread), the task incomplete and the tabs
+        // unchanged until that context drains, and nothing posted to the construction context. This
+        // also guards the pre-existing tests, which enter on xUnit's own context while the view model
+        // was built on a queued one. (It kills a gate that runs inline for any non-null context —
+        // Inspector B round 2 finding 2 — and one that forces the construction context onto it.)
+        using var h = Harness.Create(today => Task.FromResult(Report(today)));
+        var other = new QueuedSyncContext();
+        var baseline = h.Context.PostCount;
+
+        await RunOnContextAsync(other, () => h.Vm.RefreshAsync());
+        var task = h.Vm.AgentUsageTask!;
+        await WaitUntilAsync(
+            () => task.IsCompleted || other.PendingCount > 0 || h.Context.PendingCount > 0,
+            "the handler to be posted to some context (or, in the regression, to run inline)");
+
+        Assert.False(task.IsCompleted);
+        Assert.Equal(1, other.PendingCount);          // delivered through the context it was entered on…
+        Assert.Equal(baseline, h.Context.PostCount);  // …and nothing went to the construction context
+        AssertNoHandlerTabChanges(h.Vm);
+
+        other.Drain();
+        await task.WaitAsync(Bound);
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+        Assert.True(h.Vm.AgyTab.HasHistory);
+        AssertComposedTiles(h.Vm.AgyTab);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    // ── D16: overlapping refreshes must not turn a pool-thread update inline ────────────
+
+    [Fact]
+    public async Task D16_OverlappingBareAndConstructionContextRefreshes_PoolThreadUpdateStillWaitsForTheDrain()
+    {
+        // A bare (Current == null) refresh whose ccusage read is blocked on a gate; while it is in
+        // flight a second refresh is entered on the construction context (its refresher call returns
+        // immediately because a read is already running). Then the gate is released from a pool
+        // thread, so the first refresher's continuation — and, before D16, the handler — runs inline
+        // there. D16: no per-call context may leak from the second refresh into the first (a shared
+        // "entry context" field would be overwritten by it); the first call's handler must still be
+        // posted to the construction context and wait for its drain.
+        var gate = new TaskCompletionSource<AgentUsageReport>(); // continuations run inline on the releasing thread
+        using var h = Harness.Create(_ => gate.Task);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+
+        await Task.Run(() => h.Vm.RefreshAsync()); // bare; its agent-usage read is now blocked
+        var first = h.Vm.AgentUsageTask!;
+        Assert.False(first.IsCompleted);
+        Assert.Equal(1, h.Source.ReadCount);
+
+        await RunOnContextAsync(h.Context, () => h.Vm.RefreshAsync()); // entered on the UI context
+        var second = h.Vm.AgentUsageTask!;
+        await second.WaitAsync(Bound); // returned at once: a read is already running
+        Assert.Equal(1, h.Source.ReadCount);
+        Assert.Equal(0, h.Context.PendingCount);
+
+        await Task.Run(() => gate.SetResult(ReportWithOpenCode(today, 8_000))); // release from a pool thread
+        await WaitUntilAsync(() => first.IsCompleted || h.Context.PendingCount > 0,
+            "the first refresh's handler to be posted (or, in the regression, to run inline)");
+
+        Assert.False(first.IsCompleted);
+        Assert.Equal(1, h.Context.PendingCount);
+        AssertNoHandlerTabChanges(h.Vm);
+
+        h.Context.Drain();
+        await first.WaitAsync(Bound);
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+        Assert.True(h.Vm.AgyTab.HasHistory);
+        Assert.Equal(1, h.Source.ReadCount);
+    }
+
+    [Fact]
+    public async Task D16_PendingForceRerun_AlsoDeliversOnTheConstructionContext()
+    {
+        // D16: "_pendingForce re-runs must deliver on the view model's context too". A bare refresh
+        // blocks on its first read; a manual refresh with All agents selected (entered on the
+        // construction context) marks a forced re-run. The gate is released from a pool thread: the
+        // first handler is posted (and its drain unblocks the re-run), the forced second read then
+        // produces a DIFFERENT OpenCode total whose handler must also be posted — not run inline on
+        // the pool thread — so the tab still shows the first total until the second drain.
+        var gate = new TaskCompletionSource<AgentUsageReport>();
+        var reads = 0;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        using var h = Harness.Create(
+            _ => Interlocked.Increment(ref reads) == 1
+                ? gate.Task
+                : Task.FromResult(ReportWithOpenCode(today, 9_000)),
+            new AppSettings { ActiveProvider = "all-agents" });
+        Assert.True(h.Vm.IsAllAgentsSelected);
+
+        await Task.Run(() => h.Vm.RefreshAsync()); // bare, not manual → not forced; read 1 blocks
+        var first = h.Vm.AgentUsageTask!;
+        Assert.Equal(1, h.Source.ReadCount);
+
+        await RunOnContextAsync(h.Context, () => h.Vm.RefreshAsync(manual: true));
+        await h.Vm.AgentUsageTask!.WaitAsync(Bound); // returns at once; only sets _pendingForce
+
+        await Task.Run(() => gate.SetResult(ReportWithOpenCode(today, 8_000)));
+        await WaitUntilAsync(() => first.IsCompleted || h.Context.PendingCount > 0,
+            "the first handler to be posted (or, in the regression, to run inline)");
+        Assert.False(first.IsCompleted);
+        Assert.Equal(1, h.Context.PendingCount);
+        AssertNoHandlerTabChanges(h.Vm);
+
+        h.Context.Drain(); // first handler: unblocks the refresher, which re-runs forced
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        await WaitUntilAsync(() => first.IsCompleted || h.Context.PendingCount > 0,
+            "the forced re-run's handler to be posted (or, in the regression, to run inline)");
+
+        Assert.False(first.IsCompleted); // the task covers the re-run's tab work too
+        Assert.Equal(1, h.Context.PendingCount);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total); // the 9,000 total is not applied yet
+        Assert.Equal(2, h.Source.ReadCount); // the forced re-read really ran
+
+        h.Context.Drain();
+        await first.WaitAsync(Bound);
+        Assert.Equal(9_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+    }
+
+    // ── D16: an exception thrown by the posted handler stays inside the refresher ───────
+
+    [Fact]
+    public async Task D16_PostedHandlerException_IsContained_TaskCompletesWithoutFault_DrainDoesNotThrow()
+    {
+        // The D13 composition failure (see ReportWithRejectedAgyRow) delivered through a bare
+        // refresh, so the handler runs as POSTED work. The refresher's own catch around the handler
+        // must contain the AGY throw: Drain() must not throw (an exception escaping a posted callback
+        // would be unhandled on a real UI thread), AgentUsageTask completes without fault, and
+        // OpenCode/Overview — updated before the AGY tab (D13) — are done. The "before the drain"
+        // asserts make sure the failure really happens inside the posted work (otherwise an inline
+        // handler would also pass the rest vacuously).
+        using var h = Harness.Create(today => Task.FromResult(ReportWithRejectedAgyRow(today)));
+
+        await Task.Run(() => h.Vm.RefreshAsync());
+        var task = h.Vm.AgentUsageTask!;
+        await WaitUntilAsync(() => task.IsCompleted || h.Context.PendingCount > 0,
+            "the handler to be posted (or, in the regression, to run inline)");
+        Assert.False(task.IsCompleted);
+        Assert.False(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.False(h.Vm.OverviewTab.HasSnapshot);
+
+        var drainException = Record.Exception(h.Context.Drain);
+        Assert.Null(drainException); // contained by the refresher's handler catch
+
+        await task.WaitAsync(Bound);
+        Assert.Equal(TaskStatus.RanToCompletion, task.Status); // not faulted, not cancelled
+
+        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.True(h.Vm.OpenCodeTab.HasHistory);
+        Assert.Equal(8_000.0, h.Vm.OpenCodeTab.ChartBuckets[^1].Total);
+        Assert.True(h.Vm.OverviewTab.HasSnapshot);
+
+        // Only the AGY recompose failed: path (a)'s raw push remains, the client's note is kept.
+        Assert.True(h.Vm.AgyTab.HasSnapshot);
+        Assert.False(h.Vm.AgyTab.HasHistory);
+        Assert.Equal(ClientNote, h.Vm.AgyTab.ValueNote);
+        Assert.Equal(1, h.Source.ReadCount);
     }
 
     // ── D1: range/metric change recomposes AGY synchronously; Overview excluded ─
@@ -548,8 +858,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
         var agyBuckets = vm.AgyTab.ChartBuckets;
         var overviewBuckets = vm.OverviewTab.ChartBuckets;
         Assert.Equal(14, agyBuckets.Count);
@@ -607,8 +916,7 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the construction context until the task completes
         Assert.Equal(14, vm.AgyTab.ChartBuckets.Count);
 
         await session.UpdateAsync(s => s with { ChartRangeDays = 30 });
@@ -650,19 +958,11 @@ public sealed class MainWindowViewModelAgyCompositionTests
         var vm = ConstructViewModel(context, coordinator, session, cache);
 
         await vm.RefreshAsync();
-        await vm.AgentUsageTask!;
 
-        // Settle any posted handler work. Today the AGY throw happens inside the refresher's own
-        // try/catch (this Drain is a no-op); once D9 posts the handler body to the captured context,
-        // the same throw surfaces HERE instead — the clause pins the tab state, not the catch site,
-        // so the failure is expected and consumed at this seam.
-        try
-        {
-            context.Drain();
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-        }
+        // Settle the handler work. D16: the AGY throw happens inside the refresher's own
+        // try/catch whether the handler runs inline or as posted work, so NO exception may escape
+        // Drain() (the dedicated posted-handler test pins the posted path itself).
+        Assert.Null(await Record.ExceptionAsync(() => SettleAgentUsageAsync(vm, context)));
 
         // D13 order: OpenCode and Overview were already updated by this handler run…
         Assert.True(vm.OpenCodeTab.HasSnapshot);
@@ -755,6 +1055,27 @@ public sealed class MainWindowViewModelAgyCompositionTests
         public override void Send(SendOrPostCallback d, object? state) =>
             throw new InvalidOperationException(
                 "R-017 F23: OnSettingsChanged must Post to the captured context, never Send.");
+
+        /// <summary>D16: runs at most ONE queued callback with this context installed as
+        /// <see cref="SynchronizationContext.Current"/> (as a real UI thread would), restored afterwards.</summary>
+        public void DrainOneInstalled()
+        {
+            if (!_queue.TryDequeue(out var item))
+            {
+                return;
+            }
+
+            var previous = Current;
+            SetSynchronizationContext(this);
+            try
+            {
+                item.Callback(item.State);
+            }
+            finally
+            {
+                SetSynchronizationContext(previous);
+            }
+        }
 
         /// <summary>
         /// Runs the queued callbacks FIFO on the calling thread WITHOUT installing this context —

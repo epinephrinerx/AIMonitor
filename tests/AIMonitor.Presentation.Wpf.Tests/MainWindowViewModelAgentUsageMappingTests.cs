@@ -86,8 +86,7 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
         // D14(6): the explicit drain also settles the handler body if it gets posted to the view
         // model's captured context (the D9 fix) instead of running inline; a no-op against today.
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
-        context.Drain();
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         AssertCcusageRows(vm.ClaudeTab, "1,000 · $1.23", "9,999 · $10.50"); // C9: claude ← claude
         AssertCcusageRows(vm.OpenAiTab, "2,000 · $0.50", "12.9K · $11.00"); // C9: openai ← codex
@@ -156,8 +155,7 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
 
         await vm.RefreshAsync();
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
-        context.Drain(); // D14(6): settle posted handler work explicitly (see the other test here)
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         foreach (var tab in vm.ProviderTabs)
         {
@@ -175,8 +173,7 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
 
         await vm.RefreshAsync();
         Assert.NotNull(vm.AgentUsageTask);
-        await vm.AgentUsageTask!;
-        context.Drain(); // D14(6): the second Updated settles the same way
+        await SettleAgentUsageAsync(vm, context); // D16: pumps the captured context until the task completes
 
         Assert.Equal(2, fake.ReadCount);
 
@@ -246,6 +243,25 @@ public sealed class MainWindowViewModelAgentUsageMappingTests
 
         public Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
             => Handler(request, cancellationToken);
+    }
+
+    /// <summary>D16: waits for <c>vm.AgentUsageTask</c> while pumping the view model's captured context,
+    /// bounded. A refresh entered with no <see cref="SynchronizationContext.Current"/> (a test
+    /// continuation after an await — xUnit's context is gone after the first hop) now has its handler
+    /// POSTED to that context, so awaiting the task without draining it first would hang.</summary>
+    private static async Task SettleAgentUsageAsync(MainWindowViewModel vm, QueuedSyncContext context)
+    {
+        var task = vm.AgentUsageTask!;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (!task.IsCompleted)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for AgentUsageTask while pumping the captured context.");
+            context.Drain();
+            await Task.WhenAny(task, Task.Delay(5));
+        }
+
+        await task;
+        context.Drain();
     }
 
     /// <summary>R-017 F24 pattern (same hand-written context as MainWindowViewModelOpenCodeChartWiringTests
