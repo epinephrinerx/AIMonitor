@@ -32,7 +32,7 @@ public sealed class ProviderConnectionStore
     {
         var id = NormalizeProviderId(providerId);
 
-        if (id == "agy")
+        if (id is "agy" or "opencode")
         {
             return new ProviderConnection(null, "");
         }
@@ -79,7 +79,7 @@ public sealed class ProviderConnectionStore
     {
         var id = NormalizeProviderId(providerId);
 
-        if (id == "agy")
+        if (id is "agy" or "opencode")
         {
             var sanitizedKey = SanitizeKey(typedKey);
             if (!string.IsNullOrEmpty(sanitizedKey))
@@ -152,7 +152,7 @@ public sealed class ProviderConnectionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
         var normalized = providerId.Trim().ToLowerInvariant();
-        if (normalized is not ("claude" or "openai" or "agy" or "gemini"))
+        if (normalized is not ("claude" or "openai" or "agy" or "gemini" or "opencode"))
         {
             throw new ArgumentException($"Unknown provider '{providerId}'. Supported providers are claude, openai, and agy.", nameof(providerId));
         }

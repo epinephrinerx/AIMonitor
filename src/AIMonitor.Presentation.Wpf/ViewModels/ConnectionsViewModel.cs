@@ -3,6 +3,8 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 using System.Windows.Input;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
+using AIMonitor.Application.OpenCode;
+using AIMonitor.Application.AgentUsage;
 
 /// <summary>
 /// ViewModel for the Connections landing page showing the status of all supported AI provider connections.
@@ -15,6 +17,7 @@ public sealed class ConnectionsViewModel : ViewModelBase
     public ConnectionCardViewModel ClaudeCard { get; }
     public ConnectionCardViewModel OpenAiCard { get; }
     public ConnectionCardViewModel AgyCard { get; }
+    public ConnectionCardViewModel OpenCodeCard { get; }
     public IReadOnlyList<ConnectionCardViewModel> Cards { get; }
 
     /// <summary>
@@ -68,7 +71,9 @@ public sealed class ConnectionsViewModel : ViewModelBase
         ClaudeCard = new ConnectionCardViewModel(ProviderMeta.Claude);
         OpenAiCard = new ConnectionCardViewModel(ProviderMeta.OpenAi);
         AgyCard = new ConnectionCardViewModel(ProviderMeta.Agy);
-        Cards = [ClaudeCard, OpenAiCard, AgyCard];
+        OpenCodeCard = new ConnectionCardViewModel(ProviderMeta.OpenCode);
+        OpenCodeCard.SetBadgeSeriesIndex(3);
+        Cards = [ClaudeCard, OpenAiCard, AgyCard, OpenCodeCard];
 
         foreach (var card in Cards)
         {
@@ -80,6 +85,17 @@ public sealed class ConnectionsViewModel : ViewModelBase
         OpenDashboardCommand = new RelayCommand(() => OpenDashboardRequested?.Invoke());
 
         _settingsSession.Changed += OnSettingsChanged;
+        UpdateOpenCode(null);
+    }
+
+    public string OtherAgentsStatus { get; private set; } = "Checking ccusage…";
+    public IReadOnlyList<OtherAgentRow> OtherAgents { get; private set; } = [];
+    public void UpdateOpenCode(OpenCodeAuthStatus? status) => OpenCodeCard.UpdateOpenCode(status);
+    public void UpdateOtherAgents(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
+        var result = OtherAgentsPresenter.Build(lastGood, lastError);
+        OtherAgentsStatus = result.Status; OtherAgents = result.Rows;
+        OnPropertyChanged(nameof(OtherAgentsStatus)); OnPropertyChanged(nameof(OtherAgents));
     }
 
     private void OnSettingsChanged(AppSettings settings)
@@ -101,7 +117,7 @@ public sealed class ConnectionsViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(snapshots);
 
-        foreach (var card in Cards)
+        foreach (var card in new[] { ClaudeCard, OpenAiCard, AgyCard })
         {
             if (snapshots.TryGetValue(card.Meta.Id, out var snapshot))
             {
