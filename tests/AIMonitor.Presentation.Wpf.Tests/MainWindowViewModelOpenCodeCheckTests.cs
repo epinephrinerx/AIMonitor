@@ -29,10 +29,6 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
 
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
 
-    /// <summary>The only wall-clock wait left: how long an "an extra read must NOT happen" check watches. A correct
-    /// implementation can never fail it; it is long (not 300 ms) so a late extra read is still seen.</summary>
-    private static readonly TimeSpan AbsenceBound = TimeSpan.FromSeconds(2);
-
     private static OpenCodeAuthStatus Connected(string name, string kind = "OAuth", string source = "opencode auth list") =>
         new(true, source, [new OpenCodeSignIn(name, kind)], false, "");
 
@@ -259,8 +255,8 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
         Assert.Equal("Signed in: Read2 (OAuth)", h.Vm.Connections.OpenCodeCard.Account);
         Assert.Equal(2, reader.CallCount);
 
-        // No third read follows (see AssertQuiescentAsync).
-        await AssertQuiescentAsync(h, reader, expectedCalls: 2);
+        // No third read follows (see AssertQuiescentAsync): the one loop that ran both reads ends.
+        await AssertQuiescentAsync(h, reader, expectedCalls: 2, loopsEnded: 1);
     }
 
     [Fact]
@@ -296,7 +292,7 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
         await h.Context!.WaitForPostsAsync(1);
         h.Context.Drain();
 
-        await AssertQuiescentAsync(h, reader, expectedCalls: 1);
+        await AssertQuiescentAsync(h, reader, expectedCalls: 1, loopsEnded: 1);
     }
 
     // ── provider refresh never starts a check ───────────────────────────────────
@@ -402,24 +398,24 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
     }
 
     /// <summary>
-    /// "No extra read ran" after <paramref name="expectedCalls"/> reads. The view model exposes no "loop ended"
-    /// signal, so this is the one place with a bounded watch (<see cref="AbsenceBound"/>); around it the checks are
-    /// signal-driven: the context is drained so the loop can finish, a follow-up request must start exactly one
-    /// more read (the in-flight flag was released) which is completed and delivered, and only then is the watch run.
+    /// "No extra read ran" after <paramref name="expectedCalls"/> reads, signal-driven (J5/J6): the view model's
+    /// loop-ended hook fires once per read loop, after the in-flight flag was cleared. The wait is for
+    /// <paramref name="loopsEnded"/> loop ends; an erroneous extra read would be held pending by the fake, so its
+    /// loop would never end and the wait would time out. Then a fence request must start exactly one more read (the
+    /// flag was released), which is completed, delivered and awaited the same way.
     /// </summary>
-    private static async Task AssertQuiescentAsync(VmHarness h, FakeOpenCodeReader reader, int expectedCalls)
+    private static async Task AssertQuiescentAsync(VmHarness h, FakeOpenCodeReader reader, int expectedCalls, int loopsEnded)
     {
-        h.Context!.Drain();
+        await h.WaitForLoopEndsAsync(loopsEnded);
+        Assert.Equal(expectedCalls, reader.CallCount);
+
         h.Vm.RequestOpenCodeCheck();
         await PumpUntilCallAsync(h, reader, expectedCalls + 1);
         reader.Complete(expectedCalls, Connected("Fence"));
-        await h.Context.WaitForPostsAsync(expectedCalls + 1);
-        h.Context.Drain();
+        await h.Context!.WaitForPostsAsync(expectedCalls + 1);
+        await h.WaitForLoopEndsAsync(loopsEnded + 1);
 
         Assert.Equal("Signed in: Fence (OAuth)", h.Vm.Connections.OpenCodeCard.Account);
-        Assert.False(
-            await reader.TryWaitForCallAsync(expectedCalls + 2, AbsenceBound),
-            $"An unexpected extra read ran after read #{expectedCalls}.");
         Assert.Equal(expectedCalls + 1, reader.CallCount);
     }
 
@@ -489,6 +485,15 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
 
         public CountingClient Claude { get; }
 
+        /// <summary>Counts every <c>OpenCodeCheckLoopEndedHook</c> call (one per read loop run, J5).</summary>
+        public LoopEndedSignal LoopEnds { get; } = new();
+
+        /// <summary>Optional test behaviour run inside the hook after it was counted, given the 1-based loop number.</summary>
+        public Func<int, Task>? OnLoopEnded { get; set; }
+
+        /// <summary>Waits (pumping the queued context like a UI thread) until <paramref name="total"/> loops ended.</summary>
+        public Task WaitForLoopEndsAsync(int total) => LoopEnds.WaitForAsync(total, () => Context?.Drain());
+
         /// <summary>The ONLY place that passes the reader to the view model (assumed 5th positional parameter).</summary>
         public static VmHarness Create(IOpenCodeAuthReader? reader, bool queuedContext = true, Task? claudeGate = null)
         {
@@ -509,11 +514,23 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
             {
                 var vm = new MainWindowViewModel(coordinator, session, null, null, reader);
                 context?.MarkBaseline();
-                return new VmHarness(vm, context, claude, session, coordinator);
+                var harness = new VmHarness(vm, context, claude, session, coordinator);
+                vm.OpenCodeCheckLoopEndedHook = harness.RunLoopEndedHookAsync;
+                return harness;
             }
             finally
             {
                 SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        }
+
+        private async Task RunLoopEndedHookAsync()
+        {
+            var number = LoopEnds.Raise();
+            var custom = OnLoopEnded;
+            if (custom is not null)
+            {
+                await custom(number);
             }
         }
 
@@ -610,6 +627,16 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
             }
         }
 
+        /// <summary>Ends the read as canceled (a canceled task, J4).</summary>
+        public void Cancel(int index)
+        {
+            lock (_gate)
+            {
+                _running--;
+                _calls[index].SetCanceled();
+            }
+        }
+
         public async Task WaitForCallsAsync(int count)
         {
             Assert.True(await TryWaitForCallAsync(count, Bound), $"Timed out waiting for read #{count}.");
@@ -628,6 +655,39 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
             }
 
             return true;
+        }
+    }
+
+    /// <summary>Counts loop-ended hook calls and lets a test wait for a total.</summary>
+    private sealed class LoopEndedSignal
+    {
+        private readonly SemaphoreSlim _ended = new(0);
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        /// <summary>Counts one loop end and returns its 1-based number.</summary>
+        public int Raise()
+        {
+            var number = Interlocked.Increment(ref _count);
+            _ended.Release();
+            return number;
+        }
+
+        public async Task WaitForAsync(int total, Action pump)
+        {
+            var deadline = DateTime.UtcNow + Bound;
+            while (Count < total)
+            {
+                pump();
+                if (Count >= total)
+                {
+                    return;
+                }
+
+                Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for read loop end #{total} (saw {Count}).");
+                await _ended.WaitAsync(TimeSpan.FromMilliseconds(20));
+            }
         }
     }
 

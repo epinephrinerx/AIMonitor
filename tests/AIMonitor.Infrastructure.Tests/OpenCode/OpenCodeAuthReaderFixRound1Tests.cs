@@ -16,6 +16,13 @@ public sealed class OpenCodeAuthReaderFixRound1Tests
     private static readonly string[] GoodAuthPairs = ["anthropic|OAuth", "openai|API key"];
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ShortDeadline = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>J6: a deadline a step that MUST succeed runs under: far above any scheduling stall on a loaded CI
+    /// machine (the 200 ms one is only for the step that is meant to time out).</summary>
+    private static readonly TimeSpan MustSucceedDeadline = TimeSpan.FromSeconds(2);
+
+    /// <summary>Longer than <see cref="MustSucceedDeadline"/> by a margin, so the other command proves independence.</summary>
+    private static readonly TimeSpan SlowerThanTheMustSucceedDeadline = TimeSpan.FromMilliseconds(2500);
     private const int OneMegabytePlusOne = (1024 * 1024) + 1;
 
     // ── H1: caller cancellation propagates ──────────────────────────────────────
@@ -463,10 +470,10 @@ public sealed class OpenCodeAuthReaderFixRound1Tests
     {
         // The `--version` deadline is short, the `auth list` deadline is long: an `auth list` that takes longer than
         // the version deadline must still succeed (and the other way round in the next test).
-        var h = new ReaderHarness { VersionDeadline = ShortDeadline, AuthListDeadline = TimeSpan.FromSeconds(30) };
+        var h = new ReaderHarness { VersionDeadline = MustSucceedDeadline, AuthListDeadline = TimeSpan.FromSeconds(30) };
         h.SetVersion("2.2.7");
         h.OnList = () => new FakeOpenCodeProcess(
-            new DelayedReader(TimeSpan.FromMilliseconds(900), """[{"id":"a","name":"Anthropic","connections":[{"type":"credential","method":"oauth"}]}]"""),
+            new DelayedReader(SlowerThanTheMustSucceedDeadline, """[{"id":"a","name":"Anthropic","connections":[{"type":"credential","method":"oauth"}]}]"""),
             new StringReader(""));
 
         var status = await h.ReadAsync().WaitAsync(Bound);
@@ -478,13 +485,13 @@ public sealed class OpenCodeAuthReaderFixRound1Tests
     [Fact]
     public async Task InjectedVersionDeadline_IsLongerThanTheAuthListOne_Independently_H15()
     {
-        var h = new ReaderHarness { VersionDeadline = TimeSpan.FromSeconds(30), AuthListDeadline = ShortDeadline };
-        h.OnVersion = () => new FakeOpenCodeProcess(new DelayedReader(TimeSpan.FromMilliseconds(900), "2.2.7"), new StringReader(""));
+        var h = new ReaderHarness { VersionDeadline = TimeSpan.FromSeconds(30), AuthListDeadline = MustSucceedDeadline };
+        h.OnVersion = () => new FakeOpenCodeProcess(new DelayedReader(SlowerThanTheMustSucceedDeadline, "2.2.7"), new StringReader(""));
         h.OnList = () => new FakeOpenCodeProcess("[]");
 
         var status = await h.ReadAsync().WaitAsync(Bound);
 
-        Assert.Equal("opencode auth list", status.Source); // version took 900 ms > 200 ms and still parsed as 2.x
+        Assert.Equal("opencode auth list", status.Source); // the version took longer than the list deadline and still parsed as 2.x
         Assert.Empty(status.SignIns);
     }
 

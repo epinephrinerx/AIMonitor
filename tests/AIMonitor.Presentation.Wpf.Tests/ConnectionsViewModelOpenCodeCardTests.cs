@@ -385,6 +385,122 @@ public sealed class ConnectionsViewModelOpenCodeCardTests
         Assert.Equal(checking, Chips(vm.OpenCodeCard));
     }
 
+    // ── J3: the chip notifications are raised after StateWord has its final value ─
+
+    public enum CardTarget
+    {
+        Checking,
+        NotInstalled,
+        ZeroSignIns,
+        Error,
+        Connected,
+    }
+
+    private static void Apply(ConnectionsViewModel vm, CardTarget target)
+    {
+        switch (target)
+        {
+            case CardTarget.Checking:
+                vm.UpdateOpenCode(null);
+                break;
+            case CardTarget.NotInstalled:
+                vm.UpdateOpenCode(Status(installed: false, source: ""));
+                break;
+            case CardTarget.ZeroSignIns:
+                vm.UpdateOpenCode(Status());
+                break;
+            case CardTarget.Error:
+                vm.UpdateOpenCode(Status(error: "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."));
+                break;
+            default:
+                vm.UpdateOpenCode(Status(signIns: [("Anthropic", "OAuth")]));
+                break;
+        }
+    }
+
+    private static string WordOf(CardTarget target) => target switch
+    {
+        CardTarget.Checking => "Checking...",
+        CardTarget.NotInstalled => "Not connected",
+        CardTarget.ZeroSignIns => "Not connected",
+        CardTarget.Error => "Unavailable",
+        _ => "Connected",
+    };
+
+    /// <summary>The colours a card in that state must show, taken from independent references (the Connected green
+    /// from the palette; every other state from a card of another provider that really is in that state).</summary>
+    private static (System.Windows.Media.Color Chip, System.Windows.Media.Color Tint) ExpectedChips(CardTarget target)
+    {
+        switch (target)
+        {
+            case CardTarget.Connected:
+                var good = ThemePalette.StatusGood;
+                return (
+                    System.Windows.Media.Color.FromArgb(0xFF, good.R, good.G, good.B),
+                    System.Windows.Media.Color.FromArgb(0x24, good.R, good.G, good.B));
+            case CardTarget.Checking:
+                return Chips(new ConnectionCardViewModel(ProviderMeta.Agy));
+            case CardTarget.Error:
+                var unavailable = new ConnectionCardViewModel(ProviderMeta.Agy);
+                unavailable.SetUnavailable("x");
+                return Chips(unavailable);
+            default:
+                var vm = CreateViewModel();
+                vm.Update(new Dictionary<string, ProviderSnapshot>
+                {
+                    ["openai"] = new ProviderSnapshot("openai", configured: true, detection: Detection("openai", DetectionState.NotConnected)),
+                });
+                return Chips(vm.OpenAiCard);
+        }
+    }
+
+    [Theory]
+    [InlineData(CardTarget.Connected, CardTarget.Checking)] // UpdateOpenCode(null)
+    [InlineData(CardTarget.Connected, CardTarget.NotInstalled)]
+    [InlineData(CardTarget.Connected, CardTarget.ZeroSignIns)]
+    [InlineData(CardTarget.Connected, CardTarget.Error)]
+    [InlineData(CardTarget.Checking, CardTarget.Connected)]
+    [InlineData(CardTarget.NotInstalled, CardTarget.Connected)]
+    [InlineData(CardTarget.ZeroSignIns, CardTarget.Connected)]
+    [InlineData(CardTarget.Error, CardTarget.Connected)]
+    [InlineData(CardTarget.Error, CardTarget.NotInstalled)]
+    [InlineData(CardTarget.NotInstalled, CardTarget.Error)]
+    public void ChipNotifications_ReadTheFinalColour_InsideTheirHandlers_J3(CardTarget from, CardTarget to)
+    {
+        var vm = CreateViewModel();
+        Apply(vm, from); // a new card is already "Checking..."
+        var card = vm.OpenCodeCard;
+        Assert.Equal(WordOf(from), card.StateWord);
+
+        var seen = new List<(string Property, string Word, System.Windows.Media.Color Colour)>();
+        card.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConnectionCardViewModel.StateBrush))
+            {
+                seen.Add((e.PropertyName, card.StateWord, ((SolidColorBrush)card.StateBrush).Color));
+            }
+            else if (e.PropertyName == nameof(ConnectionCardViewModel.StateTint))
+            {
+                seen.Add((e.PropertyName, card.StateWord, ((SolidColorBrush)card.StateTint).Color));
+            }
+        };
+
+        Apply(vm, to);
+
+        var expected = ExpectedChips(to);
+        Assert.Equal(WordOf(to), card.StateWord);
+        Assert.Equal(expected, Chips(card));
+
+        // The value a bound view reads in the LAST notification of each property is the final colour: the
+        // notification must not be raised before StateWord (which the colour derives from) has its final value.
+        var lastBrush = seen.Last(x => x.Property == nameof(ConnectionCardViewModel.StateBrush));
+        var lastTint = seen.Last(x => x.Property == nameof(ConnectionCardViewModel.StateTint));
+        Assert.Equal(expected.Chip, lastBrush.Colour);
+        Assert.Equal(expected.Tint, lastTint.Colour);
+        Assert.Equal(WordOf(to), lastBrush.Word);
+        Assert.Equal(WordOf(to), lastTint.Word);
+    }
+
     // ── sentinels through UpdateOpenCode (F8: what the card may show verbatim) ───
 
     private const string SentinelSource = "SENTINEL-SOURCE-9c41d7";

@@ -52,12 +52,17 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
         reader.Complete(1, Connected("ReadB"));
         await reader.WaitForCallsAsync(3); // D's rerun
         reader.Complete(2, Connected("ReadD"));
-        Assert.False(await reader.TryWaitForCallAsync(4, AbsenceBound), "an extra read ran");
+
+        // The loop ends (loop-ended hook, J5) without an extra read: this CallCount assert is the whole "no extra
+        // read" check (J6: no 2 s watch repeating it). An extra read would be held pending and the wait would fail.
+        await h.WaitForLoopEndsAsync(1);
+        Assert.Equal(3, reader.CallCount);
 
         // The flag was released exactly once by its owner: a fresh request starts a fresh read now.
         h.Vm.RequestOpenCodeCheck();
         await reader.WaitForCallsAsync(4);
         reader.Complete(3, Connected("ReadE"));
+        await h.WaitForLoopEndsAsync(2);
         Assert.Equal(1, reader.MaxConcurrent);
         Assert.Equal(4, reader.CallCount);
     }

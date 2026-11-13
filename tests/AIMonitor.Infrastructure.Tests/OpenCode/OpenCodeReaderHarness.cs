@@ -113,6 +113,19 @@ internal sealed class StallingReader(bool honorCancellation) : ScriptedReader
     protected override void Wake() => _released.TrySetResult();
 }
 
+/// <summary>A stream that never produces anything and never ends: it ignores its token AND the kill (J1: a pipe
+/// whose read cannot be interrupted, held open by a grandchild that survives the kill).</summary>
+internal sealed class NeverEndingReader : ScriptedReader
+{
+    private readonly TaskCompletionSource _never = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    protected override async Task<int> ReadCoreAsync(Memory<char> buffer, CancellationToken cancellationToken)
+    {
+        await _never.Task.ConfigureAwait(false);
+        return 0;
+    }
+}
+
 internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
 {
     private readonly TaskCompletionSource _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -122,12 +135,13 @@ internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
     {
     }
 
-    public FakeOpenCodeProcess(TextReader output, TextReader error, int exitCode = 0, bool hang = false)
+    public FakeOpenCodeProcess(TextReader output, TextReader error, int exitCode = 0, bool hang = false, bool exitIgnoresCancellation = false)
     {
         Output = output;
         Error = error;
         ExitCode = exitCode;
         Hang = hang;
+        ExitIgnoresCancellation = exitIgnoresCancellation;
     }
 
     public TextReader Output { get; }
@@ -137,6 +151,10 @@ internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
     public int ExitCode { get; }
 
     public bool Hang { get; }
+
+    /// <summary>J1: the wait for exit never completes and ignores its token, even after the kill (the process object
+    /// is wedged); only the reader's own bound can end the wait.</summary>
+    public bool ExitIgnoresCancellation { get; }
 
     public bool Killed { get; private set; }
 
@@ -148,6 +166,11 @@ internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
     public Task WaitForExitAsync(CancellationToken cancellationToken)
     {
         WaitStarted.TrySetResult();
+        if (ExitIgnoresCancellation)
+        {
+            return new TaskCompletionSource().Task;
+        }
+
         return Hang ? _exit.Task.WaitAsync(cancellationToken) : Task.CompletedTask;
     }
 
