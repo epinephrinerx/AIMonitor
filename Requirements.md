@@ -117,7 +117,7 @@
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว |
+| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R020_R021.md`, เฟส 3) |
 | วันที่ | 2026-10-01 |
 | แตะส่วนไหน | วิธีทำงานของ agent ทุกตัวใน `Docs/AI_WORKFLOW.md` |
 | เกี่ยวกับ | [[R-002]] |
@@ -357,7 +357,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว |
+| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R020_R021.md`, เฟส 3) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | หน้า Sign-in / Connections (`ConnectionsPage`) · ชื่อ agent ของ ccusage (`AgentUsagePresenter`) |
 | เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-020]] · [[R-008]] |
