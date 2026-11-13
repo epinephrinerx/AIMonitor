@@ -225,7 +225,9 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         Assert.Equal(1, reader.CallCount); // never a second read while one is in flight
 
         reader.Complete(0, Connected("Read1"));
-        await reader.WaitForCallsAsync(2); // the single rerun
+        // The rerun may start only after the first result was delivered to the view model's context, so the
+        // test pumps that context (like a UI thread) while it waits for the single rerun.
+        await PumpUntilCallAsync(h, reader, 2);
         reader.Complete(1, Connected("Read2"));
         await h.Context!.WaitForPostsAsync(2);
         h.Context.Drain();
@@ -376,6 +378,21 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         await h.Claude.FirstCall.WaitAsync(Bound);
 
         Assert.Equal(0, reader.CallCount);
+    }
+
+    private static async Task PumpUntilCallAsync(VmHarness h, FakeOpenCodeReader reader, int count)
+    {
+        var deadline = DateTime.UtcNow + Bound;
+        while (true)
+        {
+            h.Context!.Drain();
+            if (await reader.TryWaitForCallAsync(count, TimeSpan.FromMilliseconds(20)))
+            {
+                return;
+            }
+
+            Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for read #{count} while pumping the context.");
+        }
     }
 
     // ── harness ─────────────────────────────────────────────────────────────────

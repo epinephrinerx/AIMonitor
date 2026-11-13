@@ -129,12 +129,14 @@ public sealed class OpenCodeAuthReaderSecretTests
     public async Task SentinelInVersionStdoutNoise_NeverAppears_F5()
     {
         var h = new ReaderHarness();
-        h.OnVersion = () => new FakeOpenCodeProcess($"{Secret} banner without a version number\n");
+        // The text must have NO digit (F5: "its text has no digit -> version unknown"), so this sentinel has none.
+        const string noDigitSecret = "SENTINEL-SECRET-QWERTY";
+        h.OnVersion = () => new FakeOpenCodeProcess($"{noDigitSecret} banner without a version number\n");
 
         var status = await h.ReadAsync();
 
         Assert.Equal(ReaderHarness.ExpectedErrorText, status.Error); // unknown version + no auth.json -> Error
-        ReaderHarness.AssertNoLeak(status, Needles);
+        ReaderHarness.AssertNoLeak(status, noDigitSecret, "QWERTY");
     }
 
     [Fact]
