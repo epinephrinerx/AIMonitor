@@ -10,6 +10,7 @@ using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Version;
 using AIMonitor.Infrastructure.AgentUsage;
+using AIMonitor.Infrastructure.OpenCode;
 using AIMonitor.Infrastructure.Providers.Claude;
 using AIMonitor.Infrastructure.Providers.Agy;
 using AIMonitor.Infrastructure.Providers.OpenAi;
@@ -168,7 +169,7 @@ public partial class App : System.Windows.Application
         _refreshCoordinator = new LatestRefreshCoordinator(refreshUseCase);
 
         // 5. ViewModels
-        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, agentUsage: _agentUsageSource);
+        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, agentUsage: _agentUsageSource, openCodeAuthReader: new OpenCodeAuthReader());
         _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
         _mainViewModel.RequestOpenAbout += OpenAboutDialog;
         _mainViewModel.RequestCheckUpdates += () => _ = _updateCoordinator?.CheckAsync(interactive: true);
@@ -223,6 +224,7 @@ public partial class App : System.Windows.Application
 
         // Initial background fetch
         _ = _mainViewModel.RefreshAsync();
+        _mainViewModel.RequestOpenCodeCheck();
         _ = _updateCoordinator.CheckAsync(interactive: false);
 
         _settingsSession.Changed += OnSettingsChanged;

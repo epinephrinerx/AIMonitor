@@ -1,6 +1,7 @@
 using System.Windows.Input;
 using AIMonitor.Application.AgentUsage;
 using AIMonitor.Application.Providers;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Tray;
@@ -15,6 +16,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly SynchronizationContext? _uiContext;
     private readonly CachedAgentUsageSource? _agentUsageSource;
     private readonly AgentUsageRefresher? _agentUsageRefresher;
+    private readonly IOpenCodeAuthReader? _openCodeAuthReader;
+    private bool _openCodeCheckInFlight;
+    private bool _openCodeCheckPending;
+    private readonly object _openCodeCheckGate = new();
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
     private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
@@ -46,13 +51,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         LatestRefreshCoordinator refreshCoordinator,
         SettingsSession settingsSession,
         ITrayReadingsSink? trayHost = null,
-        CachedAgentUsageSource? agentUsage = null)
+        CachedAgentUsageSource? agentUsage = null,
+        IOpenCodeAuthReader? openCodeAuthReader = null)
     {
         _refreshCoordinator = refreshCoordinator ?? throw new ArgumentNullException(nameof(refreshCoordinator));
         _settingsSession = settingsSession ?? throw new ArgumentNullException(nameof(settingsSession));
         _uiContext = SynchronizationContext.Current;
         _traySink = trayHost;
         _agentUsageSource = agentUsage;
+        _openCodeAuthReader = openCodeAuthReader;
 
         ClaudeTab = new ProviderTabViewModel("claude", "Claude");
         OpenAiTab = new ProviderTabViewModel("openai", "OpenAI / Codex");
@@ -108,7 +115,12 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         Connections = new ConnectionsViewModel(_settingsSession);
         Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
-        Connections.RedetectRequested += async id => await RefreshAsync(id);
+        Connections.RedetectRequested += async id =>
+        {
+            if (id is null) { await RefreshAsync(null); RequestOpenCodeCheck(); }
+            else if (string.Equals(id, "opencode", StringComparison.OrdinalIgnoreCase)) RequestOpenCodeCheck();
+            else await RefreshAsync(id);
+        };
         Connections.OpenDashboardRequested += () => IsConnectionsPageVisible = false;
 
         ExitCommand = new RelayCommand(() => RequestExit?.Invoke());
@@ -444,6 +456,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         // The refresher posts this handler to the context captured for its current run.
         // E2: keep the last pair so a live budget change can rebuild the OpenCode tab without
         // running ccusage again.
+        try { Connections.UpdateOtherAgents(lastGood, lastError); }
+        catch (Exception) { }
         _lastAgentUsageReport = lastGood;
         _lastAgentUsageError = lastError;
 
@@ -460,6 +474,48 @@ public sealed class MainWindowViewModel : ViewModelBase
         // R-018 A3/D13: recompose the AGY tab from the raw snapshot and the fresh report, after
         // OpenCode/Overview so an AGY failure cannot stop the other tabs.
         UpdateAgyTab(today, now);
+    }
+
+    public void RequestOpenCodeCheck()
+    {
+        if (_openCodeAuthReader is null) return;
+        lock (_openCodeCheckGate)
+        {
+            if (_openCodeCheckInFlight) { _openCodeCheckPending = true; return; }
+            _openCodeCheckInFlight = true;
+        }
+        _ = RunOpenCodeCheckAsync();
+    }
+
+    private async Task RunOpenCodeCheckAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                OpenCodeAuthStatus status;
+                try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
+                await DeliverOpenCodeStatusAsync(status).ConfigureAwait(false);
+                lock (_openCodeCheckGate)
+                {
+                    if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
+                    _openCodeCheckInFlight = false;
+                    return;
+                }
+            }
+        }
+        finally { lock (_openCodeCheckGate) _openCodeCheckInFlight = false; }
+    }
+
+    private Task DeliverOpenCodeStatusAsync(OpenCodeAuthStatus status)
+    {
+        if (_uiContext is null || ReferenceEquals(SynchronizationContext.Current, _uiContext))
+        { Connections.UpdateOpenCode(status); return Task.CompletedTask; }
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _uiContext.Post(_ => { try { Connections.UpdateOpenCode(status); completion.SetResult(); } catch (Exception ex) { completion.SetException(ex); } }, null);
+        return completion.Task;
     }
 
     /// <summary>
