@@ -117,7 +117,7 @@
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R020_R021.md`, เฟส 3) |
+| สถานะ | ✅ ตกลงแล้ว |
 | วันที่ | 2026-10-01 |
 | แตะส่วนไหน | วิธีทำงานของ agent ทุกตัวใน `Docs/AI_WORKFLOW.md` |
 | เกี่ยวกับ | [[R-002]] |
@@ -357,7 +357,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R020_R021.md`, เฟส 3) |
+| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ f339f07 เมื่อ 2026-11-13 · spec `Docs/SPEC_R020_R021.md` G1–G6, H11–H12) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | หน้า Sign-in / Connections (`ConnectionsPage`) · ชื่อ agent ของ ccusage (`AgentUsagePresenter`) |
 | เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-020]] · [[R-008]] |
@@ -377,15 +377,21 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่ login แทนผู้ใช้และไม่อ่าน credentials ของ agent เหล่านั้น
 
 **ตรวจรับเมื่อ:**
-- [ ] agent ที่ ccusage พบแต่ไม่มีแท็บ แสดงในส่วน "agent อื่น" พร้อมคำแนะนำ login ของตัวเอง
-- [ ] agent id ที่ไม่รู้จักแสดงชื่อดิบพร้อมคำแนะนำกลาง
-- [ ] ไม่มี ccusage หรือไม่พบ agent อื่น → ส่วนนี้บอกสถานะชัดเจน ไม่ว่างเปล่า
+- [x] agent ที่ ccusage พบแต่ไม่มีแท็บ แสดงในส่วน "agent อื่น" พร้อมคำแนะนำ login ของตัวเอง
+- [x] agent id ที่ไม่รู้จักแสดงชื่อดิบพร้อมคำแนะนำกลาง
+- [x] ไม่มี ccusage หรือไม่พบ agent อื่น → ส่วนนี้บอกสถานะชัดเจน ไม่ว่างเปล่า
+
+ผลทดสอบของผม (2026-11-13, Release บน `f339f07`): build 0/0 · เทสต์ 344 + 225 + 1,659 + 951 ผ่านครบ · format สะอาด · unittest OK
+- ข้อ 1–3: `ConnectionsViewModelOtherAgentsTests` / `MainWindowViewModelOtherAgentsTests` (รายการยกเว้น, dedupe, ลำดับ,
+  คำแนะนำ Copilot/ZCode ตามตัวอักษร, id ดิบ + ข้อความกลาง, ข้อความสถานะทั้งสี่แบบ) · `ConnectionsPageOpenCodeAndOtherAgentsTests`
+- ภาพ ScreenEvidence `connections-light/dark` (synthetic: Copilot, ZCode, `example-agent`) แสดงครบสามแถว
+- ยังต้องให้คุณดูในแอปจริงกับ ccusage จริงของเครื่อง (ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ห้ามหยุด)
 
 ## R-020 · เพิ่มการ login ของ OpenCode
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว |
+| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ f339f07 เมื่อ 2026-11-13 · spec `Docs/SPEC_R020_R021.md` F1–F10, H1–H15, J1–J6, K1–K2) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | หน้า Sign-in / Connections · `ProviderMeta` · ตัวตรวจการติดตั้งและ auth ของ opencode (Infrastructure) |
 | เกี่ยวกับ | [[R-015]] · [[R-019]] · [[R-021]] |
@@ -406,9 +412,19 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่อ่าน log ของ OpenCode (คงตาม R-015)
 
 **ตรวจรับเมื่อ:**
-- [ ] หน้า Connections มีการ์ด OpenCode บอกสถานะติดตั้ง/ไม่ติดตั้ง และรายชื่อ provider ที่ login ไว้
-- [ ] ไม่มีค่า secret ใดจากไฟล์ auth ปรากฏใน UI, log หรือ settings (มีเทสต์ synthetic)
-- [ ] ไม่พบ opencode หรือไม่ได้ login → แสดงคำแนะนำ `opencode auth login` และไม่ error
+- [x] หน้า Connections มีการ์ด OpenCode บอกสถานะติดตั้ง/ไม่ติดตั้ง และรายชื่อ provider ที่ login ไว้
+- [x] ไม่มีค่า secret ใดจากไฟล์ auth ปรากฏใน UI, log หรือ settings (มีเทสต์ synthetic)
+- [x] ไม่พบ opencode หรือไม่ได้ login → แสดงคำแนะนำ `opencode auth login` และไม่ error
+
+ผลทดสอบของผม (2026-11-13, Release บน `f339f07`): build 0/0 · เทสต์ 344 + 225 + 1,659 + 951 ผ่านครบ · format สะอาด · unittest OK
+- ข้อ 1: `ConnectionsViewModelOpenCodeCardTests` (ทุกสถานะของการ์ด, chip เขียวเหมือนการ์ดอื่น) · `OpenCodeAuthReader*Tests`
+  (2.x `auth list`, 1.x `auth.json`, fallback) · ภาพ ScreenEvidence `connections-light/dark` (synthetic: Anthropic (OAuth), OpenAI (API key))
+- ข้อ 2: `OpenCodeAuthReaderSecretTests` (sentinel ในทุกช่อง secret ไม่ปรากฏใน status, `ToString`, Error, exception) ·
+  `ConnectionsViewModelOpenCodeCardTests` (การ์ดแสดงเฉพาะช่องที่ spec อนุญาต) · `ProviderConnectionStoreOpenCodeTests` ·
+  ชื่อที่มี `://` หรือ `@` → "Unnamed provider" — คุณตัดสินให้แยกเทสต์ reader กับการ์ด ไม่ต่อกันเป็นเทสต์เดียว
+- ข้อ 3: `OpenCodeAuthReaderOutcomeTests` (ไม่อยู่ใน PATH, ไม่ได้ login, timeout, cap, JSON ผิด) · การ์ดแสดง `opencode auth login`
+- รีวิว: Reviewer1/Reviewer2 Approve with minors (ปิดใน J/K) · Inspector B Approve (mutant ทุกตัวในรอบสุดท้ายถูกจับ)
+- ยังต้องให้คุณดูในแอปจริงกับ OpenCode จริงของเครื่อง: ผมไม่ได้รัน `opencode` จริง และไม่ได้เปิดแอปตัวใหม่ เพราะตัวที่ติดตั้งไว้ห้ามหยุด
 
 ## R-019 · หน้า login รองรับ API key ของทุกโปรแกรมที่ดึงยอดได้จริง
 
