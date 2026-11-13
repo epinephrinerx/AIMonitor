@@ -20,6 +20,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _openCodeCheckInFlight;
     private bool _openCodeCheckPending;
     private readonly object _openCodeCheckGate = new();
+    internal Task? OpenCodeCheckLoopTask { get; private set; }
     internal Func<Task>? OpenCodeCheckLoopEndedHook { get; set; }
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
@@ -485,7 +486,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (_openCodeCheckInFlight) { _openCodeCheckPending = true; return; }
             _openCodeCheckInFlight = true;
         }
-        _ = RunOpenCodeCheckAsync();
+        OpenCodeCheckLoopTask = RunOpenCodeCheckAsync();
     }
 
     private async Task RunOpenCodeCheckAsync()
