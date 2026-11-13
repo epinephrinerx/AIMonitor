@@ -117,7 +117,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
         Connections.RedetectRequested += async id =>
         {
-            if (id is null) { await RefreshAsync(null); RequestOpenCodeCheck(); }
+            if (id is null) { RequestOpenCodeCheck(); await RefreshAsync(null); }
             else if (string.Equals(id, "opencode", StringComparison.OrdinalIgnoreCase)) RequestOpenCodeCheck();
             else await RefreshAsync(id);
         };
@@ -489,24 +489,21 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task RunOpenCodeCheckAsync()
     {
-        try
+        while (true)
         {
-            while (true)
+            OpenCodeAuthStatus status;
+            try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
+            catch (OperationCanceledException) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
+            catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
+            try { await DeliverOpenCodeStatusAsync(status).ConfigureAwait(false); }
+            catch (Exception) { /* observe delivery failures, then honor a queued rerun */ }
+            lock (_openCodeCheckGate)
             {
-                OpenCodeAuthStatus status;
-                try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
-                catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
-                await DeliverOpenCodeStatusAsync(status).ConfigureAwait(false);
-                lock (_openCodeCheckGate)
-                {
-                    if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
-                    _openCodeCheckInFlight = false;
-                    return;
-                }
+                if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
+                _openCodeCheckInFlight = false;
+                return;
             }
         }
-        finally { lock (_openCodeCheckGate) _openCodeCheckInFlight = false; }
     }
 
     private Task DeliverOpenCodeStatusAsync(OpenCodeAuthStatus status)

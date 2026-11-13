@@ -35,6 +35,9 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
     private System.Windows.Media.Color StateColour()
     {
+        if (string.Equals(Meta.Id, "opencode", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(_stateWord, "Connected", StringComparison.Ordinal) ? ThemePalette.StatusGood : ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted;
+
         if (_detection is not null
             && string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase)
             && _adminOnly
@@ -234,7 +237,6 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     {
         if (status is null) { Update(null); return; }
         Detection = null;
-        RefreshColours();
         ConnectButtonText = "Sign-in help";
         if (!status.Installed) { StateWord = "Not connected"; StateGlyph = "–"; Account = "OpenCode not found on PATH"; SourceLine = "Install OpenCode, then run `opencode auth login`"; }
         else if (!string.IsNullOrEmpty(status.Error)) { StateWord = "Unavailable"; StateGlyph = "!"; Account = "Could not check"; SourceLine = status.Error; }
@@ -246,5 +248,6 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             SourceLine = status.Source == "auth.json" ? "Detected from auth.json" : "Detected from opencode auth list";
             if (status.MayBeOutdated) SourceLine += "  -  may be out of date (OpenCode 2.x keeps sign-ins in its database)";
         }
+        RefreshColours();
     }
 }

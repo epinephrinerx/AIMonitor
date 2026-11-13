@@ -27,6 +27,8 @@ public sealed class ConnectDialogViewModel : ViewModelBase
 
     public bool NeedsKey => Meta.NeedsKey;
 
+    public bool ShowsFoundSection => !string.Equals(Meta.Id, "opencode", StringComparison.OrdinalIgnoreCase);
+
     public bool CanBrowse => Meta.KeyPlaceholder.Contains("json", StringComparison.OrdinalIgnoreCase);
 
     public string Key
