@@ -456,7 +456,7 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ (spec `Docs/SPEC_R018.md`, D1–D9 รับรอง 2026-11-11) |
+| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ 2e995bf เมื่อ 2026-11-13 · spec `Docs/SPEC_R018.md` D1–D18) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | `Controls/GaugeControl.cs` · แท็บ Gemini / AGY (`ProviderTabViewModel`, ข้อมูล ccusage ของ R-014) · ScreenEvidence |
 | เกี่ยวกับ | [[R-004]] · [[R-005]] · [[R-013]] · [[R-014]] |
@@ -476,10 +476,10 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 - ไม่แก้ widget (ตัด "…" อยู่แล้ว)
 
 **ตรวจรับเมื่อ:**
-- [ ] ชื่อ gauge ยาวไม่ล้นการ์ดที่ 1120 px ทั้ง light/dark (synthetic render)
-- [ ] ชื่อสั้นแสดงเหมือนเดิม
-- [ ] แท็บ AGY มีแถวสถิติและกราฟรายวันเมื่อ ccusage มีข้อมูล `antigravity`
-- [ ] ไม่มีข้อมูล `antigravity` → แท็บ AGY แสดงแบบเดิมไม่ error
+- [x] ชื่อ gauge ยาวไม่ล้นการ์ดที่ 1120 px ทั้ง light/dark (synthetic render)
+- [x] ชื่อสั้นแสดงเหมือนเดิม
+- [x] แท็บ AGY มีแถวสถิติและกราฟรายวันเมื่อ ccusage มีข้อมูล `antigravity`
+- [x] ไม่มีข้อมูล `antigravity` → แท็บ AGY แสดงแบบเดิมไม่ error
 
 ## R-015 · gauge ค่าใช้จ่ายของ OpenCode และ tab OpenCode
 
