@@ -12,39 +12,42 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
     private const int AuthFileLimit = 1024 * 1024;
     private readonly Func<string?> _path;
     private readonly Func<string, string?> _environment;
-    private readonly Func<string, long> _fileLength;
-    private readonly Func<string, CancellationToken, Task<byte[]>> _readFile;
+    private readonly Func<string, int, CancellationToken, Task<byte[]?>> _readFile;
     private readonly Func<ProcessStartInfo, IOpenCodeProcess> _start;
 
     public OpenCodeAuthReader() : this(ResolveExecutable, Environment.GetEnvironmentVariable,
-        FileLength, File.ReadAllBytesAsync, info => new OpenCodeProcess(info))
+        ReadFileAsync, info => new OpenCodeProcess(info), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20))
     { }
 
     internal OpenCodeAuthReader(Func<string?> path, Func<string, string?> environment,
-        Func<string, long> fileLength, Func<string, CancellationToken, Task<byte[]>> readFile,
-        Func<ProcessStartInfo, IOpenCodeProcess> start)
+        Func<string, int, CancellationToken, Task<byte[]?>> readFile, Func<ProcessStartInfo, IOpenCodeProcess> start,
+        TimeSpan versionDeadline, TimeSpan authListDeadline)
     {
-        _path = path; _environment = environment; _fileLength = fileLength; _readFile = readFile; _start = start;
+        _path = path; _environment = environment; _readFile = readFile; _start = start;
+        VersionDeadline = versionDeadline; AuthListDeadline = authListDeadline;
     }
+
+    internal TimeSpan VersionDeadline { get; }
+    internal TimeSpan AuthListDeadline { get; }
 
     public async Task<OpenCodeAuthStatus> ReadAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string? executable;
         try { executable = _path(); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception) { executable = null; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { executable = null; }
         if (executable is null) return new(false, "", [], false, "");
 
-        var version = await RunAsync(executable, ["--version"], 10, 4096, cancellationToken).ConfigureAwait(false);
+        var version = await RunAsync(executable, ["--version"], VersionDeadline, 4096, cancellationToken).ConfigureAwait(false);
         var major = version.Success ? ParseMajor(version.Output) : null;
         if (major is >= 2)
         {
-            var auth = await RunAsync(executable, ["auth", "list", "--format", "json"], 20, 256 * 1024, cancellationToken).ConfigureAwait(false);
+            var auth = await RunAsync(executable, ["auth", "list", "--format", "json"], AuthListDeadline, 256 * 1024, cancellationToken).ConfigureAwait(false);
             if (auth.Success)
             {
                 try { return new(true, "opencode auth list", ParseConnections(auth.Output), false, ""); }
-                catch (Exception ex) when (ex is JsonException or InvalidDataException or FormatException) { }
+                catch { /* malformed command output falls back to auth.json */ }
             }
             return await ReadAuthFileAsync(outdated: true, cancellationToken).ConfigureAwait(false);
         }
@@ -56,36 +59,42 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
         try
         {
             var xdg = _environment("XDG_DATA_HOME");
-            var root = !string.IsNullOrWhiteSpace(xdg) && Path.IsPathRooted(xdg)
-                ? xdg : Path.Combine(_environment("USERPROFILE") ?? "", ".local", "share");
+            var root = !string.IsNullOrWhiteSpace(xdg) && Path.IsPathRooted(xdg) && !IsDriveRelative(xdg)
+                ? xdg : GetProfileRoot();
+            if (root is null) return Failed();
             var file = Path.Combine(root, "opencode", "auth.json");
-            var length = _fileLength(file);
-            if (length < 0 && !outdated) return new(true, "auth.json", [], false, "");
-            if (length < 0 || length > AuthFileLimit) return Failed();
-            var bytes = await _readFile(file, ct).ConfigureAwait(false);
+            var bytes = await _readFile(file, AuthFileLimit + 1, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
+            if (bytes is null)
+                return !outdated ? new(true, "auth.json", [], false, "") : Failed();
             if (bytes.Length > AuthFileLimit) return Failed();
-            using var doc = JsonDocument.Parse(bytes);
+            var offset = bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ? 3 : 0;
+            using var doc = JsonDocument.Parse(bytes.AsMemory(offset));
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return Failed();
             var rows = new List<OpenCodeSignIn>();
             foreach (var item in doc.RootElement.EnumerateObject())
             {
-                var name = SafeName(item.Name);
                 var type = item.Value.ValueKind == JsonValueKind.Object && item.Value.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
-                rows.Add(new(name, type switch { "oauth" => "OAuth", "api" => "API key", "wellknown" => "Well-known", _ => "Other" }));
+                rows.Add(new(SafeName(item.Name), KindForType(type)));
             }
-            return new(true, "auth.json", rows, outdated, "");
+            return new(true, "auth.json", Deduplicate(rows), outdated, "");
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception)
-        { return Failed(); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return Failed(); }
     }
 
-    private async Task<(bool Success, string Output)> RunAsync(string executable, string[] args, int seconds, int limit, CancellationToken ct)
+    private string? GetProfileRoot()
+    {
+        var profile = _environment("USERPROFILE");
+        return !string.IsNullOrWhiteSpace(profile) && Path.IsPathRooted(profile) && !IsDriveRelative(profile)
+            ? Path.Combine(profile, ".local", "share") : null;
+    }
+
+    private async Task<(bool Success, string Output)> RunAsync(string executable, string[] args, TimeSpan duration, int limit, CancellationToken ct)
     {
         IOpenCodeProcess? process = null;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
+        deadline.CancelAfter(duration);
         try
         {
             var info = new ProcessStartInfo(executable)
@@ -104,17 +113,26 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
             var stdout = ReadBoundedAsync(process.Output, limit, deadline.Token);
             var stderr = DrainAsync(process.Error, 1024 * 1024, deadline.Token);
             var exited = process.WaitForExitAsync(deadline.Token);
-            var all = Task.WhenAll(stdout, stderr, exited);
-            await Task.WhenAny(all, stdout, stderr).ConfigureAwait(false);
-            if (stdout.IsFaulted) await stdout.ConfigureAwait(false);
-            if (stderr.IsFaulted) await stderr.ConfigureAwait(false);
-            await all.WaitAsync(deadline.Token).ConfigureAwait(false);
+
+            // Observe stdout immediately. In particular, an over-cap stream kills the process
+            // without waiting for exit or stderr, both of which may otherwise remain open.
+            var first = await Task.WhenAny(stdout, exited).WaitAsync(deadline.Token).ConfigureAwait(false);
+            if (first == stdout)
+            {
+                var output = await stdout.ConfigureAwait(false);
+                await exited.WaitAsync(deadline.Token).ConfigureAwait(false);
+                await stderr.WaitAsync(deadline.Token).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                return process.ExitCode == 0 ? (true, output) : (false, "");
+            }
+            await exited.ConfigureAwait(false);
+            await stdout.WaitAsync(deadline.Token).ConfigureAwait(false);
+            await stderr.WaitAsync(deadline.Token).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             return process.ExitCode == 0 ? (true, stdout.Result) : (false, "");
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (false, ""); }
-        catch (Exception)
-        { return (false, ""); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return (false, ""); }
         finally
         {
             deadline.Cancel();
@@ -129,11 +147,20 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
 
     private static async Task<string> ReadBoundedAsync(TextReader reader, int limit, CancellationToken ct)
     {
-        var b = new char[2048]; var sb = new StringBuilder(); var bytes = 0;
-        while (true) { var n = await reader.ReadAsync(b.AsMemory(), ct).ConfigureAwait(false); if (n == 0) return sb.ToString(); bytes += Encoding.UTF8.GetByteCount(b.AsSpan(0, n)); if (bytes > limit) throw new OutputLimitException(); sb.Append(b, 0, n); }
+        var buffer = new char[2048]; var output = new StringBuilder(); var bytes = 0;
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+            if (count == 0) return output.ToString();
+            bytes += Encoding.UTF8.GetByteCount(buffer.AsSpan(0, count));
+            if (bytes > limit) throw new OutputLimitException();
+            output.Append(buffer, 0, count);
+        }
     }
+
     private static async Task DrainAsync(TextReader reader, int limit, CancellationToken ct)
-    { var b = new char[2048]; var total = 0; while (true) { var n = await reader.ReadAsync(b.AsMemory(), ct).ConfigureAwait(false); if (n == 0) return; total = Math.Min(limit, total + n); } }
+    { var buffer = new char[2048]; var total = 0; while (true) { var count = await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false); if (count == 0) return; total = Math.Min(limit, total + count); } }
+
     private static List<OpenCodeSignIn> ParseConnections(string json)
     {
         using var doc = JsonDocument.Parse(json);
@@ -145,7 +172,8 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
             var name = provider.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
             if (string.IsNullOrWhiteSpace(name)) name = provider.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
             if (name is null) throw new InvalidDataException();
-            if (!provider.TryGetProperty("connections", out var connections) || connections.ValueKind != JsonValueKind.Array) continue;
+            if (!provider.TryGetProperty("connections", out var connections)) continue;
+            if (connections.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
             foreach (var connection in connections.EnumerateArray())
             {
                 if (connection.ValueKind != JsonValueKind.Object || !connection.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String) throw new InvalidDataException();
@@ -159,17 +187,45 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
                 rows.Add(new(SafeName(name), kind));
             }
         }
-        return rows;
+        return Deduplicate(rows);
     }
-    private static string SafeName(string? value) => value is not null && Regex.IsMatch(value.Trim(), @"^[A-Za-z0-9][A-Za-z0-9 ._()+/@:-]{0,47}$") ? value.Trim() : "Unnamed provider";
-    private static int? ParseMajor(string output) { var m = Regex.Match(output, @"\d+"); return m.Success && int.TryParse(m.Value, out var value) ? value : null; }
+
+    private static List<OpenCodeSignIn> Deduplicate(IEnumerable<OpenCodeSignIn> rows)
+    {
+        var seen = new HashSet<(string Name, string Kind)>();
+        return rows.Where(row => seen.Add((row.Name, row.Kind))).ToList();
+    }
+    private static string KindForType(string? type) => type switch { "oauth" => "OAuth", "api" => "API key", "wellknown" => "Well-known", _ => "Other" };
+    private static string SafeName(string? value)
+    {
+        var name = value?.Trim();
+        return name is not null && !name.Contains("://", StringComparison.Ordinal) && !name.Contains('@')
+            && Regex.IsMatch(name, @"^[A-Za-z0-9][A-Za-z0-9 ._()+/@:-]{0,47}$") ? name : "Unnamed provider";
+    }
+    private static int? ParseMajor(string output) { var match = Regex.Match(output, @"\d+"); return match.Success && int.TryParse(match.Value, out var value) ? value : null; }
     private static OpenCodeAuthStatus Failed() => new(true, "", [], false, ErrorText);
-    private static long FileLength(string path) { try { return new FileInfo(path).Length; } catch (FileNotFoundException) { return -1; } catch (DirectoryNotFoundException) { return -1; } }
+    internal static async Task<byte[]?> ReadFileAsync(string path, int maxBytes, CancellationToken ct)
+    {
+        try
+        {
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 8192, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var buffer = new byte[maxBytes]; var total = 0;
+            while (total < maxBytes)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(total, maxBytes - total), ct).ConfigureAwait(false);
+                if (read == 0) break;
+                total += read;
+            }
+            return buffer.AsSpan(0, total).ToArray();
+        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
     private static string? ResolveExecutable() => ResolveExecutable(Environment.GetEnvironmentVariable("PATH"), File.Exists);
     internal static string? ResolveExecutable(string? searchPath, Func<string, bool> fileExists)
     {
         foreach (var entry in (searchPath ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        { var dir = entry.Trim().Trim('"'); if (!Path.IsPathRooted(dir) || IsDriveRelative(dir)) continue; foreach (var ext in new[] { "exe", "cmd" }) { var p = Path.Combine(dir, "opencode." + ext); if (fileExists(p)) return p; } }
+        { var dir = entry.Trim().Trim('"'); if (!Path.IsPathRooted(dir) || IsDriveRelative(dir)) continue; foreach (var ext in new[] { "exe", "cmd" }) { var path = Path.Combine(dir, "opencode." + ext); if (fileExists(path)) return path; } }
         return null;
     }
     private static bool IsDriveRelative(string path) => path.Length >= 2 && path[1] == ':' && char.IsLetter(path[0])

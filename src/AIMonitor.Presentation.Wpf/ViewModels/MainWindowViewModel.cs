@@ -20,6 +20,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _openCodeCheckInFlight;
     private bool _openCodeCheckPending;
     private readonly object _openCodeCheckGate = new();
+    internal Task? OpenCodeCheckLoopTask { get; private set; }
+    internal Func<Task>? OpenCodeCheckLoopEndedHook { get; set; }
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
     private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
@@ -117,7 +119,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         Connections.ConnectRequested += id => RequestConnect?.Invoke(id);
         Connections.RedetectRequested += async id =>
         {
-            if (id is null) { await RefreshAsync(null); RequestOpenCodeCheck(); }
+            if (id is null) { RequestOpenCodeCheck(); await RefreshAsync(null); }
             else if (string.Equals(id, "opencode", StringComparison.OrdinalIgnoreCase)) RequestOpenCodeCheck();
             else await RefreshAsync(id);
         };
@@ -484,29 +486,32 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (_openCodeCheckInFlight) { _openCodeCheckPending = true; return; }
             _openCodeCheckInFlight = true;
         }
-        _ = RunOpenCodeCheckAsync();
+        OpenCodeCheckLoopTask = RunOpenCodeCheckAsync();
     }
 
     private async Task RunOpenCodeCheckAsync()
     {
-        try
+        while (true)
         {
-            while (true)
+            OpenCodeAuthStatus? status = null;
+            var canceled = false;
+            try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
+            catch (OperationCanceledException) { canceled = true; }
+            catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
+            if (!canceled)
             {
-                OpenCodeAuthStatus status;
-                try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
-                catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
-                await DeliverOpenCodeStatusAsync(status).ConfigureAwait(false);
-                lock (_openCodeCheckGate)
-                {
-                    if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
-                    _openCodeCheckInFlight = false;
-                    return;
-                }
+                try { await DeliverOpenCodeStatusAsync(status!).ConfigureAwait(false); }
+                catch (Exception) { /* observe delivery failures, then honor a queued rerun */ }
             }
+            lock (_openCodeCheckGate)
+            {
+                if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
+                _openCodeCheckInFlight = false;
+            }
+            try { if (OpenCodeCheckLoopEndedHook is { } hook) await hook().ConfigureAwait(false); }
+            catch (Exception) { /* observe test-hook failures without changing loop state */ }
+            return;
         }
-        finally { lock (_openCodeCheckGate) _openCodeCheckInFlight = false; }
     }
 
     private Task DeliverOpenCodeStatusAsync(OpenCodeAuthStatus status)

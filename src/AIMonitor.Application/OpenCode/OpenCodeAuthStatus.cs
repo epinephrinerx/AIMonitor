@@ -7,7 +7,10 @@ public sealed record OpenCodeAuthStatus(
     string Source,
     IReadOnlyList<OpenCodeSignIn> SignIns,
     bool MayBeOutdated,
-    string Error);
+    string Error)
+{
+    public override string ToString() => $"OpenCodeAuthStatus {{ SignIns = [{string.Join(", ", SignIns.Select(signIn => $"{signIn.Name} ({signIn.Kind})"))}] }}";
+}
 
 public interface IOpenCodeAuthReader
 {
