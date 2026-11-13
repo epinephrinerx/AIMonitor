@@ -145,9 +145,10 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [Fact]
     public async Task VersionTimeout_IsVersionUnknown_KillsAndDisposesTheProcess_F2_F5()
     {
-        // Real 10 s deadline (the value is not injectable): the hung `--version` is killed and the outcome is
-        // "version unknown" -> auth.json with MayBeOutdated.
-        var h = new ReaderHarness();
+        // H15: the `--version` deadline is injected (short here): the hung `--version` is killed at that deadline
+        // and the outcome is "version unknown" -> auth.json with MayBeOutdated. Only the internal deadline is a
+        // failed command; the caller's token is never involved.
+        var h = new ReaderHarness { VersionDeadline = TimeSpan.FromMilliseconds(200) };
         h.OnVersion = () => new FakeOpenCodeProcess("2.2.7\n", hang: true);
         h.SetAuthJson(GoodAuthJson);
 
@@ -341,8 +342,8 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [Fact]
     public async Task AuthListTimeout_FallsBackToAuthJson_KillsAndDisposesTheProcess_F2_F5()
     {
-        // Real 20 s deadline (the value is not injectable).
-        var h = new ReaderHarness();
+        // H15: the `auth list` deadline is injected (short here).
+        var h = new ReaderHarness { AuthListDeadline = TimeSpan.FromMilliseconds(200) };
         h.SetVersion("2.2.7");
         h.OnList = () => new FakeOpenCodeProcess("[]", hang: true);
         h.SetAuthJson(GoodAuthJson);
@@ -359,7 +360,7 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [Fact]
     public async Task AuthListTimeout_WithoutAuthJson_IsAnError_F5()
     {
-        var h = new ReaderHarness();
+        var h = new ReaderHarness { AuthListDeadline = TimeSpan.FromMilliseconds(200) };
         h.SetVersion("2.2.7");
         h.OnList = () => new FakeOpenCodeProcess("[]", hang: true);
 
@@ -641,18 +642,5 @@ public sealed class OpenCodeAuthReaderOutcomeTests
         Assert.True(h.Processes[1].Killed);
     }
 
-    private static async Task WaitForProcessWait(ReaderHarness h, int index)
-    {
-        // Deterministic: the fake completes WaitStarted the moment the reader awaits the process; the process
-        // itself is created by the start function the reader calls. Poll the list with a bounded wait only to
-        // find the process object (it is added by the start callback on the reader's own thread).
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (h.Processes.Count <= index)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "The reader never started the expected process.");
-            await Task.Yield();
-        }
-
-        await h.Processes[index].WaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
-    }
+    private static Task WaitForProcessWait(ReaderHarness h, int index) => h.WaitForProcessAsync(index);
 }

@@ -18,8 +18,13 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// The (a) direction needs UpdateOtherAgents to throw: the test attaches a PropertyChanged handler to
 /// <c>Connections</c> that throws when OtherAgentsStatus/OtherAgents change, which propagates out of
 /// UpdateOtherAgents without any production seam.
-/// Fakes as in the R-014/R-018 view-model tests: no real ccusage, no sleeps; the handler work is posted to the
-/// context the view model captured at construction and settled with an explicit drain.
+/// Fakes as in the R-014/R-018 view-model tests: no real ccusage, no sleeps, no polling; the handler work is posted
+/// to the context the view model captured at construction and settled by draining that context each time it signals
+/// a new post.
+/// Fixed clock (fix round 1): the reports use a fixed past date, never the real date. The OtherAgents rows depend
+/// only on the agent ids, and the "existing tabs still update" checks use outputs that do not depend on "today"
+/// (<c>AllAgentsTab.Months</c> / <c>HasMonths</c>, set by the FIRST existing update). The view model reads the wall
+/// clock only for the date-dependent tab content, which these tests deliberately do not assert.
 /// </summary>
 public sealed class MainWindowViewModelOtherAgentsTests
 {
@@ -32,39 +37,24 @@ public sealed class MainWindowViewModelOtherAgentsTests
     private static AgentUsage Agent(string id, long total = 1_000, decimal? cost = 1.00m) =>
         new(id, new TokenCounts(total, 0, 0, 0, total), [Model(id + "-model", total, cost)]);
 
-    /// <summary>Today: claude, opencode, copilot, zcode. This month: claude. The "other" agents are copilot + zcode.</summary>
-    private static AgentUsageReport ReportWithOthers(DateOnly today) => new(
-        daily: [new DailyAgentUsage(today, [Agent("claude"), Agent("opencode", 8_000, 0.40m), Agent("copilot"), Agent("zcode")])],
-        monthly: [new MonthlyAgentUsage(today.Year, today.Month, [Agent("claude", 9_999, 10.50m)])],
+    private static readonly DateOnly FixedDay = DateOnly.FromDateTime(FixedUtc.UtcDateTime);
+
+    /// <summary>Claude, opencode, copilot, zcode on the fixed day; claude in the month. "Other" = copilot + zcode.</summary>
+    private static AgentUsageReport ReportWithOthers() => new(
+        daily: [new DailyAgentUsage(FixedDay, [Agent("claude"), Agent("opencode", 8_000, 0.40m), Agent("copilot"), Agent("zcode")])],
+        monthly: [new MonthlyAgentUsage(FixedDay.Year, FixedDay.Month, [Agent("claude", 9_999, 10.50m)])],
         sessions: [],
         unpricedModels: [],
         pricing: AgentUsagePricing.OnlineRequested,
         retrievedAt: FixedUtc,
         skippedRows: 0);
-
-    /// <summary>R-018 D13: yesterday's antigravity model has a negative cost, which AgyUsageComposer rejects
-    /// (the AGY tab update, the LAST existing update, throws). Copilot is present in the same report.</summary>
-    private static AgentUsageReport ReportWithRejectedAgyRowAndCopilot(DateOnly today) => new(
-        daily:
-        [
-            new DailyAgentUsage(today, [Agent("antigravity", 20_000, 1.00m), Agent("opencode", 8_000, 0.40m), Agent("copilot")]),
-            new DailyAgentUsage(today.AddDays(-1), [Agent("antigravity", 10_000, -0.25m)]),
-        ],
-        monthly: [],
-        sessions: [],
-        unpricedModels: [],
-        pricing: AgentUsagePricing.OnlineRequested,
-        retrievedAt: FixedUtc,
-        skippedRows: 0);
-
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
 
     // ── delivery and content ────────────────────────────────────────────────────
 
     [Fact]
     public async Task UsageUpdate_FillsOtherAgents_OnTheCapturedContext_G4()
     {
-        await using var h = Harness.Create(_ => Task.FromResult(ReportWithOthers(Today)));
+        await using var h = Harness.Create(_ => Task.FromResult(ReportWithOthers()));
 
         await h.RefreshAsync();
         await h.Context.WaitForPostsAsync(1); // the handler is posted to the construction context
@@ -74,9 +64,8 @@ public sealed class MainWindowViewModelOtherAgentsTests
 
         Assert.Equal("Agents found by ccusage that have no tab of their own:", h.Vm.Connections.OtherAgentsStatus);
         Assert.Equal(new[] { "copilot", "zcode" }, h.Vm.Connections.OtherAgents.Select(r => r.AgentId));
-        // ...and the existing tabs were updated by the same handler run.
-        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
-        Assert.NotEmpty(h.Vm.ClaudeTab.SupplementaryRows);
+        // ...and the existing tabs were updated by the same handler run (a date-independent output).
+        Assert.True(h.Vm.AllAgentsTab.HasMonths);
     }
 
     [Fact]
@@ -99,7 +88,7 @@ public sealed class MainWindowViewModelOtherAgentsTests
         var reads = 0;
         await using var h = Harness.Create(_ =>
             ++reads == 1
-                ? Task.FromResult(ReportWithOthers(Today))
+                ? Task.FromResult(ReportWithOthers())
                 : Task.FromException<AgentUsageReport>(new AgentUsageUnavailableException(AgentUsageErrorKind.Failed, "SENTINEL refresh failed")));
         await h.RefreshAsync();
         await h.SettleAsync();
@@ -120,18 +109,26 @@ public sealed class MainWindowViewModelOtherAgentsTests
     [Fact]
     public async Task ExistingTabUpdateThatThrows_CannotPreventOtherAgentsFromUpdating_G4()
     {
-        await using var h = Harness.Create(_ => Task.FromResult(ReportWithRejectedAgyRowAndCopilot(Today)));
+        // The existing update that throws is the FIRST one (AllAgentsTab.Update): a handler on the tab throws when
+        // its Months change, which propagates out of that update exactly like a failing composition would, and
+        // stops every later existing update. UpdateOtherAgents must already have run (it is called first).
+        await using var h = Harness.Create(_ => Task.FromResult(ReportWithOthers()));
+        var thrown = 0;
+        h.Vm.AllAgentsTab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AllAgentsTabViewModel.Months) or nameof(AllAgentsTabViewModel.HasMonths))
+            {
+                thrown++;
+                throw new InvalidOperationException("synthetic failure inside an existing tab update");
+            }
+        };
 
         await h.RefreshAsync();
-        Assert.Null(await Record.ExceptionAsync(h.SettleAsync));
+        await h.SettleAsync();
 
-        // The AGY composition did throw (R-018 D13: the AGY tab kept its pre-handler state, no history)...
-        Assert.False(h.Vm.AgyTab.HasHistory);
-        // ...yet OtherAgents was updated, because UpdateOtherAgents runs first.
+        Assert.True(thrown >= 1, "The existing tab update was never reached, so the fixture did not exercise the isolation.");
         Assert.Equal("Agents found by ccusage that have no tab of their own:", h.Vm.Connections.OtherAgentsStatus);
-        Assert.Equal(new[] { "copilot" }, h.Vm.Connections.OtherAgents.Select(r => r.AgentId));
-        // OpenCode (before AGY in the existing order) was updated as well.
-        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);
+        Assert.Equal(new[] { "copilot", "zcode" }, h.Vm.Connections.OtherAgents.Select(r => r.AgentId));
     }
 
     // ── isolation, direction 2: UpdateOtherAgents throws -> existing tabs still update ──────────
@@ -139,7 +136,7 @@ public sealed class MainWindowViewModelOtherAgentsTests
     [Fact]
     public async Task UpdateOtherAgentsThatThrows_NeverStopsTheExistingTabUpdates_G4()
     {
-        await using var h = Harness.Create(_ => Task.FromResult(ReportWithOthers(Today)));
+        await using var h = Harness.Create(_ => Task.FromResult(ReportWithOthers()));
         var attempts = 0;
         h.Vm.Connections.PropertyChanged += (_, e) =>
         {
@@ -154,11 +151,9 @@ public sealed class MainWindowViewModelOtherAgentsTests
         Assert.Null(await Record.ExceptionAsync(h.SettleAsync)); // contained in its own try/catch
 
         Assert.True(attempts >= 1, "UpdateOtherAgents was never reached, so the fixture did not exercise the isolation.");
-        // Every existing update still ran after the failure:
-        Assert.NotEmpty(h.Vm.ClaudeTab.SupplementaryRows);              // claude <- claude (today + month)
-        Assert.True(h.Vm.OpenCodeTab.HasSnapshot);                       // OpenCode tab from the opencode row
-        Assert.True(h.Vm.OverviewTab.HasSnapshot);                       // Overview
-        Assert.NotNull(h.Vm.AllAgentsTab.Today);                         // All agents tab
+        // The first existing update still ran after the failure (a date-independent output):
+        Assert.True(h.Vm.AllAgentsTab.HasMonths);
+        Assert.Single(h.Vm.AllAgentsTab.Months);
     }
 
     // ── order: the existing updates keep their order ────────────────────────────
@@ -170,7 +165,7 @@ public sealed class MainWindowViewModelOtherAgentsTests
         await using var h = Harness.Create(_ =>
         {
             reads++;
-            return Task.FromResult(ReportWithOthers(Today));
+            return Task.FromResult(ReportWithOthers());
         });
         var failuresLeft = 1;
         h.Vm.Connections.PropertyChanged += (_, e) =>
@@ -248,7 +243,8 @@ public sealed class MainWindowViewModelOtherAgentsTests
         /// handler to the context it captured at construction instead of xUnit's own (D16 rule).</summary>
         public Task RefreshAsync() => Task.Run(() => Vm.RefreshAsync()).WaitAsync(Bound);
 
-        /// <summary>Waits for <c>AgentUsageTask</c> while pumping the construction context (the D16 pattern).</summary>
+        /// <summary>Waits for <c>AgentUsageTask</c> while pumping the construction context (the D16 pattern): the
+        /// context signals every new post, so the pump drains exactly when there is something to run, no polling.</summary>
         public async Task SettleAsync()
         {
             var task = Vm.AgentUsageTask!;
@@ -256,8 +252,14 @@ public sealed class MainWindowViewModelOtherAgentsTests
             while (!task.IsCompleted)
             {
                 Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for AgentUsageTask while pumping the captured context.");
+                var arrived = Context.NextPost; // taken before draining: a post after this point completes it
                 Context.Drain();
-                await Task.WhenAny(task, Task.Delay(5));
+                if (task.IsCompleted)
+                {
+                    break;
+                }
+
+                await Task.WhenAny(task, arrived).WaitAsync(Bound);
             }
 
             await task;
@@ -298,6 +300,11 @@ public sealed class MainWindowViewModelOtherAgentsTests
 
         public int PostCount => Volatile.Read(ref _postCount) - _baseline;
 
+        private TaskCompletionSource _nextPost = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes when the next Post arrives (a fresh one is armed by every Post).</summary>
+        public Task NextPost => Volatile.Read(ref _nextPost).Task;
+
         public void MarkBaseline() => _baseline = Volatile.Read(ref _postCount);
 
         public override void Post(SendOrPostCallback d, object? state)
@@ -305,6 +312,7 @@ public sealed class MainWindowViewModelOtherAgentsTests
             _queue.Enqueue((d, state));
             Interlocked.Increment(ref _postCount);
             _posted.Release();
+            Interlocked.Exchange(ref _nextPost, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
         }
 
         public override void Send(SendOrPostCallback d, object? state) =>

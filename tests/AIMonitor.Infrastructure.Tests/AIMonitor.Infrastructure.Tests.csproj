@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +21,7 @@
     <ProjectReference Include="..\..\src\AIMonitor.Infrastructure\AIMonitor.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\AIMonitor.Application\AIMonitor.Application.csproj" />
     <ProjectReference Include="..\..\src\AIMonitor.Domain\AIMonitor.Domain.csproj" />
+    <ProjectReference Include="..\..\src\AIMonitor.Presentation.Wpf\AIMonitor.Presentation.Wpf.csproj" />
     <ProjectReference Include="..\AIMonitor.TestSupport\AIMonitor.TestSupport.csproj" />
   </ItemGroup>
 

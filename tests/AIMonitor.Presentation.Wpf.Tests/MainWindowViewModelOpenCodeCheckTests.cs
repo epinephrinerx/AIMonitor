@@ -23,11 +23,15 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// <see cref="VmHarness.Create"/> if the code puts it elsewhere. Every wait here is a bounded await on a
 /// semaphore/TCS signalled by the code under test; nothing sleeps to "let things settle".
 /// </summary>
-public sealed class MainWindowViewModelOpenCodeCheckTests
+public sealed partial class MainWindowViewModelOpenCodeCheckTests
 {
     private const string ErrorText = "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check.";
 
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
+
+    /// <summary>The only wall-clock wait left: how long an "an extra read must NOT happen" check watches. A correct
+    /// implementation can never fail it; it is long (not 300 ms) so a late extra read is still seen.</summary>
+    private static readonly TimeSpan AbsenceBound = TimeSpan.FromSeconds(2);
 
     private static OpenCodeAuthStatus Connected(string name, string kind = "OAuth", string source = "opencode auth list") =>
         new(true, source, [new OpenCodeSignIn(name, kind)], false, "");
@@ -118,12 +122,29 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
     {
         var reader = new FakeOpenCodeReader();
         await using var h = VmHarness.Create(reader, queuedContext: false);
+        // Wait for the WHOLE card update (every displayed field), not only StateWord: the update sets the fields one
+        // after another, so StateWord alone would race the assertions on Account (Reviewer2 #4).
         var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var seen = new HashSet<string>();
+        string[] fields =
+        [
+            nameof(ConnectionCardViewModel.StateWord),
+            nameof(ConnectionCardViewModel.StateGlyph),
+            nameof(ConnectionCardViewModel.Account),
+            nameof(ConnectionCardViewModel.SourceLine),
+        ];
         h.Vm.Connections.OpenCodeCard.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ConnectionCardViewModel.StateWord))
+            lock (seen)
             {
-                applied.TrySetResult();
+                if (e.PropertyName is not null && fields.Contains(e.PropertyName))
+                {
+                    seen.Add(e.PropertyName);
+                    if (seen.Count == fields.Length)
+                    {
+                        applied.TrySetResult();
+                    }
+                }
             }
         };
         h.Vm.RequestOpenCodeCheck();
@@ -133,7 +154,9 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         await applied.Task.WaitAsync(Bound);
 
         Assert.Equal("Connected", h.Vm.Connections.OpenCodeCard.StateWord);
+        Assert.Equal("✓", h.Vm.Connections.OpenCodeCard.StateGlyph);
         Assert.Equal("Signed in: OpenAI (API key)", h.Vm.Connections.OpenCodeCard.Account);
+        Assert.Equal("Detected from opencode auth list", h.Vm.Connections.OpenCodeCard.SourceLine);
     }
 
     [Fact]
@@ -236,9 +259,8 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         Assert.Equal("Signed in: Read2 (OAuth)", h.Vm.Connections.OpenCodeCard.Account);
         Assert.Equal(2, reader.CallCount);
 
-        // Bounded absence check (a correct implementation can never fail it): no third read follows.
-        Assert.False(await reader.TryWaitForCallAsync(3, TimeSpan.FromMilliseconds(300)));
-        Assert.Equal(2, reader.CallCount);
+        // No third read follows (see AssertQuiescentAsync).
+        await AssertQuiescentAsync(h, reader, expectedCalls: 2);
     }
 
     [Fact]
@@ -274,8 +296,7 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         await h.Context!.WaitForPostsAsync(1);
         h.Context.Drain();
 
-        Assert.False(await reader.TryWaitForCallAsync(2, TimeSpan.FromMilliseconds(300)));
-        Assert.Equal(1, reader.CallCount);
+        await AssertQuiescentAsync(h, reader, expectedCalls: 1);
     }
 
     // ── provider refresh never starts a check ───────────────────────────────────
@@ -380,12 +401,34 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         Assert.Equal(0, reader.CallCount);
     }
 
+    /// <summary>
+    /// "No extra read ran" after <paramref name="expectedCalls"/> reads. The view model exposes no "loop ended"
+    /// signal, so this is the one place with a bounded watch (<see cref="AbsenceBound"/>); around it the checks are
+    /// signal-driven: the context is drained so the loop can finish, a follow-up request must start exactly one
+    /// more read (the in-flight flag was released) which is completed and delivered, and only then is the watch run.
+    /// </summary>
+    private static async Task AssertQuiescentAsync(VmHarness h, FakeOpenCodeReader reader, int expectedCalls)
+    {
+        h.Context!.Drain();
+        h.Vm.RequestOpenCodeCheck();
+        await PumpUntilCallAsync(h, reader, expectedCalls + 1);
+        reader.Complete(expectedCalls, Connected("Fence"));
+        await h.Context.WaitForPostsAsync(expectedCalls + 1);
+        h.Context.Drain();
+
+        Assert.Equal("Signed in: Fence (OAuth)", h.Vm.Connections.OpenCodeCard.Account);
+        Assert.False(
+            await reader.TryWaitForCallAsync(expectedCalls + 2, AbsenceBound),
+            $"An unexpected extra read ran after read #{expectedCalls}.");
+        Assert.Equal(expectedCalls + 1, reader.CallCount);
+    }
+
     private static async Task PumpUntilCallAsync(VmHarness h, FakeOpenCodeReader reader, int count)
     {
         var deadline = DateTime.UtcNow + Bound;
         while (true)
         {
-            h.Context!.Drain();
+            h.Context?.Drain();
             if (await reader.TryWaitForCallAsync(count, TimeSpan.FromMilliseconds(20)))
             {
                 return;
@@ -526,16 +569,34 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
                 source = new TaskCompletionSource<OpenCodeAuthStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _calls.Add(source);
                 _threadIds.Add(Environment.CurrentManagedThreadId);
+                _running++;
+                _max = Math.Max(_max, _running);
             }
 
             _started.Release();
             return source.Task;
         }
 
+        private int _running;
+        private int _max;
+
+        /// <summary>The most reads that were ever pending at once (the contract is one at a time).</summary>
+        public int MaxConcurrent
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _max;
+                }
+            }
+        }
+
         public void Complete(int index, OpenCodeAuthStatus status)
         {
             lock (_gate)
             {
+                _running--;
                 _calls[index].SetResult(status);
             }
         }
@@ -544,6 +605,7 @@ public sealed class MainWindowViewModelOpenCodeCheckTests
         {
             lock (_gate)
             {
+                _running--;
                 _calls[index].SetException(exception);
             }
         }

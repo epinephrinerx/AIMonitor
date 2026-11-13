@@ -271,6 +271,91 @@ public sealed class OpenCodeAuthReaderSecretTests
     }
 
     [Fact]
+    public void StatusToString_HasTheExactSpecShape_H2()
+    {
+        var status = new OpenCodeAuthStatus(
+            Installed: true,
+            Source: "SOURCE-MARKER",
+            SignIns: [new OpenCodeSignIn("Anthropic", "OAuth"), new OpenCodeSignIn("OpenAI", "API key")],
+            MayBeOutdated: true,
+            Error: "ERROR-MARKER");
+
+        Assert.Equal("OpenCodeAuthStatus { SignIns = [Anthropic (OAuth), OpenAI (API key)] }", status.ToString());
+    }
+
+    [Fact]
+    public void StatusToString_WithoutSignIns_IsEmptyBrackets_AndNeverShowsErrorOrSource_H2()
+    {
+        var status = new OpenCodeAuthStatus(false, "SOURCE-MARKER", [], false, "ERROR-MARKER");
+
+        Assert.Equal("OpenCodeAuthStatus { SignIns = [] }", status.ToString());
+    }
+
+    [Fact]
+    public async Task EveryReaderResult_PassedThroughTheCard_NeverShowsASentinelInAccountOrSourceLine_F8()
+    {
+        // Reviewer2 gap: the sentinel tests inspected the status only. Here every scenario's real reader result is
+        // passed through ConnectionCardViewModel.UpdateOpenCode and ALL its displayed text is checked.
+        var scenarios = new List<ReaderHarness>();
+
+        var oneX = new ReaderHarness();
+        oneX.SetVersion("1.19.5");
+        oneX.SetAuthJson($$"""
+            {
+              "anthropic": {"type":"oauth","refresh":"{{Secret}}","access":"{{Secret}}","accountId":"{{Secret}}"},
+              "openai": {"type":"api","key":"{{Secret}}","metadata":{"note":"{{Secret}}"} },
+              "custom": {"type":"wellknown","key":"{{Secret}}","token":"{{Secret}}"},
+              "bad={{Secret}}": {"type":"oauth"}
+            }
+            """);
+        scenarios.Add(oneX);
+
+        var twoX = new ReaderHarness();
+        twoX.UseTwoX($$"""
+            [{"id":"anthropic","name":"Anthropic","connections":[
+              {"type":"credential","id":"cred_{{Secret}}","label":"{{Secret}}","method":"oauth","status":{"status":"needs_auth","message":"{{Secret}}","url":"https://example.test/?k={{Secret}}"}},
+              {"type":"env","name":"{{EnvName}}","status":{"status":"ok","message":"{{Secret}}"} }]},
+             {"id":"x={{Secret}}","name":"bad={{Secret}}","connections":[{"type":"credential","method":"key"}]}]
+            """);
+        scenarios.Add(twoX);
+
+        var failedList = new ReaderHarness();
+        failedList.SetVersion("2.2.7");
+        failedList.OnList = () => new FakeOpenCodeProcess($"not json {Secret}", error: Secret, exitCode: 1);
+        failedList.AddFile(ReaderHarness.DefaultAuthJson, $$"""{"anthropic":{"type":"oauth","key":"{{Secret}}",""");
+        scenarios.Add(failedList);
+
+        var unreadable = new ReaderHarness();
+        unreadable.SetVersion("1.19.5");
+        unreadable.SetAuthJson("{}");
+        unreadable.FailOpen(ReaderHarness.DefaultAuthJson, new IOException($"{Secret} C:\\{Secret}\\auth.json"));
+        scenarios.Add(unreadable);
+
+        var versionNoise = new ReaderHarness();
+        versionNoise.OnVersion = () => new FakeOpenCodeProcess("SENTINEL-SECRET-QWERTY banner without digits", error: Secret);
+        scenarios.Add(versionNoise);
+
+        var notInstalled = new ReaderHarness();
+        notInstalled.RemoveFile(ReaderHarness.DefaultExe);
+        scenarios.Add(notInstalled);
+
+        foreach (var scenario in scenarios)
+        {
+            var status = await scenario.ReadAsync();
+            var card = new AIMonitor.Presentation.Wpf.ViewModels.ConnectionCardViewModel(AIMonitor.Presentation.Wpf.ViewModels.ProviderMeta.OpenCode);
+
+            card.UpdateOpenCode(status);
+
+            var text = string.Join('\n', card.StateWord, card.StateGlyph, card.Account, card.SourceLine, card.ConnectButtonText);
+            Assert.DoesNotContain("9c41d7", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("SENTINEL", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(EnvName, text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(@"C:\", text, StringComparison.Ordinal);
+            ReaderHarness.AssertNoLeak(status, Needles);
+        }
+    }
+
+    [Fact]
     public void StatusShape_HasNoSecretCarryingMember_F1()
     {
         // F1: OpenCodeAuthStatus(bool Installed, string Source, IReadOnlyList<OpenCodeSignIn> SignIns,

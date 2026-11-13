@@ -7,28 +7,125 @@ using AIMonitor.Infrastructure.OpenCode;
 namespace AIMonitor.Infrastructure.Tests.OpenCode;
 
 /// <summary>
-/// Shared fakes for the R-020 reader tests (Docs/SPEC_R020_R021.md F1-F5b). Nothing here starts a
-/// process, touches the disk or reads the real environment: PATH/env, file existence, file content and
-/// the process start are all injected.
+/// Shared fakes for the R-020 reader tests (Docs/SPEC_R020_R021.md F1-F5b, fix round 1 H1-H15). Nothing here
+/// starts a process, touches the disk or reads the real environment: PATH/env, file content and the process
+/// start are all injected.
 ///
-/// SEAM (the spec fixes F2 only as "the process start is injected
-/// (Func&lt;ProcessStartInfo, IOpenCodeProcess&gt;) like ICcUsageProcess, and so are the PATH/env/file
-/// reads"). The constructor shape was adapted to the Writing Owner's seam
-/// <c>(Func&lt;string?&gt; path, Func&lt;string,string?&gt; environment, Func&lt;string,long&gt; fileLength,
-/// Func&lt;string,CancellationToken,Task&lt;byte[]&gt;&gt; readFile, Func&lt;ProcessStartInfo,IOpenCodeProcess&gt; start)</c>
-/// and the static <c>OpenCodeAuthReader.ResolveExecutable(string? searchPath, Func&lt;string,bool&gt; fileExists)</c>.
-/// Every assumption about the constructor and about IOpenCodeProcess lives in this one file:
-/// <see cref="ReaderHarness.CreateReader"/> and <see cref="FakeOpenCodeProcess"/>.
-/// The 10 s / 20 s deadlines are not injectable, so the two timeout tests run in real time.
+/// SEAM (fix round 1). The constructor is
+/// <c>(Func&lt;string?&gt; path, Func&lt;string,string?&gt; environment,
+/// Func&lt;string,int,CancellationToken,Task&lt;byte[]?&gt;&gt; readFile,
+/// Func&lt;ProcessStartInfo,IOpenCodeProcess&gt; start, TimeSpan versionDeadline, TimeSpan authListDeadline)</c>;
+/// <c>readFile(path, maxBytes, ct)</c> returns null when the file is missing, otherwise at most
+/// <c>maxBytes</c> bytes (the fake truncates, like a bounded read does); the reader passes 1 MB + 1. The old
+/// <c>fileLength</c> seam is gone. The static <c>OpenCodeAuthReader.ResolveExecutable(string? searchPath,
+/// Func&lt;string,bool&gt; fileExists)</c> is unchanged. Every assumption about the constructor and about
+/// IOpenCodeProcess lives in this one file: <see cref="ReaderHarness.CreateReader"/> and
+/// <see cref="FakeOpenCodeProcess"/>. The harness deadlines default to 30 s (never reached by a passing test);
+/// timeout tests set a short deadline (H15), so no test waits for the production 10 s / 20 s.
 /// </summary>
+internal interface IKillAware
+{
+    void OnKilled();
+}
+
+/// <summary>Base for scripted streams: every read overload funnels into <see cref="ReadCoreAsync"/>.</summary>
+internal abstract class ScriptedReader : TextReader, IKillAware
+{
+    private volatile bool _killed;
+
+    protected bool Killed => _killed;
+
+    public void OnKilled()
+    {
+        _killed = true;
+        Wake();
+    }
+
+    protected abstract Task<int> ReadCoreAsync(Memory<char> buffer, CancellationToken cancellationToken);
+
+    protected virtual void Wake()
+    {
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) =>
+        new(ReadCoreAsync(buffer, cancellationToken));
+
+    public override Task<int> ReadAsync(char[] buffer, int index, int count) =>
+        ReadCoreAsync(buffer.AsMemory(index, count), CancellationToken.None);
+
+    public override int Read(char[] buffer, int index, int count) =>
+        ReadCoreAsync(buffer.AsMemory(index, count), CancellationToken.None).GetAwaiter().GetResult();
+
+    public override int Read(Span<char> buffer)
+    {
+        var temp = new char[buffer.Length];
+        var n = ReadCoreAsync(temp, CancellationToken.None).GetAwaiter().GetResult();
+        temp.AsSpan(0, n).CopyTo(buffer);
+        return n;
+    }
+}
+
+/// <summary>Stdout/stderr that keeps producing data asynchronously (every read yields first) until the
+/// process is killed or the token is canceled: a process that floods past the output cap.</summary>
+internal sealed class FloodingReader : ScriptedReader
+{
+    protected override async Task<int> ReadCoreAsync(Memory<char> buffer, CancellationToken cancellationToken)
+    {
+        if (Killed)
+        {
+            return 0;
+        }
+
+        await Task.Yield();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Killed)
+        {
+            return 0;
+        }
+
+        var n = Math.Min(buffer.Length, 2048);
+        buffer.Span[..n].Fill('x');
+        return n;
+    }
+}
+
+/// <summary>A stream that never produces anything and ends only when the process is killed. With
+/// <c>honorCancellation: false</c> it also ignores the cancellation token, like a pipe whose read cannot be
+/// interrupted: only the kill unblocks it.</summary>
+internal sealed class StallingReader(bool honorCancellation) : ScriptedReader
+{
+    private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    protected override async Task<int> ReadCoreAsync(Memory<char> buffer, CancellationToken cancellationToken)
+    {
+        if (honorCancellation)
+        {
+            await _released.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await _released.Task.ConfigureAwait(false);
+        }
+
+        return 0;
+    }
+
+    protected override void Wake() => _released.TrySetResult();
+}
+
 internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
 {
     private readonly TaskCompletionSource _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public FakeOpenCodeProcess(string output = "", string error = "", int exitCode = 0, bool hang = false)
+        : this(new StringReader(output), new StringReader(error), exitCode, hang)
     {
-        Output = new StringReader(output);
-        Error = new StringReader(error);
+    }
+
+    public FakeOpenCodeProcess(TextReader output, TextReader error, int exitCode = 0, bool hang = false)
+    {
+        Output = output;
+        Error = error;
         ExitCode = exitCode;
         Hang = hang;
     }
@@ -58,6 +155,8 @@ internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
     {
         Killed = true;
         _exit.TrySetResult();
+        (Output as IKillAware)?.OnKilled();
+        (Error as IKillAware)?.OnKilled();
     }
 
     public void Dispose()
@@ -96,15 +195,46 @@ internal sealed class ReaderHarness
 
     public List<FakeOpenCodeProcess> Processes { get; } = [];
 
-    /// <summary>Paths whose content was read (readFile calls).</summary>
+    private readonly object _processGate = new();
+    private readonly List<TaskCompletionSource<FakeOpenCodeProcess>> _processStarted = [];
+
+    /// <summary>Completes when the reader has started the process with this index (0 = --version, 1 = auth list)
+    /// and the fake has been asked to wait for its exit: a signal, not a poll.</summary>
+    public async Task<FakeOpenCodeProcess> WaitForProcessAsync(int index)
+    {
+        Task<FakeOpenCodeProcess> started;
+        lock (_processGate)
+        {
+            while (_processStarted.Count <= index)
+            {
+                _processStarted.Add(new TaskCompletionSource<FakeOpenCodeProcess>(TaskCreationOptions.RunContinuationsAsynchronously));
+            }
+
+            started = _processStarted[index].Task;
+        }
+
+        var process = await started.WaitAsync(TimeSpan.FromSeconds(30));
+        await process.WaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        return process;
+    }
+
+    /// <summary>Paths whose content was read (readFile calls, also those that found no file).</summary>
     public List<string> OpenedFiles { get; } = [];
 
-    /// <summary>Paths whose length was asked (fileLength calls).</summary>
-    public List<string> FileLengthChecks { get; } = [];
+    /// <summary>The <c>maxBytes</c> argument of every readFile call (H4: always 1 MB + 1).</summary>
+    public List<int> ReadLimits { get; } = [];
 
-    /// <summary>Every path the reader touched at all (length checks and reads), distinct.</summary>
+    /// <summary>Every path the reader touched at all, distinct.</summary>
     public IReadOnlyList<string> AccessedPaths =>
-        FileLengthChecks.Concat(OpenedFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        OpenedFiles.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>H15: injected deadlines. 30 s: never reached by a passing test; timeout tests set a short one.</summary>
+    public TimeSpan VersionDeadline { get; set; } = TimeSpan.FromSeconds(30);
+
+    public TimeSpan AuthListDeadline { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Replaces the whole readFile seam (a read that blocks, throws or over-returns).</summary>
+    public Func<string, int, CancellationToken, Task<byte[]?>>? ReadOverride { get; set; }
 
     public List<string> EnvironmentReads { get; } = [];
 
@@ -151,24 +281,34 @@ internal sealed class ReaderHarness
                 EnvironmentReads.Add(name);
                 return Env.TryGetValue(name, out var value) ? value : null;
             },
-            path =>
-            {
-                var key = Normalize(path);
-                FileLengthChecks.Add(key);
-                return _files.TryGetValue(key, out var bytes) ? bytes.Length : -1;
-            },
-            (path, _) =>
-            {
-                var key = Normalize(path);
-                OpenedFiles.Add(key);
-                if (_openFailures.TryGetValue(key, out var failure))
-                {
-                    return Task.FromException<byte[]>(failure);
-                }
+            ReadFileAsync,
+            StartProcess,
+            VersionDeadline,
+            AuthListDeadline);
 
-                return Task.FromResult(_files[key]);
-            },
-            StartProcess);
+    private Task<byte[]?> ReadFileAsync(string path, int maxBytes, CancellationToken cancellationToken)
+    {
+        var key = Normalize(path);
+        OpenedFiles.Add(key);
+        ReadLimits.Add(maxBytes);
+        if (ReadOverride is not null)
+        {
+            return ReadOverride(key, maxBytes, cancellationToken);
+        }
+
+        if (_openFailures.TryGetValue(key, out var failure))
+        {
+            return Task.FromException<byte[]?>(failure);
+        }
+
+        if (!_files.TryGetValue(key, out var bytes))
+        {
+            return Task.FromResult<byte[]?>(null); // missing file
+        }
+
+        // A bounded read never returns more than the limit, whatever the file holds.
+        return Task.FromResult<byte[]?>(bytes.Length <= maxBytes ? bytes : bytes[..maxBytes]);
+    }
 
     public async Task<OpenCodeAuthStatus> ReadAsync(CancellationToken cancellationToken = default)
     {
@@ -213,7 +353,18 @@ internal sealed class ReaderHarness
         }
 
         var process = script();
-        Processes.Add(process);
+        lock (_processGate)
+        {
+            Processes.Add(process);
+            var index = Processes.Count - 1;
+            while (_processStarted.Count <= index)
+            {
+                _processStarted.Add(new TaskCompletionSource<FakeOpenCodeProcess>(TaskCreationOptions.RunContinuationsAsynchronously));
+            }
+
+            _processStarted[index].TrySetResult(process);
+        }
+
         return process;
     }
 

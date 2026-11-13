@@ -295,6 +295,119 @@ public sealed class ConnectionsViewModelOpenCodeCardTests
         Assert.Equal("Checking...", vm.AgyCard.StateWord);
     }
 
+    // ── H14: chip colours ───────────────────────────────────────────────────────
+
+    private static (System.Windows.Media.Color Chip, System.Windows.Media.Color Tint) Chips(ConnectionCardViewModel card) =>
+        (((SolidColorBrush)card.StateBrush).Color, ((SolidColorBrush)card.StateTint).Color);
+
+    private static DetectionInfo Detection(string id, DetectionState state) => new(id, state, "cli", "CLI", "user");
+
+    [Fact]
+    public void ConnectedChip_HasTheSameGreenAsTheOtherCardsConnectedChip_H14()
+    {
+        var vm = CreateViewModel();
+        vm.Update(new Dictionary<string, ProviderSnapshot>
+        {
+            ["claude"] = new ProviderSnapshot("claude", configured: true, detection: Detection("claude", DetectionState.Connected)),
+            ["openai"] = new ProviderSnapshot("openai", configured: true, detection: Detection("openai", DetectionState.Connected)),
+            ["agy"] = new ProviderSnapshot("agy", configured: true, detection: Detection("agy", DetectionState.Connected)),
+        });
+
+        vm.UpdateOpenCode(Status(signIns: [("Anthropic", "OAuth")]));
+
+        Assert.Equal("Connected", vm.OpenCodeCard.StateWord);
+        var opencode = Chips(vm.OpenCodeCard);
+        foreach (var other in new[] { vm.ClaudeCard, vm.OpenAiCard, vm.AgyCard })
+        {
+            Assert.Equal("Connected", other.StateWord);
+            Assert.Equal(Chips(other), opencode);
+        }
+
+        var good = ThemePalette.StatusGood;
+        Assert.Equal(System.Windows.Media.Color.FromArgb(0xFF, good.R, good.G, good.B), opencode.Chip);
+        Assert.Equal(System.Windows.Media.Color.FromArgb(0x24, good.R, good.G, good.B), opencode.Tint);
+    }
+
+    [Fact]
+    public void ConnectedChip_AlsoIsGreen_WhenTheSignInsMayBeOutOfDate_H14()
+    {
+        var vm = CreateViewModel();
+        vm.Update(new Dictionary<string, ProviderSnapshot>
+        {
+            ["claude"] = new ProviderSnapshot("claude", configured: true, detection: Detection("claude", DetectionState.Connected)),
+        });
+
+        vm.UpdateOpenCode(Status(source: "auth.json", mayBeOutdated: true, signIns: [("Anthropic", "OAuth")]));
+
+        Assert.Equal(Chips(vm.ClaudeCard), Chips(vm.OpenCodeCard));
+    }
+
+    [Fact]
+    public void ConnectedChip_ReturnsToTheMutedStyle_WhenTheCardLeavesConnected_H14()
+    {
+        var vm = CreateViewModel();
+        vm.UpdateOpenCode(Status(signIns: [("Anthropic", "OAuth")]));
+        var green = Chips(vm.OpenCodeCard);
+
+        vm.UpdateOpenCode(Status());
+
+        Assert.NotEqual(green, Chips(vm.OpenCodeCard));
+    }
+
+    [Fact]
+    public void OtherStates_UseTheExistingStylingOfTheirWords_H14()
+    {
+        var vm = CreateViewModel();
+        vm.Update(new Dictionary<string, ProviderSnapshot>
+        {
+            ["openai"] = new ProviderSnapshot("openai", configured: true, detection: Detection("openai", DetectionState.NotConnected)),
+        });
+        var notConnected = Chips(vm.OpenAiCard);                    // "Not connected"
+        var checking = Chips(new ConnectionCardViewModel(ProviderMeta.Agy)); // "Checking..."
+        var unavailableCard = new ConnectionCardViewModel(ProviderMeta.Agy);
+        unavailableCard.SetUnavailable("x");
+        var unavailable = Chips(unavailableCard);                   // "Unavailable"
+
+        vm.UpdateOpenCode(Status(installed: false, source: ""));
+        Assert.Equal("Not connected", vm.OpenCodeCard.StateWord);
+        Assert.Equal(notConnected, Chips(vm.OpenCodeCard));
+
+        vm.UpdateOpenCode(Status());
+        Assert.Equal("Not connected", vm.OpenCodeCard.StateWord);
+        Assert.Equal(notConnected, Chips(vm.OpenCodeCard));
+
+        vm.UpdateOpenCode(Status(error: "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."));
+        Assert.Equal("Unavailable", vm.OpenCodeCard.StateWord);
+        Assert.Equal(unavailable, Chips(vm.OpenCodeCard));
+
+        vm.UpdateOpenCode(null);
+        Assert.Equal("Checking...", vm.OpenCodeCard.StateWord);
+        Assert.Equal(checking, Chips(vm.OpenCodeCard));
+    }
+
+    [Fact]
+    public void SentinelInTheStatusSourceOrFlags_NeverReachesTheCardText_F8()
+    {
+        // The card shows fixed wording for the source ("auth.json" or "opencode auth list"); any other Source text from
+        // the status object must never be displayed, in any state (names and kinds are the only variable text).
+        const string sentinel = "SENTINEL-SOURCE-9c41d7";
+        foreach (var status in new[]
+                 {
+                     Status(source: sentinel, signIns: [("Anthropic", "OAuth")]),
+                     Status(source: sentinel, mayBeOutdated: true, signIns: [("Anthropic", "OAuth")]),
+                     Status(source: sentinel),
+                     Status(installed: false, source: sentinel),
+                 })
+        {
+            var vm = CreateViewModel();
+
+            vm.UpdateOpenCode(status);
+
+            var text = string.Join("|", vm.OpenCodeCard.StateWord, vm.OpenCodeCard.StateGlyph, vm.OpenCodeCard.Account, vm.OpenCodeCard.SourceLine);
+            Assert.DoesNotContain("9c41d7", text, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     // ── buttons ─────────────────────────────────────────────────────────────────
 
     [Fact]

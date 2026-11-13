@@ -192,8 +192,8 @@ public sealed class OpenCodeAuthReaderMappingTests
     [InlineData("GitHub Copilot")]
     [InlineData("a")]
     [InlineData("0pen")]
-    [InlineData("my.provider_v2 (beta)+x/y@z:w-1")]
-    [InlineData("https://example.test/.well-known")] // ':' '/' '.' '-' are all on the allow-list
+    [InlineData("my.provider_v2 (beta)+x/y:w-1")] // '.' '_' ' ' '(' ')' '+' '/' ':' '-' are on the allow-list
+    [InlineData("host:8080/path")] // ':' and '/' alone are fine; only "://" is not (H8)
     public async Task AllowedProviderNames_AreShown_F5b(string name)
     {
         var pairs = await OneXPairs($$"""{"{{name}}":{"type":"oauth"} }""");
@@ -273,6 +273,181 @@ public sealed class OpenCodeAuthReaderMappingTests
         var pairs = await TwoXPairs(json);
 
         Assert.Equal(new[] { "Unnamed provider|API key" }, pairs);
+    }
+
+    // ── H8: "://" or "@" -> "Unnamed provider", even when the allow-list matches ──
+
+    [Theory]
+    [InlineData("https://example.test/.well-known")]
+    [InlineData("x://y")]
+    [InlineData("ab://")]
+    [InlineData("user@host")]
+    [InlineData("a@b")]
+    [InlineData("name@")]
+    [InlineData("my.provider_v2 (beta)+x/y@z:w-1")]
+    public async Task NamesWithSchemeSeparatorOrAtSign_BecomeUnnamedProvider_InAuthJson_H8(string name)
+    {
+        var pairs = await OneXPairs($$"""{"{{name}}":{"type":"wellknown"} }""");
+
+        Assert.Equal(new[] { "Unnamed provider|Well-known" }, pairs);
+    }
+
+    [Theory]
+    [InlineData("name")]
+    [InlineData("id-only")]
+    public async Task NamesWithSchemeSeparatorOrAtSign_BecomeUnnamedProvider_InTwoX_H8(string where)
+    {
+        var json = where == "name"
+            ? """[{"id":"clean-id","name":"https://host.test/x","connections":[{"type":"credential","method":"key"}]}]"""
+            : """[{"id":"user@host","connections":[{"type":"credential","method":"key"}]}]""";
+
+        var pairs = await TwoXPairs(json);
+
+        Assert.Equal(new[] { "Unnamed provider|API key" }, pairs);
+    }
+
+    // ── H9: exact duplicates are shown once, at the position of the first ───────
+
+    [Fact]
+    public async Task TwoX_ExactDuplicates_AreShownOnce_AtTheFirstPosition_H9()
+    {
+        var json = "[" + string.Join(
+            ",",
+            Provider("Anthropic", Credential("oauth"), Credential("oauth")),
+            Provider("OpenAI", Credential("key")),
+            Provider("Anthropic", Credential("oauth"))) + "]";
+
+        var pairs = await TwoXPairs(json);
+
+        Assert.Equal(new[] { "Anthropic|OAuth", "OpenAI|API key" }, pairs);
+    }
+
+    [Fact]
+    public async Task TwoX_SameNameDifferentKind_IsKept_H9()
+    {
+        var json = "[" + string.Join(
+            ",",
+            Provider("Anthropic", Credential("oauth"), Credential("key"), Credential("oauth", "needs_auth"), Credential("oauth"))) + "]";
+
+        var pairs = await TwoXPairs(json);
+
+        Assert.Equal(new[] { "Anthropic|OAuth", "Anthropic|API key", "Anthropic|OAuth (needs sign-in)" }, pairs);
+    }
+
+    [Fact]
+    public async Task TwoX_DuplicatesAreJudgedAfterTheAllowList_TwoUnnamedProvidersOfTheSameKindShowOnce_H9()
+    {
+        // Both names fail the allow-list ('=' and "://"), become "Unnamed provider", and then are exact duplicates.
+        var json = """
+            [
+              {"id":"a","name":"bad=name","connections":[{"type":"credential","method":"oauth"}]},
+              {"id":"b","name":"https://x.test","connections":[{"type":"credential","method":"oauth"}]},
+              {"id":"c","name":"also=bad","connections":[{"type":"credential","method":"key"}]}
+            ]
+            """;
+
+        var pairs = await TwoXPairs(json);
+
+        Assert.Equal(new[] { "Unnamed provider|OAuth", "Unnamed provider|API key" }, pairs);
+    }
+
+    [Fact]
+    public async Task TwoX_DuplicateEnvironmentConnections_AreShownOnce_H9()
+    {
+        // Two different (never shown) env var names both become "OpenAI|Environment".
+        var pairs = await TwoXPairs(
+            """[{"id":"o","name":"OpenAI","connections":[{"type":"env","name":"OPENAI_API_KEY"},{"type":"env","name":"OPENAI_KEY"}]}]""");
+
+        Assert.Equal(new[] { "OpenAI|Environment" }, pairs);
+    }
+
+    [Fact]
+    public async Task TwoX_DuplicateIsExact_DifferentCaseIsNotADuplicate_H9()
+    {
+        var json = "[" + string.Join(",", Provider("Anthropic", Credential("oauth")), Provider("anthropic", Credential("oauth"))) + "]";
+
+        var pairs = await TwoXPairs(json);
+
+        Assert.Equal(new[] { "Anthropic|OAuth", "anthropic|OAuth" }, pairs);
+    }
+
+    [Fact]
+    public async Task OneX_NamesThatBecomeUnnamedWithTheSameKind_ShowOnce_AtTheFirstPosition_H9()
+    {
+        var pairs = await OneXPairs(
+            """{"first":{"type":"oauth"},"bad=one":{"type":"api"},"bad=two":{"type":"api"},"last":{"type":"api"}}""");
+
+        Assert.Equal(new[] { "first|OAuth", "Unnamed provider|API key", "last|API key" }, pairs);
+    }
+
+    // ── H7: `connections` present but not an array fails the command; absent adds no rows ──
+
+    [Theory]
+    [InlineData(""oauth"")]
+    [InlineData("{}")]
+    [InlineData("{\"type\":\"credential\"}")]
+    [InlineData("7")]
+    [InlineData("true")]
+    [InlineData("null")]
+    public async Task ConnectionsPresentButNotAnArray_IsAFailedCommand_FallsBackToAuthJson_H7(string connections)
+    {
+        var h = new ReaderHarness();
+        h.UseTwoX($$"""[{"id":"a","name":"Anthropic","connections":{{connections}} }]""");
+        h.SetAuthJson("""{"fromfile":{"type":"api"}}""");
+
+        var status = await h.ReadAsync();
+
+        Assert.Equal("auth.json", status.Source);
+        Assert.True(status.MayBeOutdated);
+        Assert.Equal(new[] { "fromfile|API key" }, ReaderHarness.Pairs(status));
+    }
+
+    [Fact]
+    public async Task ConnectionsNotAnArray_InALaterProvider_StillFailsTheWholeCommand_NoPartialRows_H7()
+    {
+        var h = new ReaderHarness();
+        h.UseTwoX("""
+            [
+              {"id":"a","name":"Anthropic","connections":[{"type":"credential","method":"oauth"}]},
+              {"id":"b","name":"OpenAI","connections":"nope"}
+            ]
+            """);
+
+        var status = await h.ReadAsync();
+
+        Assert.Equal(ReaderHarness.ExpectedErrorText, status.Error); // no auth.json -> Error, not "Anthropic|OAuth"
+        Assert.Empty(status.SignIns);
+    }
+
+    [Fact]
+    public async Task ProviderWithoutConnections_ContributesNoRows_AndIsNotAFailure_H7()
+    {
+        var pairs = await TwoXPairs(
+            """
+            [
+              {"id":"idle","name":"Idle"},
+              {"id":"a","name":"Anthropic","connections":[{"type":"credential","method":"oauth"}]},
+              {"id":"also-idle","name":"AlsoIdle"}
+            ]
+            """);
+
+        Assert.Equal(new[] { "Anthropic|OAuth" }, pairs);
+    }
+
+    [Fact]
+    public async Task OnlyProvidersWithoutConnections_IsInstalledWithZeroSignIns_NoFallback_H7()
+    {
+        var h = new ReaderHarness();
+        h.UseTwoX("""[{"id":"idle","name":"Idle"}]""");
+        h.SetAuthJson("""{"legacy":{"type":"oauth"}}""");
+
+        var status = await h.ReadAsync();
+
+        Assert.Equal("opencode auth list", status.Source);
+        Assert.False(status.MayBeOutdated);
+        Assert.Empty(status.SignIns);
+        Assert.True(string.IsNullOrEmpty(status.Error));
+        Assert.Empty(h.AccessedPaths);
     }
 
     [Fact]
