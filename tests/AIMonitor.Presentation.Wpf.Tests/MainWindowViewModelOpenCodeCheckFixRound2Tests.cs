@@ -169,7 +169,7 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
     {
         var reader = new FakeOpenCodeReader();
         await using var h = VmHarness.Create(reader, queuedContext: false);
-        var releaseA = new TaskCompletionSource(); // default options: SetResult runs the awaiting code inline
+        var releaseA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         h.OnLoopEnded = async number =>
         {
             if (number == 1)
@@ -201,13 +201,13 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
     [Fact]
     public async Task AStaleCleanupOfReadLoopA_CannotClearTheFlagOfReadLoopB_RequestCCoalesces_H11_J5()
     {
-        // Reviewer2 #3 as a deterministic interleaving. A's loop has cleared its flag and is parked in the hook; request B
-        // arrives there and starts read #2 (its flag is set and B is held); A returns (the hook task completes inline
-        // on this thread, so A's remaining code has run when SetResult returns); then request C arrives. C must
-        // coalesce into B's pending rerun. If A's tail cleared B's flag, C would start read #3 beside the held #2.
+        // Reviewer2 #3 with the J5 seam. A's loop has cleared its flag and is parked in the hook; request B arrives
+        // there and starts read #2 (B's flag is set and B is held); A is released and returns; requests then arrive
+        // while B is held. They must coalesce into B's pending rerun. If A's tail cleared B's flag, a request after
+        // that would start read #3 beside the held #2.
         var reader = new FakeOpenCodeReader();
         await using var h = VmHarness.Create(reader, queuedContext: false);
-        var releaseA = new TaskCompletionSource(); // default options: continuations run inline in SetResult
+        var releaseA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         h.OnLoopEnded = async number =>
         {
             if (number == 1)
@@ -226,14 +226,24 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
         }
         finally
         {
-            releaseA.TrySetResult(); // A's loop returns now
+            releaseA.TrySetResult(); // A's loop returns now (its tail runs asynchronously: see the hammering below)
         }
 
-        h.Vm.RequestOpenCodeCheck(); // C
-        Assert.False(
-            await reader.TryWaitForCallAsync(3, StaleCleanupWatch),
-            "Read #3 started while read #2 was still in flight: A's stale cleanup cleared B's in-flight flag (H11).");
-        Assert.Equal(2, reader.CallCount);
+        // Request C, and keep requesting for the whole watch: A's tail may run any time after the release, and the
+        // bug shows only for a request that arrives after it. With a correct implementation every request coalesces
+        // into B's single pending rerun, so read #3 can never start while read #2 is held. If A's tail cleared B's
+        // flag, the first request after it starts read #3 beside the held #2.
+        var watchEnd = DateTime.UtcNow + StaleCleanupWatch;
+        do
+        {
+            h.Vm.RequestOpenCodeCheck(); // C and its repeats
+            await Task.Delay(10);
+            Assert.True(
+                reader.CallCount == 2,
+                "Read #3 started while read #2 was still in flight: A's stale cleanup cleared B's in-flight flag (H11).");
+        }
+        while (DateTime.UtcNow < watchEnd);
+        Assert.False(await reader.TryWaitForCallAsync(3, TimeSpan.FromMilliseconds(200)), "Read #3 started beside the held read #2 (H11).");
 
         reader.Complete(1, Connected("ReadB"));
         await reader.WaitForCallsAsync(3); // C's coalesced rerun, in B's loop
