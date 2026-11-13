@@ -27,7 +27,7 @@ public sealed class OpenCodeAuthReaderLaunchTests
         Assert.True(string.IsNullOrEmpty(status.Error));
         Assert.False(status.MayBeOutdated);
         Assert.Empty(h.Starts);
-        Assert.Empty(h.OpenedFiles);
+        Assert.Empty(h.AccessedPaths);
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public sealed class OpenCodeAuthReaderLaunchTests
 
         var status = await h.ReadAsync();
 
-        Assert.Empty(h.OpenedFiles);
+        Assert.Empty(h.AccessedPaths);
         Assert.Equal(new[] { "Anthropic|OAuth" }, ReaderHarness.Pairs(status));
     }
 }

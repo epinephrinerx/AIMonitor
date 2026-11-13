@@ -17,8 +17,6 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     private const string GoodAuthJson = """{"anthropic":{"type":"oauth"},"openai":{"type":"api"}}""";
     private static readonly string[] GoodAuthPairs = ["anthropic|OAuth", "openai|API key"];
 
-    private static readonly TimeSpan Short = TimeSpan.FromMilliseconds(50);
-
     // ── Major = 1 ───────────────────────────────────────────────────────────────
 
     [Theory]
@@ -75,16 +73,14 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     {
         StartError,
         NonZeroExit,
-        Timeout,
         OutputCap,
         NoDigit,
         EmptyOutput,
     }
 
-    private static (ReaderHarness Harness, TimeSpan? VersionTimeout) VersionFails(VersionFailure failure)
+    private static ReaderHarness VersionFails(VersionFailure failure)
     {
         var h = new ReaderHarness();
-        TimeSpan? timeout = null;
         switch (failure)
         {
             case VersionFailure.StartError:
@@ -92,10 +88,6 @@ public sealed class OpenCodeAuthReaderOutcomeTests
                 break;
             case VersionFailure.NonZeroExit:
                 h.OnVersion = () => new FakeOpenCodeProcess("2.2.7\n", exitCode: 1);
-                break;
-            case VersionFailure.Timeout:
-                h.OnVersion = () => new FakeOpenCodeProcess("2.2.7\n", hang: true);
-                timeout = Short;
                 break;
             case VersionFailure.OutputCap:
                 // 4 KB cap on --version stdout: one char over (4 * 1024 + 1) even though it starts with a digit.
@@ -109,22 +101,21 @@ public sealed class OpenCodeAuthReaderOutcomeTests
                 break;
         }
 
-        return (h, timeout);
+        return h;
     }
 
     [Theory]
     [InlineData(VersionFailure.StartError)]
     [InlineData(VersionFailure.NonZeroExit)]
-    [InlineData(VersionFailure.Timeout)]
     [InlineData(VersionFailure.OutputCap)]
     [InlineData(VersionFailure.NoDigit)]
     [InlineData(VersionFailure.EmptyOutput)]
     public async Task VersionUnknown_ReadsAuthJson_WithMayBeOutdated_AndNeverRunsAuthList_F5(VersionFailure failure)
     {
-        var (h, timeout) = VersionFails(failure);
+        var h = VersionFails(failure);
         h.SetAuthJson(GoodAuthJson);
 
-        var status = await h.ReadAsync(versionTimeout: timeout);
+        var status = await h.ReadAsync();
 
         Assert.True(status.Installed);
         Assert.Equal("auth.json", status.Source);
@@ -137,15 +128,14 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [Theory]
     [InlineData(VersionFailure.StartError)]
     [InlineData(VersionFailure.NonZeroExit)]
-    [InlineData(VersionFailure.Timeout)]
     [InlineData(VersionFailure.OutputCap)]
     [InlineData(VersionFailure.NoDigit)]
     [InlineData(VersionFailure.EmptyOutput)]
     public async Task VersionUnknown_MissingAuthJson_IsAnError_BecauseF4IsAFallback_F5(VersionFailure failure)
     {
-        var (h, timeout) = VersionFails(failure);
+        var h = VersionFails(failure);
 
-        var status = await h.ReadAsync(versionTimeout: timeout);
+        var status = await h.ReadAsync();
 
         Assert.True(status.Installed);
         Assert.Equal(ReaderHarness.ExpectedErrorText, status.Error);
@@ -153,15 +143,22 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     }
 
     [Fact]
-    public async Task VersionTimeout_KillsTheProcess_F2()
+    public async Task VersionTimeout_IsVersionUnknown_KillsAndDisposesTheProcess_F2_F5()
     {
+        // Real 10 s deadline (the value is not injectable): the hung `--version` is killed and the outcome is
+        // "version unknown" -> auth.json with MayBeOutdated.
         var h = new ReaderHarness();
-        h.OnVersion = () => new FakeOpenCodeProcess("1.0.0", hang: true);
+        h.OnVersion = () => new FakeOpenCodeProcess("2.2.7\n", hang: true);
+        h.SetAuthJson(GoodAuthJson);
 
-        await h.ReadAsync(versionTimeout: Short);
+        var status = await h.ReadAsync();
 
         Assert.True(h.Processes[0].Killed);
         Assert.True(h.Processes[0].Disposed);
+        Assert.Equal("auth.json", status.Source);
+        Assert.True(status.MayBeOutdated);
+        Assert.Equal(GoodAuthPairs, ReaderHarness.Pairs(status));
+        Assert.Single(h.Starts);
     }
 
     [Fact]
@@ -244,7 +241,6 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     {
         StartError,
         NonZeroExit,
-        Timeout,
         OutputCap,
         InvalidJson,
         EmptyOutput,
@@ -255,11 +251,10 @@ public sealed class OpenCodeAuthReaderOutcomeTests
         ConnectionTypeNotString,
     }
 
-    private static (ReaderHarness Harness, TimeSpan? ListTimeout) ListFails(ListFailure failure)
+    private static ReaderHarness ListFails(ListFailure failure)
     {
         var h = new ReaderHarness();
         h.SetVersion("2.2.7\n");
-        TimeSpan? timeout = null;
         switch (failure)
         {
             case ListFailure.StartError:
@@ -267,10 +262,6 @@ public sealed class OpenCodeAuthReaderOutcomeTests
                 break;
             case ListFailure.NonZeroExit:
                 h.OnList = () => new FakeOpenCodeProcess("[]", exitCode: 1);
-                break;
-            case ListFailure.Timeout:
-                h.OnList = () => new FakeOpenCodeProcess("[]", hang: true);
-                timeout = Short;
                 break;
             case ListFailure.OutputCap:
                 // 256 KB cap: a well-formed array padded with one char over (256 * 1024 + 1).
@@ -299,13 +290,12 @@ public sealed class OpenCodeAuthReaderOutcomeTests
                 break;
         }
 
-        return (h, timeout);
+        return h;
     }
 
     [Theory]
     [InlineData(ListFailure.StartError)]
     [InlineData(ListFailure.NonZeroExit)]
-    [InlineData(ListFailure.Timeout)]
     [InlineData(ListFailure.OutputCap)]
     [InlineData(ListFailure.InvalidJson)]
     [InlineData(ListFailure.EmptyOutput)]
@@ -316,10 +306,10 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [InlineData(ListFailure.ConnectionTypeNotString)]
     public async Task MajorTwo_AuthListFails_FallsBackToAuthJson_WithMayBeOutdated_F5(ListFailure failure)
     {
-        var (h, timeout) = ListFails(failure);
+        var h = ListFails(failure);
         h.SetAuthJson(GoodAuthJson);
 
-        var status = await h.ReadAsync(listTimeout: timeout);
+        var status = await h.ReadAsync();
 
         Assert.True(status.Installed);
         Assert.Equal("auth.json", status.Source);
@@ -331,7 +321,6 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [Theory]
     [InlineData(ListFailure.StartError)]
     [InlineData(ListFailure.NonZeroExit)]
-    [InlineData(ListFailure.Timeout)]
     [InlineData(ListFailure.OutputCap)]
     [InlineData(ListFailure.InvalidJson)]
     [InlineData(ListFailure.RootNotArray)]
@@ -340,9 +329,9 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     [InlineData(ListFailure.ConnectionWithoutType)]
     public async Task MajorTwo_AuthListFails_AndAuthJsonMissing_IsAnError_F5(ListFailure failure)
     {
-        var (h, timeout) = ListFails(failure);
+        var h = ListFails(failure);
 
-        var status = await h.ReadAsync(listTimeout: timeout);
+        var status = await h.ReadAsync();
 
         Assert.True(status.Installed);
         Assert.Equal(ReaderHarness.ExpectedErrorText, status.Error);
@@ -350,14 +339,34 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     }
 
     [Fact]
-    public async Task AuthListTimeout_KillsTheProcess_F2()
+    public async Task AuthListTimeout_FallsBackToAuthJson_KillsAndDisposesTheProcess_F2_F5()
     {
-        var (h, timeout) = ListFails(ListFailure.Timeout);
+        // Real 20 s deadline (the value is not injectable).
+        var h = new ReaderHarness();
+        h.SetVersion("2.2.7");
+        h.OnList = () => new FakeOpenCodeProcess("[]", hang: true);
+        h.SetAuthJson(GoodAuthJson);
 
-        await h.ReadAsync(listTimeout: timeout);
+        var status = await h.ReadAsync();
 
         Assert.True(h.Processes[1].Killed);
         Assert.True(h.Processes[1].Disposed);
+        Assert.Equal("auth.json", status.Source);
+        Assert.True(status.MayBeOutdated);
+        Assert.Equal(GoodAuthPairs, ReaderHarness.Pairs(status));
+    }
+
+    [Fact]
+    public async Task AuthListTimeout_WithoutAuthJson_IsAnError_F5()
+    {
+        var h = new ReaderHarness();
+        h.SetVersion("2.2.7");
+        h.OnList = () => new FakeOpenCodeProcess("[]", hang: true);
+
+        var status = await h.ReadAsync();
+
+        Assert.Equal(ReaderHarness.ExpectedErrorText, status.Error);
+        Assert.Empty(status.SignIns);
     }
 
     [Fact]
@@ -548,7 +557,7 @@ public sealed class OpenCodeAuthReaderOutcomeTests
         var status = await h.ReadAsync();
 
         Assert.Equal(new[] { "fromxdg|OAuth" }, ReaderHarness.Pairs(status));
-        Assert.Equal(new[] { @"D:\xdg\data\opencode\auth.json" }, h.OpenedFiles, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(new[] { @"D:\xdg\data\opencode\auth.json" }, h.AccessedPaths, StringComparer.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -574,7 +583,7 @@ public sealed class OpenCodeAuthReaderOutcomeTests
         Assert.Equal(new[] { "fromprofile|API key" }, ReaderHarness.Pairs(status));
         Assert.Equal(
             new[] { @"C:\Users\tester\.local\share\opencode\auth.json" },
-            h.OpenedFiles,
+            h.AccessedPaths,
             StringComparer.OrdinalIgnoreCase);
     }
 
@@ -647,7 +656,7 @@ public sealed class OpenCodeAuthReaderOutcomeTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
         Assert.True(h.Processes[1].Killed);
-        Assert.Empty(h.OpenedFiles); // cancellation must not degrade into the auth.json fallback
+        Assert.Empty(h.AccessedPaths); // cancellation must not degrade into the auth.json fallback
     }
 
     private static async Task WaitForProcessWait(ReaderHarness h, int index)

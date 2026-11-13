@@ -11,10 +11,15 @@ namespace AIMonitor.Infrastructure.Tests.OpenCode;
 /// process, touches the disk or reads the real environment: PATH/env, file existence, file content and
 /// the process start are all injected.
 ///
-/// SEAM ASSUMPTIONS (the spec fixes F2 only as "the process start is injected
+/// SEAM (the spec fixes F2 only as "the process start is injected
 /// (Func&lt;ProcessStartInfo, IOpenCodeProcess&gt;) like ICcUsageProcess, and so are the PATH/env/file
-/// reads"). Every assumption about the constructor and about IOpenCodeProcess lives in this one file:
+/// reads"). The constructor shape was adapted to the Writing Owner's seam
+/// <c>(Func&lt;string?&gt; path, Func&lt;string,string?&gt; environment, Func&lt;string,long&gt; fileLength,
+/// Func&lt;string,CancellationToken,Task&lt;byte[]&gt;&gt; readFile, Func&lt;ProcessStartInfo,IOpenCodeProcess&gt; start)</c>
+/// and the static <c>OpenCodeAuthReader.ResolveExecutable(string? searchPath, Func&lt;string,bool&gt; fileExists)</c>.
+/// Every assumption about the constructor and about IOpenCodeProcess lives in this one file:
 /// <see cref="ReaderHarness.CreateReader"/> and <see cref="FakeOpenCodeProcess"/>.
+/// The 10 s / 20 s deadlines are not injectable, so the two timeout tests run in real time.
 /// </summary>
 internal sealed class FakeOpenCodeProcess : IOpenCodeProcess
 {
@@ -91,7 +96,15 @@ internal sealed class ReaderHarness
 
     public List<FakeOpenCodeProcess> Processes { get; } = [];
 
+    /// <summary>Paths whose content was read (readFile calls).</summary>
     public List<string> OpenedFiles { get; } = [];
+
+    /// <summary>Paths whose length was asked (fileLength calls).</summary>
+    public List<string> FileLengthChecks { get; } = [];
+
+    /// <summary>Every path the reader touched at all (length checks and reads), distinct.</summary>
+    public IReadOnlyList<string> AccessedPaths =>
+        FileLengthChecks.Concat(OpenedFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     public List<string> EnvironmentReads { get; } = [];
 
@@ -128,35 +141,38 @@ internal sealed class ReaderHarness
     public static string Normalize(string path) => path.Replace('/', '\\');
 
     /// <summary>The ONLY place that builds the reader under test.</summary>
-    public OpenCodeAuthReader CreateReader(TimeSpan? versionTimeout = null, TimeSpan? listTimeout = null) =>
+    public OpenCodeAuthReader CreateReader() =>
         new(
+            () => OpenCodeAuthReader.ResolveExecutable(
+                Env.TryGetValue("PATH", out var searchPath) ? searchPath : null,
+                path => _files.ContainsKey(Normalize(path))),
             name =>
             {
                 EnvironmentReads.Add(name);
                 return Env.TryGetValue(name, out var value) ? value : null;
             },
-            path => _files.ContainsKey(Normalize(path)),
             path =>
+            {
+                var key = Normalize(path);
+                FileLengthChecks.Add(key);
+                return _files.TryGetValue(key, out var bytes) ? bytes.Length : -1;
+            },
+            (path, _) =>
             {
                 var key = Normalize(path);
                 OpenedFiles.Add(key);
                 if (_openFailures.TryGetValue(key, out var failure))
                 {
-                    throw failure;
+                    return Task.FromException<byte[]>(failure);
                 }
 
-                return new MemoryStream(_files[key], writable: false);
+                return Task.FromResult(_files[key]);
             },
-            StartProcess,
-            versionTimeout ?? TimeSpan.FromSeconds(30),
-            listTimeout ?? TimeSpan.FromSeconds(30));
+            StartProcess);
 
-    public async Task<OpenCodeAuthStatus> ReadAsync(
-        TimeSpan? versionTimeout = null,
-        TimeSpan? listTimeout = null,
-        CancellationToken cancellationToken = default)
+    public async Task<OpenCodeAuthStatus> ReadAsync(CancellationToken cancellationToken = default)
     {
-        var status = await CreateReader(versionTimeout, listTimeout).ReadAsync(cancellationToken);
+        var status = await CreateReader().ReadAsync(cancellationToken);
         AssertOnlyAllowedCommands();
         return status;
     }
