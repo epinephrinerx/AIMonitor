@@ -381,9 +381,8 @@ public sealed class OpenCodeAuthReaderMappingTests
     }
 
     // ── H7: `connections` present but not an array fails the command; absent adds no rows ──
-
     [Theory]
-    [InlineData(""oauth"")]
+    [InlineData("\"oauth\"")]
     [InlineData("{}")]
     [InlineData("{\"type\":\"credential\"}")]
     [InlineData("7")]

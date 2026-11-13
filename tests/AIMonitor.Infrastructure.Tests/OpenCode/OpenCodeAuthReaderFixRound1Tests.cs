@@ -1,5 +1,6 @@
 using System.Text;
 using AIMonitor.Application.OpenCode;
+using AIMonitor.Infrastructure.OpenCode;
 
 namespace AIMonitor.Infrastructure.Tests.OpenCode;
 

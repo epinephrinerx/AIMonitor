@@ -207,20 +207,26 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
             }
         };
 
-        h.Vm.Connections.RedetectAllCommand.Execute(null);
-        await h.Claude.FirstCall.WaitAsync(Bound); // the provider refresh is running and held at the gate
-        Assert.True(
-            await reader.TryWaitForCallAsync(1, TimeSpan.FromSeconds(10)),
-            "The OpenCode read must start without waiting for the provider refresh (H12).");
-        Assert.False(refreshDone.Task.IsCompleted); // ...while the refresh has not completed
+        try
+        {
+            h.Vm.Connections.RedetectAllCommand.Execute(null);
+            await h.Claude.FirstCall.WaitAsync(Bound); // the provider refresh is running and held at the gate
+            Assert.True(
+                await reader.TryWaitForCallAsync(1, TimeSpan.FromSeconds(10)),
+                "The OpenCode read must start without waiting for the provider refresh (H12).");
+            Assert.False(refreshDone.Task.IsCompleted); // ...while the refresh has not completed
 
-        reader.Complete(0, Connected("Anthropic"));
-        await h.Context!.WaitForPostsAsync(1);
-        h.Context.Drain();
-        Assert.Equal("Connected", h.Vm.Connections.OpenCodeCard.StateWord); // delivered before the refresh finished
-        Assert.False(refreshDone.Task.IsCompleted);
+            reader.Complete(0, Connected("Anthropic"));
+            await h.Context!.WaitForPostsAsync(1);
+            h.Context.Drain();
+            Assert.Equal("Connected", h.Vm.Connections.OpenCodeCard.StateWord); // delivered before the refresh finished
+            Assert.False(refreshDone.Task.IsCompleted);
+        }
+        finally
+        {
+            gate.TrySetResult(); // a failed assertion must not leave the refresh hanging at the gate
+        }
 
-        gate.SetResult();
         await refreshDone.Task.WaitAsync(Bound);
         Assert.Equal(1, reader.CallCount);
     }

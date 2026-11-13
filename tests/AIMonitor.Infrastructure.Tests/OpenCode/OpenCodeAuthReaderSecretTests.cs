@@ -292,10 +292,11 @@ public sealed class OpenCodeAuthReaderSecretTests
     }
 
     [Fact]
-    public async Task EveryReaderResult_PassedThroughTheCard_NeverShowsASentinelInAccountOrSourceLine_F8()
+    public async Task EverySentinelScenario_NoFieldOfTheReturnedStatusContainsTheSentinel_F1_F5()
     {
-        // Reviewer2 gap: the sentinel tests inspected the status only. Here every scenario's real reader result is
-        // passed through ConnectionCardViewModel.UpdateOpenCode and ALL its displayed text is checked.
+        // Every field of the status is checked one by one (Source, Error, each SignIn's Name and Kind, ToString()).
+        // The card side of the same gap (Reviewer2) is covered in the WPF tests, which push hand-built statuses that
+        // carry a sentinel in every string field through ConnectionCardViewModel.UpdateOpenCode.
         var scenarios = new List<ReaderHarness>();
 
         var oneX = new ReaderHarness();
@@ -313,7 +314,7 @@ public sealed class OpenCodeAuthReaderSecretTests
         var twoX = new ReaderHarness();
         twoX.UseTwoX($$"""
             [{"id":"anthropic","name":"Anthropic","connections":[
-              {"type":"credential","id":"cred_{{Secret}}","label":"{{Secret}}","method":"oauth","status":{"status":"needs_auth","message":"{{Secret}}","url":"https://example.test/?k={{Secret}}"}},
+              {"type":"credential","id":"cred_{{Secret}}","label":"{{Secret}}","method":"oauth","status":{"status":"needs_auth","message":"{{Secret}}","url":"https://example.test/?k={{Secret}}"} },
               {"type":"env","name":"{{EnvName}}","status":{"status":"ok","message":"{{Secret}}"} }]},
              {"id":"x={{Secret}}","name":"bad={{Secret}}","connections":[{"type":"credential","method":"key"}]}]
             """);
@@ -342,15 +343,24 @@ public sealed class OpenCodeAuthReaderSecretTests
         foreach (var scenario in scenarios)
         {
             var status = await scenario.ReadAsync();
-            var card = new AIMonitor.Presentation.Wpf.ViewModels.ConnectionCardViewModel(AIMonitor.Presentation.Wpf.ViewModels.ProviderMeta.OpenCode);
 
-            card.UpdateOpenCode(status);
+            var fields = new List<string> { status.Source, status.Error, status.ToString() };
+            foreach (var signIn in status.SignIns)
+            {
+                fields.Add(signIn.Name);
+                fields.Add(signIn.Kind);
+                fields.Add(signIn.ToString());
+            }
 
-            var text = string.Join('\n', card.StateWord, card.StateGlyph, card.Account, card.SourceLine, card.ConnectButtonText);
-            Assert.DoesNotContain("9c41d7", text, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("SENTINEL", text, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(EnvName, text, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(@"C:\", text, StringComparison.Ordinal);
+            foreach (var field in fields)
+            {
+                Assert.DoesNotContain("9c41d7", field, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("SENTINEL", field, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("QWERTY", field, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(EnvName, field, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(@"C:\", field, StringComparison.Ordinal);
+            }
+
             ReaderHarness.AssertNoLeak(status, Needles);
         }
     }

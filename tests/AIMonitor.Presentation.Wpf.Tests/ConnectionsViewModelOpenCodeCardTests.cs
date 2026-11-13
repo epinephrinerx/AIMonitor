@@ -385,26 +385,125 @@ public sealed class ConnectionsViewModelOpenCodeCardTests
         Assert.Equal(checking, Chips(vm.OpenCodeCard));
     }
 
-    [Fact]
-    public void SentinelInTheStatusSourceOrFlags_NeverReachesTheCardText_F8()
+    // ── sentinels through UpdateOpenCode (F8: what the card may show verbatim) ───
+
+    private const string SentinelSource = "SENTINEL-SOURCE-9c41d7";
+    private const string SentinelName = "SENTINEL-NAME-9c41d7";
+    private const string SentinelKind = "SENTINEL-KIND-9c41d7";
+    private const string SentinelError = "SENTINEL-ERROR-9c41d7";
+
+    private static string[] Displayed(ConnectionCardViewModel card) =>
+        [card.StateWord, card.StateGlyph, card.Account, card.SourceLine, card.ConnectButtonText, card.Meta.DisplayName, card.Meta.Tagline];
+
+    private static void AssertNoSentinel(ConnectionCardViewModel card, params string[] forbidden)
     {
-        // The card shows fixed wording for the source ("auth.json" or "opencode auth list"); any other Source text from
-        // the status object must never be displayed, in any state (names and kinds are the only variable text).
-        const string sentinel = "SENTINEL-SOURCE-9c41d7";
-        foreach (var status in new[]
-                 {
-                     Status(source: sentinel, signIns: [("Anthropic", "OAuth")]),
-                     Status(source: sentinel, mayBeOutdated: true, signIns: [("Anthropic", "OAuth")]),
-                     Status(source: sentinel),
-                     Status(installed: false, source: sentinel),
-                 })
+        foreach (var text in Displayed(card))
+        {
+            foreach (var needle in forbidden)
+            {
+                Assert.DoesNotContain(needle, text, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    // F8 says exactly which status fields reach the card verbatim:
+    //  - Account: "Signed in: " + `Name (Kind)` joined with ", " (names and kinds, verbatim, in reader order);
+    //  - SourceLine: "Detected from auth.json" / "Detected from opencode auth list" (+ the fixed outdated suffix), chosen
+    //    from Source but never containing it; in the Error state SourceLine = Error (the one verbatim string).
+    // Everything else (Source text, Error outside the error state, flags) never appears.
+
+    [Fact]
+    public void Connected_ShowsNamesAndKindsVerbatim_ButNeverTheSourceText_NorTheErrorText_F8()
+    {
+        var vm = CreateViewModel();
+
+        // A hand-built status with a sentinel in EVERY string field. Error is empty in the connected state by F5;
+        // the sentinel in Source must not be shown, and the state is decided without it.
+        vm.UpdateOpenCode(new OpenCodeAuthStatus(true, SentinelSource, [new OpenCodeSignIn(SentinelName, SentinelKind)], false, ""));
+
+        Assert.Equal("Connected", vm.OpenCodeCard.StateWord);
+        Assert.Equal($"Signed in: {SentinelName} ({SentinelKind})", vm.OpenCodeCard.Account); // verbatim by spec
+        Assert.Equal("Detected from opencode auth list", vm.OpenCodeCard.SourceLine);          // fixed text, not Source
+        AssertNoSentinel(vm.OpenCodeCard, SentinelSource, SentinelError);
+    }
+
+    [Fact]
+    public void Connected_FromAuthJson_ShowsFixedSourceWording_NotTheSourceField_F8()
+    {
+        var vm = CreateViewModel();
+
+        vm.UpdateOpenCode(new OpenCodeAuthStatus(true, "auth.json", [new OpenCodeSignIn(SentinelName, SentinelKind)], true, ""));
+
+        Assert.Equal("Detected from auth.json" + MayBeOutdatedSuffix, vm.OpenCodeCard.SourceLine);
+        AssertNoSentinel(vm.OpenCodeCard, SentinelSource, SentinelError);
+    }
+
+    [Fact]
+    public void ZeroSignIns_ShowsOnlyFixedWording_WhateverSourceSays_F8()
+    {
+        var vm = CreateViewModel();
+
+        vm.UpdateOpenCode(new OpenCodeAuthStatus(true, SentinelSource, [], true, ""));
+
+        Assert.Equal("Not connected", vm.OpenCodeCard.StateWord);
+        Assert.Equal("No providers signed in", vm.OpenCodeCard.Account);
+        Assert.Equal("Run `opencode auth login` to sign in", vm.OpenCodeCard.SourceLine);
+        AssertNoSentinel(vm.OpenCodeCard, SentinelSource, SentinelError, SentinelName, SentinelKind);
+    }
+
+    [Fact]
+    public void NotInstalled_ShowsOnlyFixedWording_WhateverSourceAndSignInsSay_F8()
+    {
+        var vm = CreateViewModel();
+
+        vm.UpdateOpenCode(new OpenCodeAuthStatus(false, SentinelSource, [new OpenCodeSignIn(SentinelName, SentinelKind)], true, ""));
+
+        Assert.Equal("Not connected", vm.OpenCodeCard.StateWord);
+        Assert.Equal("OpenCode not found on PATH", vm.OpenCodeCard.Account);
+        Assert.Equal("Install OpenCode, then run `opencode auth login`", vm.OpenCodeCard.SourceLine);
+        AssertNoSentinel(vm.OpenCodeCard, SentinelSource, SentinelName, SentinelKind);
+    }
+
+    [Fact]
+    public void ErrorState_ShowsTheErrorTextAsSourceLine_AndNothingElseFromTheStatus_F8()
+    {
+        var vm = CreateViewModel();
+
+        // F8: Error -> "Unavailable" / "!", Account "Could not check", SourceLine = Error (the only verbatim string
+        // in this state). The reader guarantees Error is the fixed sentence; the card shows what it is given.
+        vm.UpdateOpenCode(new OpenCodeAuthStatus(true, SentinelSource, [new OpenCodeSignIn(SentinelName, SentinelKind)], true, SentinelError));
+
+        Assert.Equal("Unavailable", vm.OpenCodeCard.StateWord);
+        Assert.Equal("!", vm.OpenCodeCard.StateGlyph);
+        Assert.Equal("Could not check", vm.OpenCodeCard.Account);
+        Assert.Equal(SentinelError, vm.OpenCodeCard.SourceLine);
+        AssertNoSentinel(vm.OpenCodeCard, SentinelSource, SentinelName, SentinelKind);
+        Assert.DoesNotContain(SentinelError, vm.OpenCodeCard.Account, StringComparison.Ordinal);
+        Assert.DoesNotContain(SentinelError, vm.OpenCodeCard.StateWord, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoStateEverShowsTheSourceFieldOrASignInInTheStateWordGlyphOrButton_F8()
+    {
+        // Across every state the chip word, glyph and button text are fixed vocabulary.
+        var statuses = new[]
+        {
+            new OpenCodeAuthStatus(true, SentinelSource, [new OpenCodeSignIn(SentinelName, SentinelKind)], false, ""),
+            new OpenCodeAuthStatus(true, SentinelSource, [], false, ""),
+            new OpenCodeAuthStatus(false, SentinelSource, [], false, ""),
+            new OpenCodeAuthStatus(true, SentinelSource, [new OpenCodeSignIn(SentinelName, SentinelKind)], false, SentinelError),
+        };
+        string[] words = ["Connected", "Not connected", "Unavailable"];
+        foreach (var status in statuses)
         {
             var vm = CreateViewModel();
 
             vm.UpdateOpenCode(status);
 
-            var text = string.Join("|", vm.OpenCodeCard.StateWord, vm.OpenCodeCard.StateGlyph, vm.OpenCodeCard.Account, vm.OpenCodeCard.SourceLine);
-            Assert.DoesNotContain("9c41d7", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(vm.OpenCodeCard.StateWord, words);
+            Assert.Contains(vm.OpenCodeCard.StateGlyph, new[] { "✓", "–", "!" });
+            Assert.Equal("Sign-in help", vm.OpenCodeCard.ConnectButtonText);
+            Assert.DoesNotContain(SentinelSource, string.Concat(Displayed(vm.OpenCodeCard)), StringComparison.Ordinal);
         }
     }
 
