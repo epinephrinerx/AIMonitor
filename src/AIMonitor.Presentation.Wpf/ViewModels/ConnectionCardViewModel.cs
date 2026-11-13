@@ -2,6 +2,7 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 
 using System.Windows.Input;
 using System.Windows.Media;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Theme;
 
@@ -18,7 +19,7 @@ public sealed class ConnectionCardViewModel : ViewModelBase
     private string _account = "Not signed in";
     private string _sourceLine = "";
     private string _connectButtonText = "Connect...";
-    private readonly int _seriesIndex;
+    private int _seriesIndex;
 
     public ProviderMeta Meta { get; }
 
@@ -119,6 +120,8 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
         Update(null);
     }
+
+    internal void SetBadgeSeriesIndex(int index) { _seriesIndex = index; RefreshColours(); }
 
     /// <summary>
     /// Updates the card representation from detection telemetry.
@@ -225,5 +228,23 @@ public sealed class ConnectionCardViewModel : ViewModelBase
         Account = "Could not check";
         SourceLine = error ?? "";
         ConnectButtonText = !Meta.NeedsKey ? "Sign-in help" : "Connect...";
+    }
+
+    public void UpdateOpenCode(OpenCodeAuthStatus? status)
+    {
+        if (status is null) { Update(null); return; }
+        Detection = null;
+        RefreshColours();
+        ConnectButtonText = "Sign-in help";
+        if (!status.Installed) { StateWord = "Not connected"; StateGlyph = "–"; Account = "OpenCode not found on PATH"; SourceLine = "Install OpenCode, then run `opencode auth login`"; }
+        else if (!string.IsNullOrEmpty(status.Error)) { StateWord = "Unavailable"; StateGlyph = "!"; Account = "Could not check"; SourceLine = status.Error; }
+        else if (status.SignIns.Count == 0) { StateWord = "Not connected"; StateGlyph = "–"; Account = "No providers signed in"; SourceLine = "Run `opencode auth login` to sign in"; }
+        else
+        {
+            StateWord = "Connected"; StateGlyph = "✓";
+            Account = "Signed in: " + string.Join(", ", status.SignIns.Select(s => $"{s.Name} ({s.Kind})"));
+            SourceLine = status.Source == "auth.json" ? "Detected from auth.json" : "Detected from opencode auth list";
+            if (status.MayBeOutdated) SourceLine += "  -  may be out of date (OpenCode 2.x keeps sign-ins in its database)";
+        }
     }
 }

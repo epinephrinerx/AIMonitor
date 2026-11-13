@@ -19,17 +19,20 @@ public sealed class ConnectionsViewModelTests
     }
 
     [Fact]
-    public void Constructor_InitializesThreeCardsInCorrectOrder()
+    public void Constructor_InitializesFourCardsInCorrectOrder()
     {
+        // R-020 G7: the OpenCode card is appended after AGY; the first three keep their order.
         var (vm, _, _) = CreateViewModel();
 
-        Assert.Equal(3, vm.Cards.Count);
+        Assert.Equal(4, vm.Cards.Count);
         Assert.Equal("claude", vm.Cards[0].Meta.Id);
         Assert.Equal("openai", vm.Cards[1].Meta.Id);
         Assert.Equal("agy", vm.Cards[2].Meta.Id);
+        Assert.Equal("opencode", vm.Cards[3].Meta.Id);
         Assert.Same(vm.ClaudeCard, vm.Cards[0]);
         Assert.Same(vm.OpenAiCard, vm.Cards[1]);
         Assert.Same(vm.AgyCard, vm.Cards[2]);
+        Assert.Same(vm.OpenCodeCard, vm.Cards[3]);
     }
 
     [Fact]

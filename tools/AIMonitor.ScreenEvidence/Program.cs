@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AIMonitor.Application.AgentUsage;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
@@ -45,6 +46,9 @@ internal static class Program
             var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(snapshots.Select(p => new ProviderClientRegistration(p.Key, new SampleProvider(p.Value))).ToArray()));
             var vm = new MainWindowViewModel(coordinator, session);
             vm.RefreshAsync().GetAwaiter().GetResult();
+            vm.Connections.UpdateOpenCode(new OpenCodeAuthStatus(true, "opencode auth list",
+                [new OpenCodeSignIn("Anthropic", "OAuth"), new OpenCodeSignIn("OpenAI", "API key")], false, ""));
+            vm.Connections.UpdateOtherAgents(ConnectionsOnlyAgentUsage(now, today), null);
             vm.LastRefreshStatus = "Synthetic fixture · Manual refresh";
             var main = new MainWindow(vm, session) { Width = 1120, Height = 820 };
             foreach (var tab in vm.ProviderTabs)
@@ -77,7 +81,9 @@ internal static class Program
             detailsWindow.Close();
 
             vm.IsConnectionsPageVisible = true;
+            main.Height = 1320;
             Capture(main, $"connections-{theme}");
+            main.Height = 820;
             vm.IsConnectionsPageVisible = false;
             vm.SelectedTab = vm.ClaudeTab;
             main.Width = 300;
@@ -383,6 +389,14 @@ internal static class Program
 
         return new AgentUsageReport(
             daily, monthly, sessions, ["Model X"], AgentUsagePricing.OnlineRequested, now, skippedRows: 0);
+    }
+
+    private static AgentUsageReport ConnectionsOnlyAgentUsage(DateTimeOffset now, DateOnly today)
+    {
+        var tokens = new TokenCounts(0, 0, 0, 0, 0);
+        var agents = new[] { "copilot", "zcode", "example-agent" }
+            .Select(id => new AgentUsage(id, tokens, Array.Empty<ModelUsage>())).ToArray();
+        return new AgentUsageReport([new DailyAgentUsage(today, agents)], [], [], [], AgentUsagePricing.Offline, now, 0);
     }
 
     private sealed class MemoryAgentUsageSource(AgentUsageReport report) : IAgentUsageSource
