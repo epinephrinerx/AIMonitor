@@ -13,7 +13,12 @@ public sealed class OpenCodeAuthReaderFixRound2Tests
 {
     private const string GoodAuthJson = """{"anthropic":{"type":"oauth"},"openai":{"type":"api"}}""";
     private static readonly string[] GoodAuthPairs = ["anthropic|OAuth", "openai|API key"];
-    private static readonly TimeSpan Deadline = TimeSpan.FromMilliseconds(500);
+    /// <summary>The deadline of the one command that is meant to time out (K2: only that step may be this short).</summary>
+    private static readonly TimeSpan TimeoutDeadline = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>The deadline of every command that must succeed (K2): far above any scheduling stall on a loaded
+    /// machine.</summary>
+    private static readonly TimeSpan MustSucceedDeadline = TimeSpan.FromSeconds(2);
 
     /// <summary>The post-kill wait for exit stays capped at 2 s (J1).</summary>
     private static readonly TimeSpan PostKillCap = TimeSpan.FromSeconds(2);
@@ -36,7 +41,11 @@ public sealed class OpenCodeAuthReaderFixRound2Tests
         // Stdout never ends and ignores its token (and the kill); the wait for exit never completes and ignores its
         // token too. Nothing the fake does can end the first wait, so only the reader's own deadline can: it must
         // reach the kill path and then give up on the post-kill exit wait after at most 2 s.
-        var h = new ReaderHarness { VersionDeadline = Deadline, AuthListDeadline = Deadline };
+        // Only the command that is meant to time out gets the short deadline; the version step that must succeed
+        // before `auth list` runs keeps the 2 s one.
+        var h = command == "version"
+            ? new ReaderHarness { VersionDeadline = TimeoutDeadline, AuthListDeadline = MustSucceedDeadline }
+            : new ReaderHarness { VersionDeadline = MustSucceedDeadline, AuthListDeadline = TimeoutDeadline };
         var index = command == "version" ? 0 : 1;
         TextReader Stderr() => stderrNeverEnds ? new NeverEndingReader() : new StringReader("");
         if (command == "version")
@@ -52,11 +61,11 @@ public sealed class OpenCodeAuthReaderFixRound2Tests
         h.SetAuthJson(GoodAuthJson);
 
         var watch = Stopwatch.StartNew();
-        var status = await h.ReadAsync().WaitAsync(Deadline + PostKillCap + Margin);
+        var status = await h.ReadAsync().WaitAsync(TimeoutDeadline + PostKillCap + Margin);
         watch.Stop();
 
         Assert.True(h.Processes[index].Killed, "The kill path was not reached.");
-        Assert.True(watch.Elapsed < Deadline + PostKillCap + Margin, $"The read took {watch.Elapsed}.");
+        Assert.True(watch.Elapsed < TimeoutDeadline + PostKillCap + Margin, $"The read took {watch.Elapsed}.");
         Assert.Equal("auth.json", status.Source); // the failed command -> F4 fallback
         Assert.True(status.MayBeOutdated);
         Assert.Equal(GoodAuthPairs, ReaderHarness.Pairs(status));
@@ -67,11 +76,11 @@ public sealed class OpenCodeAuthReaderFixRound2Tests
     {
         // The new bound must not cut a command short: stdout that ends at once and an exit that completes at once
         // finish normally and their output is used (the reader may still kill the process tree while cleaning up).
-        var h = new ReaderHarness { VersionDeadline = Deadline, AuthListDeadline = Deadline };
+        var h = new ReaderHarness { VersionDeadline = MustSucceedDeadline, AuthListDeadline = MustSucceedDeadline };
         h.SetVersion("2.2.7");
         h.SetListJson("""[{"id":"a","name":"Anthropic","connections":[{"type":"credential","method":"oauth"}]}]""");
 
-        var status = await h.ReadAsync().WaitAsync(Deadline + PostKillCap + Margin);
+        var status = await h.ReadAsync().WaitAsync(MustSucceedDeadline + PostKillCap + Margin);
 
         Assert.Equal("opencode auth list", status.Source);
         Assert.Equal(new[] { "Anthropic|OAuth" }, ReaderHarness.Pairs(status));

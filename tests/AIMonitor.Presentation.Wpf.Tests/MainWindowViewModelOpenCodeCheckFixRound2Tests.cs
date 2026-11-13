@@ -8,10 +8,6 @@ namespace AIMonitor.Presentation.Wpf.Tests;
 /// </summary>
 public sealed partial class MainWindowViewModelOpenCodeCheckTests
 {
-    /// <summary>How long J5's one remaining negative watch looks for a read #3 that starts beside the held read #2.
-    /// A correct implementation can never fail it; it can only miss the bug if the bug needed longer than this.</summary>
-    private static readonly TimeSpan StaleCleanupWatch = TimeSpan.FromSeconds(1);
-
     // ── J4 ──────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -201,59 +197,62 @@ public sealed partial class MainWindowViewModelOpenCodeCheckTests
     [Fact]
     public async Task AStaleCleanupOfReadLoopA_CannotClearTheFlagOfReadLoopB_RequestCCoalesces_H11_J5()
     {
-        // Reviewer2 #3 with the J5 seam. A's loop has cleared its flag and is parked in the hook; request B arrives
-        // there and starts read #2 (B's flag is set and B is held); A is released and returns; requests then arrive
-        // while B is held. They must coalesce into B's pending rerun. If A's tail cleared B's flag, a request after
-        // that would start read #3 beside the held #2.
+        // Reviewer2 #3 as a deterministic interleaving (K2, no time watch). A's loop has cleared its flag and is
+        // parked in the hook; request B arrives there and starts read #2 (B's flag is set and B is held); A is
+        // released and A's loop task is awaited to completion, so A's tail, stale or not, has certainly run; only
+        // then request C arrives while B is still held. C must coalesce into B's pending rerun. If A's tail had
+        // cleared B's flag, C would start a new loop (OpenCodeCheckLoopTask changes) and read #3 beside the held #2.
         var reader = new FakeOpenCodeReader();
         await using var h = VmHarness.Create(reader, queuedContext: false);
         var releaseA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var loopBCaptured = new TaskCompletionSource<Task?>(TaskCreationOptions.RunContinuationsAsynchronously);
         h.OnLoopEnded = async number =>
         {
             if (number == 1)
             {
-                h.Vm.RequestOpenCodeCheck(); // B
+                h.Vm.RequestOpenCodeCheck(); // B: starts its own loop
+                loopBCaptured.TrySetResult(h.Vm.OpenCodeCheckLoopTask);
                 await releaseA.Task;
             }
         };
 
+        Task? loopA;
+        Task? loopB;
         try
         {
             h.Vm.RequestOpenCodeCheck(); // A
+            loopA = h.Vm.OpenCodeCheckLoopTask; // captured before A's read can finish, so before any hook ran
             await reader.WaitForCallsAsync(1);
             reader.Complete(0, Connected("ReadA"));
+            loopB = await loopBCaptured.Task.WaitAsync(Bound);
             await reader.WaitForCallsAsync(2); // B started and is held
         }
         finally
         {
-            releaseA.TrySetResult(); // A's loop returns now (its tail runs asynchronously: see the hammering below)
+            releaseA.TrySetResult(); // A's loop returns now
         }
 
-        // Request C, and keep requesting for the whole watch: A's tail may run any time after the release, and the
-        // bug shows only for a request that arrives after it. With a correct implementation every request coalesces
-        // into B's single pending rerun, so read #3 can never start while read #2 is held. If A's tail cleared B's
-        // flag, the first request after it starts read #3 beside the held #2.
-        var watchEnd = DateTime.UtcNow + StaleCleanupWatch;
-        do
-        {
-            h.Vm.RequestOpenCodeCheck(); // C and its repeats
-            await Task.Delay(10);
-            Assert.True(
-                reader.CallCount == 2,
-                "Read #3 started while read #2 was still in flight: A's stale cleanup cleared B's in-flight flag (H11).");
-        }
-        while (DateTime.UtcNow < watchEnd);
-        Assert.False(await reader.TryWaitForCallAsync(3, TimeSpan.FromMilliseconds(200)), "Read #3 started beside the held read #2 (H11).");
+        Assert.NotNull(loopA);
+        Assert.NotNull(loopB);
+        Assert.NotSame(loopA, loopB); // B started a loop of its own inside A's hook
+        await loopA!.WaitAsync(Bound); // A's loop, tail included, is done; B is still held
+
+        h.Vm.RequestOpenCodeCheck(); // C, while B is in flight
+        Assert.Same(loopB, h.Vm.OpenCodeCheckLoopTask); // C only marked a rerun pending: no new loop
+        Assert.Equal(2, reader.CallCount);
+        Assert.Equal(1, reader.MaxConcurrent);
 
         reader.Complete(1, Connected("ReadB"));
         await reader.WaitForCallsAsync(3); // C's coalesced rerun, in B's loop
         reader.Complete(2, Connected("ReadC"));
-        await h.WaitForLoopEndsAsync(2); // B's loop ended after the rerun
+        await loopB!.WaitAsync(Bound); // B's loop ended after the rerun
+        await h.WaitForLoopEndsAsync(2);
 
         Assert.Equal(3, reader.CallCount);
         Assert.Equal(1, reader.MaxConcurrent);
 
         h.Vm.RequestOpenCodeCheck(); // D: a fresh loop, the flag is not stuck
+        Assert.NotSame(loopB, h.Vm.OpenCodeCheckLoopTask);
         await reader.WaitForCallsAsync(4);
         reader.Complete(3, Connected("ReadD"));
         await h.WaitForLoopEndsAsync(3);
