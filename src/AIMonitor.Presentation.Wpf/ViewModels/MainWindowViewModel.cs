@@ -20,6 +20,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _openCodeCheckInFlight;
     private bool _openCodeCheckPending;
     private readonly object _openCodeCheckGate = new();
+    internal Func<Task>? OpenCodeCheckLoopEndedHook { get; set; }
     private ITrayReadingsSink? _traySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
     private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
@@ -491,18 +492,24 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         while (true)
         {
-            OpenCodeAuthStatus status;
+            OpenCodeAuthStatus? status = null;
+            var canceled = false;
             try { status = await Task.Run(() => _openCodeAuthReader!.ReadAsync(CancellationToken.None)).ConfigureAwait(false); }
-            catch (OperationCanceledException) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
+            catch (OperationCanceledException) { canceled = true; }
             catch (Exception) { status = new(true, "", [], false, "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check."); }
-            try { await DeliverOpenCodeStatusAsync(status).ConfigureAwait(false); }
-            catch (Exception) { /* observe delivery failures, then honor a queued rerun */ }
+            if (!canceled)
+            {
+                try { await DeliverOpenCodeStatusAsync(status!).ConfigureAwait(false); }
+                catch (Exception) { /* observe delivery failures, then honor a queued rerun */ }
+            }
             lock (_openCodeCheckGate)
             {
                 if (_openCodeCheckPending) { _openCodeCheckPending = false; continue; }
                 _openCodeCheckInFlight = false;
-                return;
             }
+            try { if (OpenCodeCheckLoopEndedHook is { } hook) await hook().ConfigureAwait(false); }
+            catch (Exception) { /* observe test-hook failures without changing loop state */ }
+            return;
         }
     }
 

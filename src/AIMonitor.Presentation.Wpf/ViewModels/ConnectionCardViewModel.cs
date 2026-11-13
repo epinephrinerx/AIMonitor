@@ -235,7 +235,18 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
     public void UpdateOpenCode(OpenCodeAuthStatus? status)
     {
-        if (status is null) { Update(null); return; }
+        if (status is null)
+        {
+            _adminOnly = false;
+            Detection = null;
+            StateWord = "Checking...";
+            StateGlyph = "–";
+            Account = "Not signed in";
+            SourceLine = Meta.Tagline;
+            ConnectButtonText = "Sign-in help";
+            RefreshColours();
+            return;
+        }
         Detection = null;
         ConnectButtonText = "Sign-in help";
         if (!status.Installed) { StateWord = "Not connected"; StateGlyph = "–"; Account = "OpenCode not found on PATH"; SourceLine = "Install OpenCode, then run `opencode auth login`"; }

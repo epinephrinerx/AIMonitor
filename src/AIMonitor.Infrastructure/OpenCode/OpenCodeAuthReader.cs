@@ -116,7 +116,7 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
 
             // Observe stdout immediately. In particular, an over-cap stream kills the process
             // without waiting for exit or stderr, both of which may otherwise remain open.
-            var first = await Task.WhenAny(stdout, exited).ConfigureAwait(false);
+            var first = await Task.WhenAny(stdout, exited).WaitAsync(deadline.Token).ConfigureAwait(false);
             if (first == stdout)
             {
                 var output = await stdout.ConfigureAwait(false);
@@ -204,7 +204,7 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
     }
     private static int? ParseMajor(string output) { var match = Regex.Match(output, @"\d+"); return match.Success && int.TryParse(match.Value, out var value) ? value : null; }
     private static OpenCodeAuthStatus Failed() => new(true, "", [], false, ErrorText);
-    private static async Task<byte[]?> ReadFileAsync(string path, int maxBytes, CancellationToken ct)
+    internal static async Task<byte[]?> ReadFileAsync(string path, int maxBytes, CancellationToken ct)
     {
         try
         {
