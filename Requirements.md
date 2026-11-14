@@ -357,7 +357,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ f339f07 เมื่อ 2026-11-13 · spec `Docs/SPEC_R020_R021.md` G1–G6, H11–H12) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge f339f07 · spec `Docs/SPEC_R020_R021.md` G1–G6, H11–H12) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | หน้า Sign-in / Connections (`ConnectionsPage`) · ชื่อ agent ของ ccusage (`AgentUsagePresenter`) |
 | เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-020]] · [[R-008]] |
@@ -387,11 +387,16 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ภาพ ScreenEvidence `connections-light/dark` (synthetic: Copilot, ZCode, `example-agent`) แสดงครบสามแถว
 - ยังต้องให้คุณดูในแอปจริงกับ ccusage จริงของเครื่อง (ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ห้ามหยุด)
 
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
+
 ## R-020 · เพิ่มการ login ของ OpenCode
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ f339f07 เมื่อ 2026-11-13 · spec `Docs/SPEC_R020_R021.md` F1–F10, H1–H15, J1–J6, K1–K2) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge f339f07 · spec `Docs/SPEC_R020_R021.md` F1–F10, H1–H15, J1–J6, K1–K2) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | หน้า Sign-in / Connections · `ProviderMeta` · ตัวตรวจการติดตั้งและ auth ของ opencode (Infrastructure) |
 | เกี่ยวกับ | [[R-015]] · [[R-019]] · [[R-021]] |
@@ -426,11 +431,16 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - รีวิว: Reviewer1/Reviewer2 Approve with minors (ปิดใน J/K) · Inspector B Approve (mutant ทุกตัวในรอบสุดท้ายถูกจับ)
 - ยังต้องให้คุณดูในแอปจริงกับ OpenCode จริงของเครื่อง: ผมไม่ได้รัน `opencode` จริง และไม่ได้เปิดแอปตัวใหม่ เพราะตัวที่ติดตั้งไว้ห้ามหยุด
 
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
+
 ## R-019 · หน้า login รองรับ API key ของทุกโปรแกรมที่ดึงยอดได้จริง
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ 91fc803 เมื่อ 2026-11-12 · spec `Docs/SPEC_R019.md` E1–E16) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge 91fc803 · spec `Docs/SPEC_R019.md` E1–E16) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | `ConnectDialog` · `ProviderMeta` · `ProviderConnectionStore` · provider clients (Claude Admin API) |
 | เกี่ยวกับ | [[R-006]] · [[R-012]] · [[R-014]] · [[R-020]] |
@@ -454,10 +464,10 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 - ไม่เดา endpoint: ผู้ให้บริการที่ยืนยันจากเอกสารไม่ได้ว่ามี usage API จะไม่ทำ
 
 **ตรวจรับเมื่อ:**
-- [ ] ใส่ Anthropic Admin key ที่ถูกต้องแล้วแท็บ Claude แสดง usage/cost ของ API (synthetic tests; คุณตรวจด้วย key จริง)
+- [x] ใส่ Anthropic Admin key ที่ถูกต้องแล้วแท็บ Claude แสดง usage/cost ของ API (synthetic tests; คุณตรวจด้วย key จริง)
 - [x] key ผิดรูปแบบหรือถูกปฏิเสธ → ข้อความบอกสาเหตุ ไม่ล้ม และไม่แสดง key
 - [x] การ์ดที่ไม่รองรับ API key บอกเหตุผลชัดเจน
-- [ ] key ถูกเก็บใน DPAPI ไม่อยู่ใน settings หรือ log
+- [x] key ถูกเก็บใน DPAPI ไม่อยู่ใน settings หรือ log
 
 ผลทดสอบของผม (2026-11-12, Release บน `91fc803`): build 0/0 · เทสต์ 344 + 218 + 1,406 + 758 ผ่านครบ · format สะอาด
 - ข้อ 2: `AnthropicAdminUsageClientR019Tests` / `ClaudeLiveQuotaClientAnthropicAdminR019Tests` (401/403 → การ์ด Limited,
@@ -468,11 +478,16 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
   (เทสต์ synthetic ครอบคลุมการเก็บที่ secret store เดียวกับ OpenAI และ `ToString` ไม่แสดง key แต่ไม่ได้ตรวจ DPAPI บนดิสก์จริง)
 - ความเสี่ยงที่รับไว้: wiring/catch ใน `App.xaml.cs` (ตรวจด้วยมือ) · ±14:30 offset ถูกรับตามสเปก · ค่า fraction และปีขอบไม่มีเทสต์ตรึง
 
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ — ข้อ 1 และ 4 ติ๊กตามคำยืนยันนี้
+
 ## R-018 · แก้สองจุดจากภาพคู่: ชื่อ gauge ล้นการ์ด และแท็บ AGY ไม่มีสถิติ/กราฟ
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (merge เข้า `agent/r002-phase11-settings` ที่ 2e995bf เมื่อ 2026-11-13 · spec `Docs/SPEC_R018.md` D1–D18) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge 2e995bf · spec `Docs/SPEC_R018.md` D1–D18) |
 | วันที่ | 2026-11-11 |
 | แตะส่วนไหน | `Controls/GaugeControl.cs` · แท็บ Gemini / AGY (`ProviderTabViewModel`, ข้อมูล ccusage ของ R-014) · ScreenEvidence |
 | เกี่ยวกับ | [[R-004]] · [[R-005]] · [[R-013]] · [[R-014]] |
@@ -496,6 +511,11 @@ key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
 - [x] ชื่อสั้นแสดงเหมือนเดิม
 - [x] แท็บ AGY มีแถวสถิติและกราฟรายวันเมื่อ ccusage มีข้อมูล `antigravity`
 - [x] ไม่มีข้อมูล `antigravity` → แท็บ AGY แสดงแบบเดิมไม่ error
+
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
 
 ## R-015 · gauge ค่าใช้จ่ายของ OpenCode และ tab OpenCode
 
