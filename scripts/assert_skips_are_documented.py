@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail when a test was skipped without a documented platform reason.
 
-R-014 accepts the macOS port only if nothing is skipped for platform reasons beyond the tests
+R-022 accepts the macOS port only if nothing is skipped for platform reasons beyond the tests
 that genuinely need one operating system and say so. Those skips all come from
 WindowsOnlyFactAttribute or MacOSOnlyFactAttribute, which write a reason starting with
 "Windows-only:" or "macOS-only:" into the .trx, so any other skip reason is an undocumented hole

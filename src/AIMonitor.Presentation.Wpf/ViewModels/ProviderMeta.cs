@@ -30,13 +30,13 @@ public sealed record ProviderMeta(
         Id: "claude",
         DisplayName: "Claude",
         BadgeLetter: "C",
-        Tagline: "Claude Code · full quota",
-        NeedsKey: false,
-        KeyLabel: "",
-        KeyPlaceholder: "",
+        Tagline: "Claude Code · full quota · optional API usage",
+        NeedsKey: true,
+        KeyLabel: "Admin API key (optional; API usage and cost)",
+        KeyPlaceholder: "sk-ant-admin…",
         ExtraLabel: "",
         ExtraPlaceholder: "",
-        SetupHint: "Sign in to Claude Code on this machine (run `claude` in a terminal). This app reads that existing login read-only and never writes to it.");
+        SetupHint: "Sign in to Claude Code on this machine (run `claude` in a terminal). This app reads that existing login read-only and never writes to it.\n\nThe Admin API key is optional and lets this app read organization usage and cost from Anthropic. It requires an Anthropic organization with an admin role, created in Claude Console → Settings → Admin keys. Ordinary or workspace API keys cannot read usage; only organization Admin keys starting with sk-ant-admin work. Claude Code sign-in stays the source of quota.");
 
     public static ProviderMeta OpenAi { get; } = new(
         Id: "openai",
@@ -60,7 +60,12 @@ public sealed record ProviderMeta(
         KeyPlaceholder: "",
         ExtraLabel: "",
         ExtraPlaceholder: "",
-        SetupHint: "Install AGY and sign in through Antigravity, then click Refresh. Ensure agy.exe is available on PATH; restart AIMonitor after changing PATH. This app reads AGY's /usage JSON output, without starting a model conversation or changing your login. AGY pools are separate from standalone Claude/Codex quotas. No API key or Google Cloud project is needed.");
+        SetupHint: "Install AGY and sign in through Antigravity, then click Refresh. Ensure agy.exe is available on PATH; restart AIMonitor after changing PATH. This app reads AGY's /usage JSON output, without starting a model conversation or changing your login. AGY pools are separate from standalone Claude/Codex quotas. No API key or Google Cloud project is needed. Gemini API keys cannot read usage or quota (no usage API), so AGY uses your Antigravity sign-in.");
+
+    public static ProviderMeta OpenCode { get; } = new(
+        Id: "opencode", DisplayName: "OpenCode", BadgeLetter: "O", Tagline: "OpenCode CLI · provider sign-ins",
+        NeedsKey: false, KeyLabel: "", KeyPlaceholder: "", ExtraLabel: "", ExtraPlaceholder: "",
+        SetupHint: "Install OpenCode, then sign in from a terminal: run `opencode auth login` and choose a provider (or use /connect inside OpenCode). Run `opencode auth list` to check your sign-ins.\n\nThis app runs `opencode --version` and `opencode auth list` to show provider names and sign-in types — never keys or tokens — and never signs in, signs out or edits OpenCode's files. On OpenCode 2.x that command talks to OpenCode's background service and starts it if it is not running, as any OpenCode command does; a service started for the first time may import an older auth.json into OpenCode's own database (OpenCode's normal upgrade step, not done by this app). OpenCode usage and cost in the OpenCode tab still come from ccusage.");
 
     public static ProviderMeta Gemini { get; } = new(
         Id: "gemini",
@@ -77,5 +82,6 @@ public sealed record ProviderMeta(
     public static IReadOnlyList<ProviderMeta> All { get; } = [Claude, OpenAi, Agy];
 
     public static ProviderMeta? TryGet(string providerId) =>
-        All.FirstOrDefault(m => string.Equals(m.Id, providerId, StringComparison.OrdinalIgnoreCase));
+        string.Equals(OpenCode.Id, providerId, StringComparison.OrdinalIgnoreCase)
+            ? OpenCode : All.FirstOrDefault(m => string.Equals(m.Id, providerId, StringComparison.OrdinalIgnoreCase));
 }

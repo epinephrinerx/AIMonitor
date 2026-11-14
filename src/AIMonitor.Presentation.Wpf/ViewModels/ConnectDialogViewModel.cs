@@ -27,6 +27,8 @@ public sealed class ConnectDialogViewModel : ViewModelBase
 
     public bool NeedsKey => Meta.NeedsKey;
 
+    public bool ShowsFoundSection => !string.Equals(Meta.Id, "opencode", StringComparison.OrdinalIgnoreCase);
+
     public bool CanBrowse => Meta.KeyPlaceholder.Contains("json", StringComparison.OrdinalIgnoreCase);
 
     public string Key
@@ -73,18 +75,34 @@ public sealed class ConnectDialogViewModel : ViewModelBase
     {
         get
         {
-            if (!string.Equals(Meta.Id, "openai", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(_key))
+            if (string.IsNullOrWhiteSpace(_key))
             {
                 return string.Empty;
             }
 
             var trimmed = _key.Trim();
-            if (trimmed.StartsWith("sk-admin-", StringComparison.Ordinal))
+
+            if (string.Equals(Meta.Id, "openai", StringComparison.OrdinalIgnoreCase))
             {
-                return "Admin API key format recognized (sk-admin-…).";
+                if (trimmed.StartsWith("sk-admin-", StringComparison.Ordinal))
+                {
+                    return "Admin API key format recognized (sk-admin-…).";
+                }
+
+                return "API spend requires an organization Admin key (sk-admin-…). Project or user keys (e.g. sk-proj-…) cannot read organization usage or costs.";
             }
 
-            return "API spend requires an organization Admin key (sk-admin-…). Project or user keys (e.g. sk-proj-…) cannot read organization usage or costs.";
+            if (string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase))
+            {
+                if (trimmed.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+                {
+                    return "Admin API key format recognized (sk-ant-admin…).";
+                }
+
+                return "API usage and cost require an organization Admin key (sk-ant-admin…). Ordinary or workspace API keys cannot read organization usage.";
+            }
+
+            return string.Empty;
         }
     }
 

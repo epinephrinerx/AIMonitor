@@ -2,6 +2,7 @@ namespace AIMonitor.Presentation.Wpf.ViewModels;
 
 using System.Windows.Input;
 using System.Windows.Media;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Domain;
 using AIMonitor.Presentation.Wpf.Theme;
 
@@ -12,12 +13,13 @@ using AIMonitor.Presentation.Wpf.Theme;
 public sealed class ConnectionCardViewModel : ViewModelBase
 {
     private DetectionInfo? _detection;
+    private bool _adminOnly;
     private string _stateWord = "Checking...";
     private string _stateGlyph = "–";
     private string _account = "Not signed in";
     private string _sourceLine = "";
     private string _connectButtonText = "Connect...";
-    private readonly int _seriesIndex;
+    private int _seriesIndex;
 
     public ProviderMeta Meta { get; }
 
@@ -31,13 +33,27 @@ public sealed class ConnectionCardViewModel : ViewModelBase
 
     public Brush StateTint => Solid(StateColour(), 0x24);
 
-    private System.Windows.Media.Color StateColour() => _detection?.State switch
+    private System.Windows.Media.Color StateColour()
     {
-        DetectionState.Connected => ThemePalette.StatusGood,
-        DetectionState.Limited => ThemePalette.StatusWarning,
-        DetectionState.Expired => ThemePalette.StatusSerious,
-        _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
-    };
+        if (string.Equals(Meta.Id, "opencode", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(_stateWord, "Connected", StringComparison.Ordinal) ? ThemePalette.StatusGood : ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted;
+
+        if (_detection is not null
+            && string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase)
+            && _adminOnly
+            && _detection.State != DetectionState.Expired)
+        {
+            return ThemePalette.StatusWarning;
+        }
+
+        return _detection?.State switch
+        {
+            DetectionState.Connected => ThemePalette.StatusGood,
+            DetectionState.Limited => ThemePalette.StatusWarning,
+            DetectionState.Expired => ThemePalette.StatusSerious,
+            _ => ThemePalette.For(ThemeManager.Instance.IsDark).InkMuted,
+        };
+    }
 
     private static SolidColorBrush Solid(System.Windows.Media.Color colour, byte alpha)
     {
@@ -108,12 +124,18 @@ public sealed class ConnectionCardViewModel : ViewModelBase
         Update(null);
     }
 
+    internal void SetBadgeSeriesIndex(int index) { _seriesIndex = index; RefreshColours(); }
+
     /// <summary>
     /// Updates the card representation from detection telemetry.
     /// When <paramref name="detection"/> is null, behaves as NotConnected with "Checking..." StateWord.
+    /// For Claude, when <paramref name="adminOnly"/> is true (Admin API succeeded but OAuth is not
+    /// connected), E14 displays "Limited" / "!" unless detection is Expired, with the matching chip
+    /// colour. The SourceLine reads "Admin key connected · Claude Code not signed in" (R-019 E2, E12a).
     /// </summary>
-    public void Update(DetectionInfo? detection)
+    public void Update(DetectionInfo? detection, bool adminOnly = false)
     {
+        _adminOnly = adminOnly;
         Detection = detection;
         RefreshColours();
 
@@ -156,17 +178,37 @@ public sealed class ConnectionCardViewModel : ViewModelBase
             Account = Meta.Tagline;
         }
 
-        var parts = new List<string>(2);
-        if (!string.IsNullOrEmpty(detection.SourceLabel))
-        {
-            parts.Add($"Detected from {detection.SourceLabel}");
-        }
-        if (!string.IsNullOrEmpty(detection.Hint))
-        {
-            parts.Add(detection.Hint);
-        }
+        // Admin-only mode for Claude: OAuth is not connected but Admin API succeeded (R-019 E2, E12a).
+        // The <paramref name="adminOnly"/> flag is the sole decider — the card does not re-derive it
+        // from DetectionState.
+        var isClaude = string.Equals(Meta.Id, "claude", StringComparison.OrdinalIgnoreCase);
 
-        SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        if (isClaude && adminOnly)
+        {
+            // R-019 E14: admin-only Claude shows "Limited" / "!" except when OAuth is Expired.
+            // Expired stays truthful to the detection state.
+            // The Detection itself (credential-file truth) is left unchanged.
+            if (detection.State != DetectionState.Expired)
+            {
+                StateWord = "Limited";
+                StateGlyph = "!";
+            }
+            SourceLine = "Admin key connected · Claude Code not signed in";
+        }
+        else
+        {
+            var parts = new List<string>(2);
+            if (!string.IsNullOrEmpty(detection.SourceLabel))
+            {
+                parts.Add($"Detected from {detection.SourceLabel}");
+            }
+            if (!string.IsNullOrEmpty(detection.Hint))
+            {
+                parts.Add(detection.Hint);
+            }
+
+            SourceLine = parts.Count > 0 ? string.Join("  -  ", parts) : Meta.Tagline;
+        }
 
         if (!Meta.NeedsKey)
         {
@@ -189,5 +231,34 @@ public sealed class ConnectionCardViewModel : ViewModelBase
         Account = "Could not check";
         SourceLine = error ?? "";
         ConnectButtonText = !Meta.NeedsKey ? "Sign-in help" : "Connect...";
+    }
+
+    public void UpdateOpenCode(OpenCodeAuthStatus? status)
+    {
+        if (status is null)
+        {
+            _adminOnly = false;
+            Detection = null;
+            StateWord = "Checking...";
+            StateGlyph = "–";
+            Account = "Not signed in";
+            SourceLine = Meta.Tagline;
+            ConnectButtonText = "Sign-in help";
+            RefreshColours();
+            return;
+        }
+        Detection = null;
+        ConnectButtonText = "Sign-in help";
+        if (!status.Installed) { StateWord = "Not connected"; StateGlyph = "–"; Account = "OpenCode not found on PATH"; SourceLine = "Install OpenCode, then run `opencode auth login`"; }
+        else if (!string.IsNullOrEmpty(status.Error)) { StateWord = "Unavailable"; StateGlyph = "!"; Account = "Could not check"; SourceLine = status.Error; }
+        else if (status.SignIns.Count == 0) { StateWord = "Not connected"; StateGlyph = "–"; Account = "No providers signed in"; SourceLine = "Run `opencode auth login` to sign in"; }
+        else
+        {
+            StateWord = "Connected"; StateGlyph = "✓";
+            Account = "Signed in: " + string.Join(", ", status.SignIns.Select(s => $"{s.Name} ({s.Kind})"));
+            SourceLine = status.Source == "auth.json" ? "Detected from auth.json" : "Detected from opencode auth list";
+            if (status.MayBeOutdated) SourceLine += "  -  may be out of date (OpenCode 2.x keeps sign-ins in its database)";
+        }
+        RefreshColours();
     }
 }

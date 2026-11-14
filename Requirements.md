@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-11
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-14
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -202,14 +202,19 @@
 - ไม่ให้คะแนนหรือรับรองความเหมือนแทนผู้ใช้ตาม R-004
 
 **ตรวจรับเมื่อ:**
-- [ ] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน
-- [ ] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows
-- [ ] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง
-- [ ] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ
+- [x] เอกสารระบุ implementation, verification และ acceptance แยกกันและตรงโค้ดปัจจุบัน — ตรวจแล้ว: `Docs/STATUS_2026-11-11.md` ข้อ 1 (verification พร้อมคำสั่งและ commit), ข้อ 2 (ตาราง Implementation | Verification | Acceptance ของ R-001–R-017 อ้าง commit จริง), ข้อ 4 (สิ่งที่ยังไม่ได้ทดสอบ); 2026-11-11
+- [x] CI มี format/build/test/dependency audit/self-contained packaging gates ที่รันได้ใน Windows — ตรวจแล้ว: GitHub Actions "Windows verification" ผ่านทุกขั้นที่ `a1765a3` (runs 42837235552 tag `v2.0.3`, 42837245808 `v2`, 42837246886 branch; 2026-11-10)
+- [x] local build/test/format/audit และ installer compilation ผ่าน พร้อมบันทึกคำสั่งจริง — ตรวจแล้ว 2026-11-10 ที่ `dde0519` (ดูความคืบหน้าบรรทัดวันเดียวกัน)
+- [x] มี synthetic screen evidence และตารางเกณฑ์ parity พร้อมระบุรายการที่ยังไม่ได้ทดสอบ — ตรวจแล้ว 2026-11-11 ที่ `0bacf53`: render 46 ภาพ 2.0 + 36 ภาพ 1.3.3 (PySide6 6.12.0), `build_parity_report.py` → 38 คู่ + 2.0-only 10 จอ + 106 ข้อย่อยฟังก์ชัน, verification tests 10/10; รายการที่ยังไม่ได้ทดสอบอยู่ใน `STATUS_2026-11-11.md` ข้อ 3–4
 - [ ] ผู้ใช้ตรวจรับ R-004 และ installer upgrade ใน disposable Windows environment
 
 **ความคืบหน้า:**
 - 2026-10-14 — Baseline `4681919`: build 0 warnings/errors, 1,310 tests ผ่าน, format ผ่าน; commits มี widget resize, theme, dashboard, charts, widget behavior, tray, Settings/Connections/About (เฟส 5–11b), update flow และ packaging naming ถึง 2026-10-07 ส่วนรายงานรีวิวที่เก็บใน repo มีถึง R-002 เฟส 4
+- 2026-11-10 — ตรวจซ้ำที่ `dde0519` (หลัง R-014–R-017): build 0 warnings และ tests 2,330/2,330 ผ่าน และ format สะอาด (รันที่ merge `b09ade5`; `dde0519` แก้แค่ `Requirements.md`); `pwsh -File scripts/verify_packages.ps1` → no vulnerable packages; `dotnet publish src/AIMonitor.Presentation.Wpf/AIMonitor.Presentation.Wpf.csproj -p:PublishProfile=win-x64-self-contained -o publish/win-x64` ผ่าน (exe 78 MB); `artifacts/tools/inno/compiler/ISCC.exe -DAppVersion=2.0.2 installer/AIMonitor2.iss` ผ่าน → `installer_out/AIUsageMonitor Setup 2.0.2.exe` (73 MB). รันทีละขั้นแทน `build_installer.ps1` เพราะขั้นแรกของสคริปต์ build Debug แบบ `--no-incremental` ซึ่งชนกับแอป Debug ที่เปิดให้ผู้ใช้ตรวจรับอยู่; `verify_packages.ps1` ต้องใช้ PowerShell 7 (`-Depth`) เหมือน CI. ข้อควรระวัง: `VersionPrefix` ยังเป็น 2.0.2 ไฟล์ setup 2.0.2 ในเครื่องจึงถูกแทนด้วย build ที่มี R-014–R-017 แล้ว ต้อง bump version ก่อน release
+- 2026-11-10 — ผู้ใช้สั่ง "เปลี่ยน version เลยครับ": `VersionPrefix` เป็น 2.0.3 และร่าง `Docs/RELEASE_2.0.3.md` (ระบุว่า R-014–R-017 ยังรอตรวจรับ); publish + ISCC ใหม่ได้ `AIUsageMonitor 2.0.3.exe` และ `AIUsageMonitor Setup 2.0.3.exe` (FileVersion 2.0.3.0); ไม่ได้ push หรือ release
+- 2026-11-11 — ผู้ใช้สั่ง "ทำเลยทั้งสามข้อครับ": spec `Docs/SPEC_R005_EVIDENCE.md` (V1–V14) ผ่าน Inspector A, WO1 (glm-5.3-flash) `dc155f1` + fix `726b92d`, Test Author (qwen3.8-flash) `056fc3f` → `4cb1166` → `eecf044`, Inspector B สองรอบ, Reviewer1/2 อนุมัติ, Integrator (Sonnet 5.5) merge `fff2571` + `0bacf53`; render หลักฐานใหม่และเติม `Docs/STATUS_2026-11-11.md` ข้อ 3 → ติ๊กเกณฑ์ 1 และ 4. เกณฑ์ 5 รอผู้ใช้: คะแนน R-004 และรันชุดทดสอบ upgrade ใน Windows Sandbox (เปิด feature แล้ว)
+- 2026-11-14 — ผู้ใช้สั่ง "สร้าง installer และ push, release ครับ" หลังตรวจรับ R-018–R-021: `VersionPrefix` เป็น 2.0.4 และ `Docs/RELEASE_2.0.4.md`; ตรวจบน Release: build 0 warnings/errors, เทสต์ 344 + 225 + 1,659 + 951 = 3,179 ผ่าน, format สะอาด, `pwsh -File scripts/verify_packages.ps1` → no vulnerable packages; `dotnet publish … -p:PublishProfile=win-x64-self-contained -o publish/win-x64` และ `ISCC.exe /DAppVersion=2.0.4 installer/AIMonitor2.iss` ผ่าน → `AIUsageMonitor 2.0.4.exe` (82 MB) และ `AIUsageMonitor Setup 2.0.4.exe` (77 MB), FileVersion 2.0.4.0; รันทีละขั้นแทน `build_installer.ps1` เพราะแอป Debug เปิดอยู่
+- 2026-11-14 — push `d6a97e7` ขึ้น `agent/r002-phase11-settings`, `v2` และ tag `v2.0.4`; CI "Windows verification" ผ่านทั้งสาม run (43582667891 tag, 43582669771 `v2`, 43582669809 branch); GitHub release "AI Usage Monitor 2.0.4" (Latest) มี `AIUsageMonitor.2.0.4.exe`, `AIUsageMonitor.Setup.2.0.4.exe` และ `SHA256SUMS-2.0.4.txt` (digest ตรงกับไฟล์ในเครื่อง). ผู้ใช้สั่ง "commit ทั้งหมด push branch นี้เป็น branch main ครับ" และเลือก merge แบบเก็บประวัติ 1.x: merge `origin/main` (Python 1.x, ไม่มีจุดร่วม) ด้วย `--allow-unrelated-histories -s ours` แล้ว push ขึ้น `main` แบบ fast-forward
 
 ## R-006 · แก้ OpenAI API Key ดึงข้อมูลไม่ได้ และ Gemini เชื่อมต่อไม่ได้
 
@@ -350,14 +355,15 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
-## R-015 · ฟังก์ชัน update ของ Mac Edition ดึงเฉพาะ release จากสาขา Mac
+## R-023 · ฟังก์ชัน update ของ Mac Edition ดึงเฉพาะ release จากสาขา Mac
 
 | | |
 |---|---|
 | สถานะ | 🧪 รอตรวจรับ |
 | วันที่ | 2026-11-11 |
+| เลขเดิม | R-015 บนสาขา `feat/macos-avalonia` — เปลี่ยนเลขตอน merge main 2.0.4 (2026-11-14) เพราะ main ใช้ R-014–R-021 ไปแล้ว ส่วนเนื้อหาไม่เปลี่ยน |
 | แตะส่วนไหน | `src/AIMonitor.Application/Version/VersionChecker.cs` · `src/AIMonitor.Presentation.Avalonia/ViewModels/AboutViewModel.cs` · `src/AIMonitor.Presentation.Avalonia/App.axaml.cs` · `tests/AIMonitor.Application.Tests/Version/GitHubVersionCheckerBranchTests.cs` |
-| เกี่ยวกับ | [[R-014]] |
+| เกี่ยวกับ | [[R-022]] |
 
 **คุณระบุ:**
 > แก้ไขฟังก์ชั่น update โดยใน Mac Edition ต้องดึง Branch mac เท่านั้น ไม่ดึง main
@@ -380,12 +386,13 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 **ความเสี่ยงที่เหลือ:** โค้ด 2.0 บนสาขา `feat/macos-avalonia` **ไม่มีประวัติร่วมกับสาขา `Mac`** (Mac คือ Python 1.x) ถ้าจะออก Mac Edition 2.0 ต้องให้ tag อยู่บนสาขา `Mac` — การ update จึงจะเห็น release นั้น วิธีนำโค้ดเข้าสาขา `Mac` เป็นเรื่องที่คุณต้องตัดสิน
 
-## R-014 · พอร์ต AIMonitor 2.0 ลง macOS ด้วย Avalonia
+## R-022 · พอร์ต AIMonitor 2.0 ลง macOS ด้วย Avalonia
 
 | | |
 |---|---|
 | สถานะ | 🔨 กำลังทำ · เฟส 0–8 เขียนครบแล้ว · เหลือยืนยันด้วยตาบนเครื่องจริง แล้วจึงเป็น 🧪 |
 | วันที่ | 2026-10-26 |
+| เลขเดิม | R-014 บนสาขา `feat/macos-avalonia` — เปลี่ยนเลขตอน merge main 2.0.4 (2026-11-14) เพราะ main ใช้ R-014–R-021 ไปแล้ว ส่วนเนื้อหาไม่เปลี่ยน |
 | แตะส่วนไหน | `AIMonitor.Infrastructure.csproj` (เลิกผูก `net10.0-windows` ทั้งก้อน) · `Storage/WindowsDpapiProtector.cs` · `Storage/LegacyDpapiSecretUnsealer.cs` · `Storage/LegacyRegistrySettingsReader.cs` · `Windows/NamedMutexSingleInstance.cs` · `Windows/WindowsStartupRegistrar.cs` · โครงการใหม่ `AIMonitor.Presentation.Avalonia` ควบคู่ `AIMonitor.Presentation.Wpf` · `AIMonitor.sln` · `Docs/ARCHITECTURE.md` · `Docs/TESTING.md` |
 | เกี่ยวกับ | [[R-001]] · [[R-002]] · [[R-004]] · สาขา `Mac` (Python 1.3.1 + พอร์ต macOS) ใช้เป็นต้นแบบ |
 
@@ -453,6 +460,331 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-31 — **ผลจริงบนเครื่อง**: การแก้ชื่อไฟล์ `agy.exe`/`codex.exe` ทำให้ **ทั้งสาม provider ใช้งานได้พร้อมกันครั้งแรกบน macOS** — Claude 83% (Session ขึ้น ⚠ High จาก `EffectiveSeverity` ที่เพิ่งแก้) · OpenAI / Codex 18% พร้อม Plan Plus · Gemini / AGY 14% แสดง section "Gemini" กับ "Claude / GPT" เรียงคอลัมน์ตรงกัน · กราฟรายวัน 14 วันแยกสีตามโมเดล (Opus 5 / Opus) แกนลงตัวที่ 50M/100M/150M/200M · stat tile "Equivalent API value $128.83" · AGY ไม่มี history จึงไม่ขึ้นกราฟ ตามที่บริการรายงานเอง
 - 2026-10-31 — ชุดทดสอบ: 1,433 ผ่าน / 21 skip / 0 แดง (รวม 1,454) · `dotnet format` สะอาด · `.app` build ใหม่แล้ว · ยังไม่ commit
 - 2026-10-31 — **คุณสั่งแก้ gauge ของ Gemini 4 Argon ที่ชื่อกินพื้นที่วง** ต้นเหตุคือ `GaugeControl` วาดชื่อโดยไม่จำกัดความกว้าง ชื่อยาว "Gemini 4 Argon · Weekly" จึงพาดข้ามปลายโค้ง · แก้ที่ตัววาด (ไม่แตะ `AgyUsageMapper` ที่ใช้ร่วมกับ Windows): ชื่อต้องอยู่ในความกว้างระหว่างขอบในของวงที่ระดับความสูงของชื่อ — ย่อฟอนต์ได้ไม่ต่ำกว่า 80% ถ้ายังไม่พอให้ขึ้นบรรทัดที่สอง และตัด "…" เฉพาะส่วนที่สองบรรทัดยังไม่พอ ชื่อที่ขึ้นสองบรรทัดจะดัน subtitle ลงแทนการทับกัน · เทสต์ใหม่ 5 ข้อใน `Controls/GaugeControlTests.cs` · **ยังไม่ได้ยืนยันด้วยตาบนจอจริง** เพราะถ่ายภาพหน้าต่างไม่สำเร็จ
+
+## R-021 · คำแนะนำการ login ของ agent อื่นนอกจากที่กำหนดไว้
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge f339f07 · spec `Docs/SPEC_R020_R021.md` G1–G6, H11–H12) |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | หน้า Sign-in / Connections (`ConnectionsPage`) · ชื่อ agent ของ ccusage (`AgentUsagePresenter`) |
+| เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-020]] · [[R-008]] |
+
+**คุณระบุ:**
+> และต้องมีคำแนะนำสำหรับการล็อคอินของ agent อื่นๆนอกจากที่เรากำหนดไว้
+
+คำตอบเพิ่มเติม (2026-11-11): ccusage รองรับ 19 agent — ผู้ใช้เลือก "เฉพาะที่ยืนยันแล้ว + ข้อความกลาง"
+(คำแนะนำเฉพาะของ GitHub Copilot CLI และ ZCode ที่ยืนยันจากเอกสารทางการแล้ว ที่เหลือใช้ข้อความกลาง เพิ่มทีหลังได้)
+
+**ผมเข้าใจว่า:**
+หน้า Connections มีส่วน "agent อื่น" แสดงคำแนะนำ login ของ agent ที่ ccusage ตรวจเจอแต่ไม่มีแท็บของตัวเอง
+(เช่น GitHub Copilot, Z Code) agent ที่ไม่รู้จักใช้คำแนะนำกลาง ข้อความต้องตรวจสอบกับเอกสารของผู้ให้บริการก่อนใส่
+
+**ไม่รวม:**
+- ไม่สร้างแท็บหรือ gauge ใหม่ และไม่ดึง quota ของ agent เหล่านั้น
+- ไม่ login แทนผู้ใช้และไม่อ่าน credentials ของ agent เหล่านั้น
+
+**ตรวจรับเมื่อ:**
+- [x] agent ที่ ccusage พบแต่ไม่มีแท็บ แสดงในส่วน "agent อื่น" พร้อมคำแนะนำ login ของตัวเอง
+- [x] agent id ที่ไม่รู้จักแสดงชื่อดิบพร้อมคำแนะนำกลาง
+- [x] ไม่มี ccusage หรือไม่พบ agent อื่น → ส่วนนี้บอกสถานะชัดเจน ไม่ว่างเปล่า
+
+ผลทดสอบของผม (2026-11-13, Release บน `f339f07`): build 0/0 · เทสต์ 344 + 225 + 1,659 + 951 ผ่านครบ · format สะอาด · unittest OK
+- ข้อ 1–3: `ConnectionsViewModelOtherAgentsTests` / `MainWindowViewModelOtherAgentsTests` (รายการยกเว้น, dedupe, ลำดับ,
+  คำแนะนำ Copilot/ZCode ตามตัวอักษร, id ดิบ + ข้อความกลาง, ข้อความสถานะทั้งสี่แบบ) · `ConnectionsPageOpenCodeAndOtherAgentsTests`
+- ภาพ ScreenEvidence `connections-light/dark` (synthetic: Copilot, ZCode, `example-agent`) แสดงครบสามแถว
+- ยังต้องให้คุณดูในแอปจริงกับ ccusage จริงของเครื่อง (ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ห้ามหยุด)
+
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
+
+## R-020 · เพิ่มการ login ของ OpenCode
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge f339f07 · spec `Docs/SPEC_R020_R021.md` F1–F10, H1–H15, J1–J6, K1–K2) |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | หน้า Sign-in / Connections · `ProviderMeta` · ตัวตรวจการติดตั้งและ auth ของ opencode (Infrastructure) |
+| เกี่ยวกับ | [[R-015]] · [[R-019]] · [[R-021]] |
+
+**คุณระบุ:**
+> ไม่มีการล็อคอินของ opencode ซึ่งต้องเพิ่มครับ
+
+คำตอบเพิ่มเติม (2026-11-11): OpenCode รุ่นปัจจุบันเก็บ login ใน SQLite `opencode.db` ไม่ใช่ `auth.json` แล้ว — ผู้ใช้เลือก "รัน opencode auth list"
+
+**ผมเข้าใจว่า:**
+เพิ่มการ์ด OpenCode ในหน้า Sign-in / Connections: ตรวจว่าติดตั้ง opencode ไหม และ login provider ไหนไว้แล้ว
+(รันคำสั่งอ่านอย่างเดียว `opencode auth list` และใช้ `auth.json` รุ่นเก่าเป็นทางสำรอง แสดงเฉพาะชื่อ provider และชนิด ไม่แสดง secret) พร้อมคำแนะนำ
+`opencode auth login` ยอดใช้จ่ายในแท็บ OpenCode ยังมาจาก ccusage ตาม R-015
+
+**ไม่รวม:**
+- ไม่ login แทนผู้ใช้ ไม่เขียนหรือแก้ไฟล์ของ opencode
+- ไม่เปลี่ยนแหล่งข้อมูลของแท็บ OpenCode (ยังเป็น ccusage)
+- ไม่อ่าน log ของ OpenCode (คงตาม R-015)
+
+**ตรวจรับเมื่อ:**
+- [x] หน้า Connections มีการ์ด OpenCode บอกสถานะติดตั้ง/ไม่ติดตั้ง และรายชื่อ provider ที่ login ไว้
+- [x] ไม่มีค่า secret ใดจากไฟล์ auth ปรากฏใน UI, log หรือ settings (มีเทสต์ synthetic)
+- [x] ไม่พบ opencode หรือไม่ได้ login → แสดงคำแนะนำ `opencode auth login` และไม่ error
+
+ผลทดสอบของผม (2026-11-13, Release บน `f339f07`): build 0/0 · เทสต์ 344 + 225 + 1,659 + 951 ผ่านครบ · format สะอาด · unittest OK
+- ข้อ 1: `ConnectionsViewModelOpenCodeCardTests` (ทุกสถานะของการ์ด, chip เขียวเหมือนการ์ดอื่น) · `OpenCodeAuthReader*Tests`
+  (2.x `auth list`, 1.x `auth.json`, fallback) · ภาพ ScreenEvidence `connections-light/dark` (synthetic: Anthropic (OAuth), OpenAI (API key))
+- ข้อ 2: `OpenCodeAuthReaderSecretTests` (sentinel ในทุกช่อง secret ไม่ปรากฏใน status, `ToString`, Error, exception) ·
+  `ConnectionsViewModelOpenCodeCardTests` (การ์ดแสดงเฉพาะช่องที่ spec อนุญาต) · `ProviderConnectionStoreOpenCodeTests` ·
+  ชื่อที่มี `://` หรือ `@` → "Unnamed provider" — คุณตัดสินให้แยกเทสต์ reader กับการ์ด ไม่ต่อกันเป็นเทสต์เดียว
+- ข้อ 3: `OpenCodeAuthReaderOutcomeTests` (ไม่อยู่ใน PATH, ไม่ได้ login, timeout, cap, JSON ผิด) · การ์ดแสดง `opencode auth login`
+- รีวิว: Reviewer1/Reviewer2 Approve with minors (ปิดใน J/K) · Inspector B Approve (mutant ทุกตัวในรอบสุดท้ายถูกจับ)
+- ยังต้องให้คุณดูในแอปจริงกับ OpenCode จริงของเครื่อง: ผมไม่ได้รัน `opencode` จริง และไม่ได้เปิดแอปตัวใหม่ เพราะตัวที่ติดตั้งไว้ห้ามหยุด
+
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
+
+## R-019 · หน้า login รองรับ API key ของทุกโปรแกรมที่ดึงยอดได้จริง
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge 91fc803 · spec `Docs/SPEC_R019.md` E1–E16) |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | `ConnectDialog` · `ProviderMeta` · `ProviderConnectionStore` · provider clients (Claude Admin API) |
+| เกี่ยวกับ | [[R-006]] · [[R-012]] · [[R-014]] · [[R-020]] |
+
+**คุณระบุ:**
+> หน้า login ต้องรองรับการใช้งาน api ของทุกโปรแกรม
+
+คำตอบเพิ่มเติม (2026-11-11) เลือกความหมาย: "ใส่ API key ดึงยอดจาก vendor" · หลังค้นเอกสาร ผู้ใช้เลือก "Legacy Usage & Cost"
+(`/v1/organizations/usage_report/messages` และ `/v1/organizations/cost_report`; ต้องเป็นบัญชี organization) · Gemini และ
+OpenCode Go/Console ไม่มี usage API ที่เปิดเผยในเอกสาร → การ์ดบอกว่ารองรับไม่ได้
+
+**ผมเข้าใจว่า:**
+แต่ละการ์ดในหน้า Sign-in / Connections มีช่อง API key ที่ดึง usage/cost ได้จริงจาก API ของผู้ให้บริการ:
+Claude = Anthropic Admin API key (usage/cost report ของ organization) เพิ่มใหม่ ไม่แทน OAuth ของ Claude Code;
+OpenAI = Admin key เดิม; ผู้ให้บริการที่ไม่มี usage API ด้วย key ธรรมดา การ์ดบอกตรง ๆ ว่ารองรับไม่ได้เพราะอะไร
+key เก็บด้วย DPAPI แบบเดียวกับ OpenAI
+
+**ไม่รวม:**
+- Gemini: ไม่นำ service account / Cloud Monitoring กลับมา (คงตาม R-012)
+- ไม่เปลี่ยน quota gauge เดิมที่มาจาก OAuth / CLI
+- ไม่เดา endpoint: ผู้ให้บริการที่ยืนยันจากเอกสารไม่ได้ว่ามี usage API จะไม่ทำ
+
+**ตรวจรับเมื่อ:**
+- [x] ใส่ Anthropic Admin key ที่ถูกต้องแล้วแท็บ Claude แสดง usage/cost ของ API (synthetic tests; คุณตรวจด้วย key จริง)
+- [x] key ผิดรูปแบบหรือถูกปฏิเสธ → ข้อความบอกสาเหตุ ไม่ล้ม และไม่แสดง key
+- [x] การ์ดที่ไม่รองรับ API key บอกเหตุผลชัดเจน
+- [x] key ถูกเก็บใน DPAPI ไม่อยู่ใน settings หรือ log
+
+ผลทดสอบของผม (2026-11-12, Release บน `91fc803`): build 0/0 · เทสต์ 344 + 218 + 1,406 + 758 ผ่านครบ · format สะอาด
+- ข้อ 2: `AnthropicAdminUsageClientR019Tests` / `ClaudeLiveQuotaClientAnthropicAdminR019Tests` (401/403 → การ์ด Limited,
+  timestamp/รูปแบบผิด → `ParseErrorMessage` ไม่มี inner exception ไม่มีข้อความ key)
+- ข้อ 3: `ProviderMetaR019Tests` (Claude: key ธรรมดา/workspace อ่าน usage ไม่ได้ · AGY: Gemini API key อ่าน usage/quota ไม่ได้)
+  — การ์ด OpenCode เป็นของ R-020
+- ข้อ 1 และ 4 ยังต้องให้คุณตรวจ: ใส่ Admin key จริงในแอป แล้วดูว่าไม่มี key ใน `settings.json` หรือ log
+  (เทสต์ synthetic ครอบคลุมการเก็บที่ secret store เดียวกับ OpenAI และ `ToString` ไม่แสดง key แต่ไม่ได้ตรวจ DPAPI บนดิสก์จริง)
+- ความเสี่ยงที่รับไว้: wiring/catch ใน `App.xaml.cs` (ตรวจด้วยมือ) · ±14:30 offset ถูกรับตามสเปก · ค่า fraction และปีขอบไม่มีเทสต์ตรึง
+
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ — ข้อ 1 และ 4 ติ๊กตามคำยืนยันนี้
+
+## R-018 · แก้สองจุดจากภาพคู่: ชื่อ gauge ล้นการ์ด และแท็บ AGY ไม่มีสถิติ/กราฟ
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวมบน Debug build 2026-11-14 · merge 2e995bf · spec `Docs/SPEC_R018.md` D1–D18) |
+| วันที่ | 2026-11-11 |
+| แตะส่วนไหน | `Controls/GaugeControl.cs` · แท็บ Gemini / AGY (`ProviderTabViewModel`, ข้อมูล ccusage ของ R-014) · ScreenEvidence |
+| เกี่ยวกับ | [[R-004]] · [[R-005]] · [[R-013]] · [[R-014]] |
+
+**คุณระบุ:**
+> แก้ส่วนที่แจ้งได้เลยครับ
+
+(ส่วนที่แจ้ง = `Docs/STATUS_2026-11-11.md` ข้อ 3: แท็บ Gemini / AGY ไม่มีแถวสถิติและกราฟรายวันแบบ 1.3.3 และชื่อ meter
+"Claude and GPT models · Session/Weekly" ชนกันที่ความกว้าง 1120 px)
+
+**ผมเข้าใจว่า:**
+1. ชื่อและคำอธิบายรองของ gauge ใน dashboard ไม่เกินความกว้างของการ์ด ขึ้นบรรทัดได้สูงสุด 2 บรรทัด ที่เหลือตัดเป็น "…"
+2. แท็บ Gemini / AGY มีแถวสถิติ token และกราฟรายวัน ดึงจาก ccusage agent `antigravity` (agy `/usage` ไม่ให้ข้อมูล token)
+
+**ไม่รวม:**
+- ไม่เปลี่ยนแหล่ง % quota ของ AGY
+- ไม่แก้ widget (ตัด "…" อยู่แล้ว)
+
+**ตรวจรับเมื่อ:**
+- [x] ชื่อ gauge ยาวไม่ล้นการ์ดที่ 1120 px ทั้ง light/dark (synthetic render)
+- [x] ชื่อสั้นแสดงเหมือนเดิม
+- [x] แท็บ AGY มีแถวสถิติและกราฟรายวันเมื่อ ccusage มีข้อมูล `antigravity`
+- [x] ไม่มีข้อมูล `antigravity` → แท็บ AGY แสดงแบบเดิมไม่ error
+
+ผู้ใช้ตรวจรับ (2026-11-14, Debug build บน `69fdb1b`):
+> ผ่านทั้งหมดครับ
+
+ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ
+
+## R-015 · gauge ค่าใช้จ่ายของ OpenCode และ tab OpenCode
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
+| วันที่ | 2026-11-10 |
+| แตะส่วนไหน | tab ใหม่ "OpenCode" · Settings (งบรายเดือนต่อ agent) · `AppSettings` · ข้อมูล ccusage ของ R-014 |
+| เกี่ยวกับ | [[R-014]] · [[R-016]] · [[R-004]] |
+
+**คุณระบุ:**
+> 1. สร้าง meter guage สำหรับ opencode ครับ
+
+คำตอบเพิ่มเติม (2026-11-10): gauge วัด "ค่าใช้จ่ายเทียบงบที่ตั้งเอง" · tab หลักเป็น Claude, Codex, Antigravity, OpenCode + All agents · ใช้รอบอ่านเดิมของ R-014
+
+**ผมเข้าใจว่า:**
+1. เพิ่ม tab "OpenCode" เป็น tab หลักตัวที่สี่ (ต่อจาก Claude, OpenAI / Codex, Gemini / AGY) ก่อน tab "All agents"
+2. ใน tab มี gauge แบบเดียวกับ tab อื่น แสดง **ค่าใช้จ่ายเดือนนี้ของ agent `opencode` จาก ccusage ÷ งบรายเดือนที่ผู้ใช้ตั้ง** เป็น % พร้อมข้อความ `$ใช้ไป / $งบ` และใต้ gauge มีแถว "Today (ccusage)" / "This month (ccusage)" แบบ AGY ใน R-014
+3. งบรายเดือน (USD) ตั้งได้ใน Settings ต่อ agent ค่าเริ่มต้นคือไม่ตั้ง → gauge แสดงยอดเงินแต่ไม่แสดง % และบอกให้ไปตั้งงบ
+4. เดือนนับตามปฏิทินของเวลาเครื่อง (เหมือน "This month" ของ ccusage) เกินงบแสดงเกิน 100% ได้และใช้สีเตือนเดิมของ gauge
+5. ตัวเลขมาจากข้อมูล ccusage ชุดเดียวกับ R-014 (เปิดแอป + ทุก 15 นาที + ปุ่ม refresh) ไม่เรียก ccusage เพิ่ม
+
+**ไม่รวม:**
+- ไม่ดึงโควต้าจริงของแผน OpenCode / opencode-go และไม่อ่าน log ของ OpenCode เอง (R-014: ผ่าน ccusage เท่านั้น)
+- ไม่ใส่ OpenCode ใน tray icon หรือ widget
+- ไม่แจ้งเตือน (notification) เมื่อเกินงบ
+- ไม่เปลี่ยน gauge ของ Claude / Codex / AGY ที่วัดโควต้าจริงอยู่แล้ว
+
+**ตรวจรับเมื่อ:**
+- [x] มี tab OpenCode เป็นตัวที่สี่ และเลือกค้างไว้แล้วเปิดแอปใหม่กลับมาที่ tab นี้ — ตรวจแล้ว: เทสต์ลำดับ tab และ save/restore `ActiveProvider = "opencode"` ผ่าน (🧪 รอคุณดูบนแอป)
+- [x] ตั้งงบ $X แล้ว gauge แสดง % = ค่าใช้จ่ายเดือนนี้ของ opencode ใน `ccusage daily --json --by-agent` ÷ X — ตรวจแล้ว: oracle O1/O2 (12.345÷50 = 24.69%, เกินงบ 120% สีวิกฤต) และ subtitle `$ใช้ไป of $งบ budget`; ยังไม่ได้เทียบกับ ccusage จริง (🧪 รอคุณตั้งงบใน Settings แล้วดู)
+- [x] ไม่ตั้งงบ → แสดงยอดเงินไม่มี % และมีข้อความชี้ไป Settings — ตรวจแล้ว: gauge `--` + `$7.50 · No budget set — add one in Settings` (E26) (🧪 รอคุณดูบนแอป)
+- [x] ไม่มี ccusage หรือ ccusage ไม่เจอ opencode → tab ไม่ค้าง แสดงคำแนะนำแบบเดียวกับ R-014 — ตรวจแล้ว: synthetic tests (error banner ไม่มีการ์ด setup, ไม่มี opencode เดือนนี้ → $0.00) (🧪)
+- [x] tab อื่น tray และ widget หน้าตาเดิม — ตรวจแล้ว: ProviderTabs/tray/widget ไม่รวม OpenCode, กฎการ์ด setup เดิมคงไว้ (E24), widget คง provider tab ล่าสุด (E28) (🧪 รอคุณดูบนแอป)
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
+
+**ความคืบหน้า:**
+- 2026-11-10 — Q1 (งบรายเดือนต่อ agent ใน Settings + `AgentBudget`) merge `eb44740`; Q2 (tab OpenCode + gauge) merge `d5e260f`; เทสต์ merge `d664012` — 2,152 tests ผ่าน, build 0 warning, format สะอาด, ผ่าน Inspector A/B (mutant 12/12) และ Reviewer1/2; spec `Docs/SPEC_R015.md` E1–E30
+
+## R-017 · กราฟ token ต่อโมเดลและเส้นราคาใน tab OpenCode
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
+| วันที่ | 2026-11-10 |
+| แตะส่วนไหน | tab OpenCode (R-015) · `StackedColumnChartControl` (เพิ่มเส้นราคาแบบไม่บังคับ) · ข้อมูล ccusage รายวันของ R-014 |
+| เกี่ยวกับ | [[R-015]] · [[R-014]] · [[R-004]] |
+
+**คุณระบุ:**
+> หน้า Opencode ให้แสดงเป็นกราฟแท่งด้านใต้ด้วยครับว่าแต่ละ Model มีการใช้ token เท่าไร และมีกราฟเส้นที่บอกว่าราคาเท่าไร
+
+คำตอบเพิ่มเติม (2026-11-10): กราฟแท่ง "ทั้งสองแบบ" (รายวันซ้อนสีตามโมเดล + ยอดรวมต่อโมเดล) · เส้นราคา "ทับบนกราฟแท่งรายวัน"
+
+**ผมเข้าใจว่า:**
+1. ใต้ gauge ของ tab OpenCode แสดงกราฟ "Usage per day" แบบเดียวกับ tab Claude: แกน X เป็นวัน แต่ละแท่งซ้อนสีตามโมเดลของ agent `opencode` จาก ccusage รายวัน ใช้ช่วงวัน (7/14/30/90) และตัวเลือกหน่วย (Total tokens / Output tokens / Equivalent value) ที่มีอยู่แล้ว
+2. เส้นราคาทับบนกราฟเดียวกัน: ค่าใช้จ่าย ($) ของ opencode ต่อวัน (เฉพาะโมเดลที่รู้ราคา) มีแกน $ ด้านขวา วันที่มีโมเดลไม่ทราบราคาให้บอกใน tooltip/legend ว่าไม่ครบ ไม่นับเป็น $0
+3. ข้างกราฟมี "By model" (กราฟแท่งแนวนอนแบบเดียวกับ tab Claude) แสดงยอดรวมต่อโมเดลในช่วงวันที่เลือก
+4. ข้อมูลมาจาก ccusage ชุดเดียวกับ R-014 (เปิดแอป + ทุก 15 นาที + refresh) ไม่เรียก ccusage เพิ่ม
+5. เส้นราคาเป็นตัวเลือกของกราฟ tab อื่นไม่ส่งเส้นมาจึงหน้าตาเดิม
+
+**ไม่รวม:**
+- ไม่เพิ่มเส้นราคาให้ tab Claude / Codex / AGY / All agents
+- ไม่ทำกราฟ "By project" ให้ OpenCode
+- ไม่มีกราฟใน tray / widget
+- ไม่อ่าน log ของ OpenCode เอง
+
+**ตรวจรับเมื่อ:**
+- [x] tab OpenCode มีกราฟรายวันซ้อนสีตามโมเดล ยอดแต่ละวัน/โมเดลตรงกับ `ccusage daily --json --by-agent` ของ opencode
+- [x] เส้นราคาทับบนกราฟ ค่าแต่ละวันตรงกับ cost ของ opencode วันนั้นใน ccusage และมีแกน $
+- [x] "By model" แสดงยอดรวมต่อโมเดลในช่วงวันที่เลือก เปลี่ยนช่วงวัน/หน่วยแล้วกราฟเปลี่ยนตาม
+- [x] ไม่มีข้อมูล opencode ในช่วงนั้น → แสดงสถานะว่างแบบเดิม ไม่ค้าง — ทดสอบด้วยเทสต์ F12/H9 (เทียบภาพ bitmap กับสถานะ "No usage recorded")
+- [x] กราฟของ tab อื่นหน้าตาเดิม (ไม่มีเส้นราคา) — ทดสอบด้วยเทสต์ H9 และ `ProviderTabChartCostsTests` (Claude/OpenAI/AGY ได้ `ChartCosts` ว่าง)
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
+
+**ความคืบหน้า (2026-11-10):** spec `Docs/SPEC_R017.md` (G1.1–G1.4, H1–H10, F1–F25) · โค้ด 40bdf6a + dfe5e62 (F10–F16) + 42b8f04 (F17) + 8afa278 (F23 settings sync บน UI thread) · เทสต์ 671663d / 81a5cc2 / 8fbb1a1 · Inspector B: mutant 17 ตัว ที่เคยรอด 2 ตัว (เส้นราคา/จุดกลวง) ถูกเทสต์ใหม่จับได้แล้ว · Reviewer1/Reviewer2 อนุมัติ · merge a674c11: build 0 warning, เทสต์ 2,250/2,250 ผ่าน, format สะอาด · ข้อค้าง: F25 (comment ในเทสต์ F23 เกินจริง) และความเสี่ยงเทสต์ wiring ถ้ารันคร่อมเที่ยงคืน (F21) · ข้อที่ยังไม่ติ๊กต้องเทียบกับ ccusage จริงบนเครื่อง จึงรอคุณตรวจในแอป
+## R-016 · หน้าภาพรวม gauge ค่าใช้จ่ายของทุก agent ที่ ccusage ตรวจเจอ
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
+| วันที่ | 2026-11-10 |
+| แตะส่วนไหน | module ใหม่ใน Application/Presentation ที่สร้างรายการ agent จาก ccusage · tab ใหม่ "Overview" · Settings (งบต่อ agent ใช้ร่วมกับ R-015) |
+| เกี่ยวกับ | [[R-014]] · [[R-015]] · [[R-004]] |
+
+**คุณระบุ:**
+> 2. สร้าง Module ใหม่ ทำหน้าที่อ่าน output ของ ccusage ตอนเริ่มโปรแกรม แล้วจึงวาด Guage ตาม agent ที่ตรวจเจอจาก ccusage ครับ แต่ยังคง Tab สำหรับ 4 agent หลัก คือ Claude, Codex, Antigravity, OpenCode
+
+คำตอบเพิ่มเติม (2026-11-10): gauge วัดค่าใช้จ่ายเทียบงบที่ตั้งเอง · วางใน "หน้าภาพรวมใหม่" แยกจาก tab All agents · คง 4 tab หลัก + All agents (agent อื่นไม่มี tab ของตัวเอง) · ใช้รอบอ่านเดิมของ R-014
+
+**ผมเข้าใจว่า:**
+1. module ใหม่รับข้อมูล ccusage ชุดเดียวกับ R-014 (ครั้งแรกตอนเปิดแอป แล้วทุก 15 นาที) แล้วสร้างรายการ agent ที่ ccusage เจอ — บนเครื่องนี้คือ antigravity, claude, codex, copilot, opencode, zcode — ไม่มีรายชื่อ agent ฝังในโค้ด
+2. tab ใหม่ "Overview" (ผมเลือกเป็น tab แทนหน้าต่างแยก เพราะแอปใช้ tab อยู่แล้ว) วาง gauge หนึ่งอันต่อ agent ที่เจอ คำนวณแบบ R-015 (ค่าใช้จ่ายเดือนนี้ ÷ งบรายเดือนของ agent นั้น) เรียงตามค่าใช้จ่ายเดือนนี้มากไปน้อย
+3. agent ที่ไม่ได้ตั้งงบแสดงยอดเงินโดยไม่มี % · agent ที่หายไปจาก ccusage ในรอบถัดไปก็หายจากหน้านี้ · agent ใหม่ที่โผล่มาก็เพิ่มเอง
+4. tab ทั้งหมดเรียงเป็น: Claude · OpenAI / Codex · Gemini / AGY · OpenCode · Overview · All agents
+5. งบต่อ agent ตั้งใน Settings ที่เดียวกับ R-015 โดยรายชื่อ agent ใน Settings มาจาก ccusage
+
+**ไม่รวม:**
+- ไม่สร้าง tab ให้ copilot / zcode / agent อื่น
+- ไม่ลบหรือเปลี่ยน tab "All agents" ของ R-014
+- ไม่ใส่ใน tray หรือ widget · ไม่มี notification
+- ไม่ดึงโควต้าจริงของแผนใด ๆ จากผู้ให้บริการ (gauge ทุกอันเป็นค่าใช้จ่ายเทียบงบ)
+
+**ตรวจรับเมื่อ:**
+- [x] tab Overview แสดง gauge ครบทุก agent ที่ `ccusage daily --json --by-agent` ของเครื่องเดียวกันมีในเดือนนี้ และค่าใช้จ่ายตรงกัน
+- [x] ตั้งงบให้ agent หนึ่งแล้ว % ตรงกับ ค่าใช้จ่ายเดือนนี้ ÷ งบ · agent ที่ไม่ตั้งงบไม่แสดง %
+- [x] เทสต์ด้วย JSON สังเคราะห์ที่มี agent ชื่อใหม่ → มี gauge ของ agent นั้นโดยไม่แก้โค้ด — ทดสอบด้วย oracle O4 (`newagent` ได้ gauge 32% จากงบ "NewAgent" $10) ใน `OverviewSnapshotBuilderTests`
+- [x] ไม่มี ccusage → tab ไม่ค้าง แสดงคำแนะนำแบบ R-014 · tab เดิม tray widget หน้าตาเดิม — ส่วนตรรกะทดสอบแล้ว (O7/I7 ข้อความ error แบบ R-014, I3 "Checking ccusage...", เทสต์ลำดับแท็บและ `ProviderTabs` เดิม) แต่หน้าตาจริงยังต้องให้คุณดู
+- [x] (I21) Overview ที่มี agent ≥4 ตัว แสดง gauge ไม่เกิน 3 คอลัมน์ และมีช่องว่างระหว่างแถว · การ์ดในแท็บอื่นหน้าตาเดิม
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
+
+**ความคืบหน้า (2026-11-10):** spec `Docs/SPEC_R016.md` (H1.1–H1.3, O1–O11, I1–I21) · โค้ด 5167681 + c02da4e (I10–I16) + efa9051 (I17 ข้อความว่างเมื่อมี gauge, I18 ระยะห่างแถว) · เทสต์ 118919c / 038a1dd / 579bcc7 · Inspector A: blocker 1 major 4 → I1–I8 · Reviewer1 อนุมัติแบบมี minor → I11–I16 · Reviewer2 ขอแก้ → I17–I18 (Test Author เจอ I17 เองด้วย) · Inspector B → I19–I21 (mutant ของ Codex เป็นการวิเคราะห์ เพราะ sandbox restore ไม่ได้; mutant ที่รันจริง 3 ตัวโดย Test Author) · merge b09ade5: build 0 warning, เทสต์ 2,330/2,330, format สะอาด · ข้อค้าง: ความเสี่ยงเทสต์ wiring คร่อมเที่ยงคืน (I8)
+## R-014 · ใช้ ccusage เป็นแหล่งข้อมูล usage/cost ของทุก agent และปรับตัวอ่าน transcript ของเราให้ตรงกัน
+
+| | |
+|---|---|
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจรับโดยรวม 2026-11-10; ออกใน 2.0.3) |
+| วันที่ | 2026-11-09 |
+| แตะส่วนไหน | adapter ใหม่สำหรับ ccusage CLI · tab "All agents" ใหม่ · ส่วนข้อมูลเพิ่มเติมใน tab เดิม · `ClaudeTranscriptStore` · `ClaudeModelPricing` · THIRD-PARTY-NOTICES |
+| เกี่ยวกับ | [[R-004]] · [[R-010]] · [[R-011]] · [[R-012]] · PAR-006/007/013/015/030 |
+
+**คุณระบุ:**
+> อ่านข้อมูลจาก repo นี้ แล้วนำมาปรับใช้กับระบบของเราครับ https://github.com/ccusage/ccusage
+
+> นี่คือ output ของ ccusage เราจะเรียก output นี้มาใช้ร่วมกับงานของเราครับ
+
+คำตอบเพิ่มเติม (2026-11-09): ใช้ทั้งสองอย่าง (เรียก ccusage เป็นแหล่งข้อมูล และแก้ตัวอ่านของเราให้ตรงกัน) · แสดงทั้ง tab ใหม่และใน tab เดิม · ผู้ใช้ติดตั้ง ccusage เอง และใช้ราคาออนไลน์
+
+**ผมเข้าใจว่า:**
+1. AIMonitor เรียก ccusage (MIT, v20.x) ที่ผู้ใช้ติดตั้งไว้บน PATH เป็น process ภายนอกแบบเดียวกับ AGY CLI ด้วย `ccusage daily --json --by-agent --sections daily,monthly,session` มี timeout, จำกัดขนาด output, ยกเลิกได้ และไม่เรียก `npx` หรือดาวน์โหลด ccusage เอง
+2. ราคาใช้โหมดออนไลน์ของ ccusage (ดึง LiteLLM/models.dev ที่เป็นข้อมูลราคาสาธารณะ ไม่ส่งข้อมูลผู้ใช้) ถ้าดึงไม่ได้ให้ใช้ราคาที่ฝังใน ccusage (`--offline`) และบอกในหน้าจอว่าใช้ราคาแบบไหน
+3. Tab ใหม่ "All agents" แสดงรายวัน/รายเดือนแยก agent และโมเดล ค่าใช้จ่าย และ session; โมเดลที่ ccusage ไม่รู้ราคา (`unpricedModels`) แสดงว่า "ไม่ทราบราคา" ไม่ใช่ $0
+4. Tab เดิม (Claude, OpenAI / Codex, Gemini / AGY) แสดงตัวเลขของ agent นั้นจาก ccusage ในส่วนข้อมูลเพิ่มเติมใต้ gauge โดยไม่เปลี่ยน gauge กราฟ และหน้าตาเดิม (เป้า R-004)
+5. แก้ตัวอ่าน transcript และตารางราคาของเราให้ตรงกับ ccusage: dedup `message.id`+`requestId` เก็บรายการที่ไม่ใช่ sidechain และมี token มากสุด, สแกน `projects/` ทุกชั้นรวม `subagents/`, `CLAUDE_CONFIG_DIR` หลาย path และ `~/.config/claude`, เพิ่มราคา Opus/Sonnet/Haiku 5.5 และรุ่นเก่า (Opus 4/4.1) และราคาขั้นบันไดเกิน 200k แล้วเทียบผลรายวันกับ ccusage
+6. ถ้าไม่มี ccusage แอปทำงานได้เหมือนเดิมและแสดงคำแนะนำการติดตั้งใน tab ใหม่
+
+**ไม่รวม:**
+- ไม่คัดลอกโค้ด ccusage; ถ้าแปลงตรรกะใดมาให้ใส่ MIT notice ใน THIRD-PARTY-NOTICES
+- ไม่อ่านข้อมูล AGY/OpenCode/Copilot/ZCode เองโดยตรง (ใช้ผ่าน ccusage เท่านั้น)
+- 5-hour blocks/burn rate ยังไม่ทำในข้อนี้ (ขัด PAR-013 ถ้าไม่ติดป้ายว่าเป็นค่าประมาณ)
+- ไม่แพ็ก ccusage ไปกับ installer
+
+**คำถามที่ต้องตอบก่อนเริ่ม:**
+- ความถี่ในการเรียก ccusage (การสแกน log ทุก agent อาจหนักกว่า refresh 3 นาที) — เสนอแยกรอบ เช่น 15 นาที
+- ตัวอย่าง JSON จริงหนึ่งชุดสำหรับทำ fixture (ลบชื่อโปรเจกต์/path ออกก่อน)
+
+**ตรวจรับเมื่อ:**
+- [x] tab "All agents" แสดงยอดรายวัน/รายเดือนตรงกับ `ccusage daily --json` ของเครื่องเดียวกัน — ตรวจแล้ว: ตัวเลขมาจาก JSON ของ ccusage โดยตรง (parser + presenter มีเทสต์ oracle) ภาพหน้าจอยังไม่ได้ตรวจ (🧪 รอคุณดูบนแอป)
+- [x] tab เดิมแสดงข้อมูล ccusage ของ agent นั้นโดย gauge และหน้าตาเดิมไม่เปลี่ยน — ตรวจแล้ว: Reviewer1 เทียบ 9 กรณีไม่มีข้อมูล ccusage ก่อน/หลัง P4 ตรงกันทุกบรรทัด (🧪 รอคุณดูบนแอป)
+- [x] ไม่มี ccusage / ccusage error / timeout แล้วแอปไม่ค้าง และแสดงคำแนะนำที่ทำต่อได้ — ตรวจแล้ว: synthetic tests ครบทุกชนิด error, ccusage ไม่บล็อก refresh ของ provider (🧪 รอคุณลองถอด ccusage ออกจาก PATH)
+- [x] Claude tab ของเรา (ไม่ผ่าน ccusage) ได้ยอด token รายวันตรงกับ ccusage ภายในเกณฑ์ที่ตกลง และค่าใช้จ่าย Opus/Sonnet/Haiku 5.5 ไม่เป็น Estimated — ตรวจแล้ว (A10): 29/29 วันที่จบแล้วตรงทุกหลักทั้ง 4 ประเภท token; ราคา 5.5 เป็น Exact
+- [x] synthetic tests ไม่เรียก ccusage จริง, build/format ผ่าน, ผ่าน Inspector และ Reviewer ทั้งสองตามลำดับงานใน `Docs/AI_WORKFLOW.md` §5.8 — ตรวจแล้ว: 1,998 tests ผ่าน, build 0 warning, format สะอาด, ทุกเฟสผ่าน Inspector A/B และ Reviewer1/2
+> ผู้ใช้ตรวจรับ 2026-11-10: "ตรวจรับทั้งหมด แก้เลขให้ตรง push release ครับ" — ยืนยันโดยรวมสำหรับ R-014–R-017 ไม่ได้รายงานผลรายข้อ เกณฑ์ที่ติ๊กในข้อนี้จึงมาจากคำยืนยันรวมนี้
+
+**ความคืบหน้า:**
+- 2026-11-09 — P1 (ccusage data source) merge `b5eb61a`; A12 ตรวจกับ ccusage จริงผ่าน `.cmd` shim: exit 0, 509 KB
+- 2026-11-09 — P2a (ราคา Claude ทางการ) merge `760bb1c`
+- 2026-11-09 — P2b (ตัวอ่าน transcript: หลาย root, สแกนทุกชั้น, dedup แบบ ccusage, advisor iterations) merge `441ba7a`; A10 ผ่าน 29/29 วัน; หน่วยความจำ seen-set 94 MB ที่ 400k records
+- 2026-11-09 — P3 (tab "All agents") merge `c168ad8`; P4 (แถว ccusage ใน tab เดิม) merge `0a21583`; ไม่ได้ push
+- 2026-11-10 — งานติดตาม merge `783100e`: แก้บั๊ก runner คืน Success เมื่อ deadline หมดพร้อม process จบ (R12/R14, เดิม 2/30 รันขนานล้ม หลังแก้ 30/30 ผ่าน), เทสต์ R13 แบบ deterministic, ลบ branch ที่เข้าไม่ถึง (C24/C26), เทสต์ช่องว่าง C25 ครบ; 2,013 tests ผ่าน; UI ค้างไม่เกิดซ้ำใน 4 นาทีที่ตรวจทุกวินาที
+- งานติดตามที่เหลือ: path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); `RefreshCommand_PassesManualTrue…` ล้มหนึ่งครั้งตอนเครื่องโหลดหนัก (รันซ้ำ 6 รอบผ่าน)
+- (เดิม) งานติดตาม: เทสต์ที่ Inspector B ของ P4 แนะนำ (stat tile "Plan" ใน section ccusage-only, `HasResetInfo` ใน `IsAgentUsageOnly`, regression ไม่มี summary ทั้งสาม tab); ลำดับไฟล์ตัวพิมพ์ผสม (P2b); `CcUsageRunnerTests.DeadlineFiredWhileProcessExited…` flaky เมื่อรันขนาน; path credentials กับ `CLAUDE_CONFIG_DIR` หลายค่า (B17); UI ไม่ตอบสนองชั่วคราวหนึ่งครั้งราววินาทีที่ 120 ใน smoke test
 
 ## R-013 · แบ่ง gauge ของ AGY เป็นกลุ่ม Gemini และ Claude/GPT และเปลี่ยนชื่อเป็น Gemini / AGY
 

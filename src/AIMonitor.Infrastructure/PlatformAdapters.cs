@@ -13,7 +13,7 @@ namespace AIMonitor.Infrastructure;
 ///
 /// A composition root calls these instead of naming a concrete adapter, so Windows and macOS make
 /// the same choices from one place rather than each presentation layer repeating them and drifting
-/// apart (R-014). Everything else in this assembly is platform-neutral or already annotated, so this
+/// apart (R-022). Everything else in this assembly is platform-neutral or already annotated, so this
 /// is the only type that needs to know which operating system it is on.
 /// </summary>
 public static class PlatformAdapters
@@ -108,7 +108,7 @@ public static class PlatformAdapters
     ///
     /// Windows reads the legacy Registry tree. macOS returns nothing: the 1.x macOS build kept its
     /// settings in a <c>~/Library/Preferences</c> plist and its keys in the Keychain under its own
-    /// service, and importing those is a separate decision that R-014 does not cover — so a macOS
+    /// service, and importing those is a separate decision that R-022 does not cover — so a macOS
     /// user starts with a fresh profile rather than a half-read one.
     /// </summary>
     public static ILegacySettingsReader CreateLegacySettingsReader() =>

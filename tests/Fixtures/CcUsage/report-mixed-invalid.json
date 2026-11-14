@@ -1,0 +1,117 @@
+{
+  "daily": [
+    {
+      "period": "2026-02-30",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "period": "2026-11-05",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "period": "2026-11-06",
+      "agent": "all"
+    },
+    {
+      "period": "2026-11-07",
+      "agents": [
+        { "agent": "opencode", "inputTokens": 5, "outputTokens": "20", "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 25,
+          "modelBreakdowns": [ { "modelName": "claude-fable-5", "inputTokens": 5, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.0001 } ] }
+      ]
+    },
+    {
+      "period": 20261108,
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "period": "2026-11-09",
+      "agents": [
+        { "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "period": "2026-11-10",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40 }
+      ]
+    },
+    {
+      "period": "2026-11-11",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0 } ] }
+      ]
+    },
+    {
+      "period": "2026-11-12",
+      "agent": "all",
+      "agents": []
+    }
+  ],
+  "monthly": [
+    {
+      "period": "2026-13",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "period": "2026-11",
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    },
+    {
+      "agents": [
+        { "agent": "claude", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "totalTokens": 40,
+          "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.001 } ] }
+      ]
+    }
+  ],
+  "session": [
+    {
+      "period": "s-ok",
+      "agent": "claude",
+      "inputTokens": 10,
+      "outputTokens": 20,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 0,
+      "totalTokens": 30,
+      "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.0005 } ],
+      "metadata": { "lastActivity": "2026-11-07T10:00:00Z" }
+    },
+    {
+      "period": "s-no-metadata",
+      "agent": "claude",
+      "inputTokens": 10,
+      "outputTokens": 20,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 0,
+      "totalTokens": 30,
+      "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.0005 } ]
+    },
+    {
+      "period": "",
+      "agent": "claude",
+      "inputTokens": 10,
+      "outputTokens": 20,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 0,
+      "totalTokens": 30,
+      "modelBreakdowns": [ { "modelName": "claude-opus-4-8", "inputTokens": 10, "outputTokens": 20, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.0005 } ],
+      "metadata": { "lastActivity": "2026-11-07T09:00:00Z" }
+    }
+  ]
+}

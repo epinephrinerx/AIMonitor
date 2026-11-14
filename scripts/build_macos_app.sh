@@ -6,7 +6,7 @@
 #
 # The bundle is signed ad-hoc (`codesign -s -`), which is the minimum an arm64 binary needs in
 # order to run at all. It is NOT signed with a Developer ID and NOT notarized, so macOS will warn
-# the first time it is opened from the Finder. R-014 covers neither.
+# the first time it is opened from the Finder. R-022 covers neither.
 #
 # Usage: scripts/build_macos_app.sh [output-directory]
 set -euo pipefail

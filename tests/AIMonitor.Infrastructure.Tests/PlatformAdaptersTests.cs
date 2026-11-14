@@ -186,7 +186,7 @@ public sealed class PlatformAdaptersTests
         }
         else
         {
-            // A macOS 1.x profile lives in a Preferences plist and the Keychain, which R-014 does
+            // A macOS 1.x profile lives in a Preferences plist and the Keychain, which R-022 does
             // not import; a fresh profile is the honest result, not a half-read one.
             Assert.Empty(reader.ReadAll());
         }

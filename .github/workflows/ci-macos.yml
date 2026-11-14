@@ -32,7 +32,7 @@ jobs:
         run: dotnet build AIMonitor.CrossPlatform.slnf --no-restore
       - name: Tests
         run: dotnet test AIMonitor.CrossPlatform.slnf --no-build --no-restore --logger trx --results-directory artifacts/test-results
-      # R-014: a test may only be skipped here for a Windows dependency that says so in its skip
+      # R-022: a test may only be skipped here for a Windows dependency that says so in its skip
       # reason. Any other skip is an undocumented hole and fails the job.
       - name: Skips are documented
         run: python3 scripts/assert_skips_are_documented.py artifacts/test-results

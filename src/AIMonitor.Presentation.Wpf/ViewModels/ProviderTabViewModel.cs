@@ -51,8 +51,13 @@ public sealed class MeterDisplayItem : ViewModelBase
 }
 
 /// <summary>One row of gauge cards under an optional heading. <see cref="Columns"/> is shared by
-/// every section of a tab so cards line up across rows.</summary>
-public sealed record MeterSection(string Heading, IReadOnlyList<MeterDisplayItem> Meters, int Columns);
+/// every section of a tab so cards line up across rows. <see cref="HasMultipleRows"/> indicates
+/// whether the section wraps to more than one row (R-016 I11).</summary>
+public sealed record MeterSection(string Heading, IReadOnlyList<MeterDisplayItem> Meters, int Columns)
+{
+    /// <summary>True when the section wraps to more than one row (I11).</summary>
+    public bool HasMultipleRows => Meters.Count > Columns;
+}
 
 /// <summary>A plain numeric readout shown in the stats row under the gauges.</summary>
 public sealed record StatTile(string Label, string Value, string Detail);
@@ -65,6 +70,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private IReadOnlyList<MeterDisplayItem> _meters = [];
     private IReadOnlyList<MeterSection> _meterSections = [];
     private IReadOnlyList<UsageHistoryBucket> _chartBuckets = [];
+    private IReadOnlyList<DailyCost> _chartCosts = [];
     private IReadOnlyList<string> _chartSeries = [];
     private IReadOnlyList<UsageHistoryBreakdown> _modelRows = [];
     private IReadOnlyList<UsageHistoryBreakdown> _projectRows = [];
@@ -78,6 +84,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private string _statsSummary = "";
     private string _accountInfo = "";
     private string _errorMessage = "";
+    private string? _emptyMessage;
+    private int _meterColumns;
+    private int _meterColumnsCap = int.MaxValue;
     private IReadOnlyList<StatTile> _statTiles = [];
     private SupplementaryDetailsViewModel? _supplementary;
     private bool _showSupplementary;
@@ -87,12 +96,22 @@ public sealed class ProviderTabViewModel : ViewModelBase
     private bool _isConfigured;
     private bool _hasSnapshot;
     private DateTimeOffset? _lastUpdated;
+    private AgentUsageSummary? _agentUsage;
+    private bool _baseShowSupplementary;
 
     public ProviderTabViewModel(string providerId, string displayName)
     {
         ProviderId = providerId;
         DisplayName = displayName;
         _tabTitle = displayName;
+
+        // I13: Overview tab derives its behavior from ProviderId.
+        var isOverview = string.Equals(providerId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        if (isOverview)
+        {
+            _emptyMessage = "Checking ccusage..."; // I3 state 1 initial
+            _meterColumnsCap = 3; // I5
+        }
     }
 
     /// <summary>Tab caption: the name plus the lead meter's percentage, e.g. "Claude 12%".</summary>
@@ -128,6 +147,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ResetSummary));
                 OnPropertyChanged(nameof(ResetDetails));
                 OnPropertyChanged(nameof(ResetTitle));
+                OnPropertyChanged(nameof(HasResetInfo));
                 OnPropertyChanged(nameof(HasSupplementaryRows));
                 OnPropertyChanged(nameof(HasSupplementaryActivity));
                 OnPropertyChanged(nameof(ActivityTitle));
@@ -147,6 +167,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
     public string ResetSummary => _supplementary?.ResetSummary ?? "";
     public string ResetDetails => _supplementary?.ResetDetails ?? "";
     public string ResetTitle => _supplementary?.ResetTitle ?? "Rate Limit Resets";
+    public bool HasResetInfo => _supplementary?.HasResetInfo ?? false;
     public bool HasSupplementaryRows => _supplementary?.HasRows ?? false;
     public bool HasSupplementaryActivity => _supplementary?.HasActivity ?? false;
     public string ActivityTitle => _supplementary?.ActivityTitle ?? "Activity";
@@ -218,10 +239,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
-    private static IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
+    private IReadOnlyList<MeterSection> BuildSections(IReadOnlyList<MeterDisplayItem> meters)
     {
         var groups = meters.GroupBy(m => m.Section, StringComparer.Ordinal).ToList();
-        var columns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var rawColumns = groups.Count == 0 ? 0 : groups.Max(g => g.Count());
+        var columns = Math.Min(rawColumns, _meterColumnsCap);
+        MeterColumns = columns;
         return groups.Select(g => new MeterSection(g.Key, g.ToList(), columns)).ToList();
     }
 
@@ -244,6 +267,13 @@ public sealed class ProviderTabViewModel : ViewModelBase
     {
         get => _chartSeries;
         private set => SetProperty(ref _chartSeries, value);
+    }
+
+    /// <summary>Optional priced costs aligned with <see cref="ChartBuckets"/> by day (same order).</summary>
+    public IReadOnlyList<DailyCost> ChartCosts
+    {
+        get => _chartCosts;
+        private set => SetProperty(ref _chartCosts, value);
     }
 
     public string ChartMetric
@@ -360,6 +390,235 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Text shown in the provider area when there are no meters (R-016 I3). Null for every tab
+    /// except the Overview, which uses it for "Checking ccusage...", "No agent usage recorded this
+    /// month" and the rollover "Waiting for this month's ccusage data" (I4).
+    /// </summary>
+    public string? EmptyMessage
+    {
+        get => _emptyMessage;
+        internal set
+        {
+            if (SetProperty(ref _emptyMessage, value))
+            {
+                OnPropertyChanged(nameof(HasEmptyMessage));
+            }
+        }
+    }
+
+    public bool HasEmptyMessage => !string.IsNullOrEmpty(_emptyMessage);
+
+    /// <summary>
+    /// Hands off the Overview tab's empty-state message from the builder (I12). Non-Overview tabs
+    /// ignore the call. MainWindowViewModel calls this after UpdateFromSnapshot with the result of
+    /// OverviewSnapshotBuilder.EmptyMessage.
+    /// </summary>
+    public void UpdateOverviewEmptyMessage(string? message)
+    {
+        var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        if (isOverview)
+        {
+            EmptyMessage = message;
+        }
+    }
+
+    /// <summary>
+    /// Gauge-column cap used by <see cref="BuildSections"/>. Overview uses 3 (I5); every other tab
+    /// keeps the existing uncapped behaviour. Set before the first snapshot is applied.
+    /// </summary>
+    public void SetMeterColumnsCap(int cap)
+    {
+        if (cap < 1) throw new ArgumentOutOfRangeException(nameof(cap));
+        _meterColumnsCap = cap;
+    }
+
+    /// <summary>
+    /// Effective column count across <see cref="MeterSections"/>; exposed so tests can assert the
+    /// Overview cap without rendering (I5). Equals the shared per-section column count.
+    /// </summary>
+    public int MeterColumns
+    {
+        get => _meterColumns;
+        private set => SetProperty(ref _meterColumns, value);
+    }
+
+    /// <summary>
+    /// Sets the ccusage summary shown in the supplementary rows (R-014 P4). The rows are rebuilt
+    /// immediately; a later <see cref="UpdateFromSnapshot"/> keeps using this summary.
+    /// </summary>
+    public void SetAgentUsage(AgentUsageSummary? summary)
+    {
+        _agentUsage = SupportsAgentUsage ? summary : null;
+        ApplyAgentUsage();
+    }
+
+    /// <summary>Provider ids whose tab shows ccusage rows (C9/E3); all others ignore a summary.</summary>
+    private bool SupportsAgentUsage =>
+        AppendsAgentUsage
+        || string.Equals(ProviderId, "agy", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Claude and OpenAI append the ccusage rows to their existing supplementary rows (C8).</summary>
+    private bool AppendsAgentUsage =>
+        string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rebuilds the supplementary rows from the base rows plus the stored ccusage summary. AGY and
+    /// OpenCode show only the ccusage rows (C8/E3); Claude/OpenAI keep their existing rows and append (C8) when the
+    /// section is visible, otherwise they show a ccusage-only section (C20). When no summary line is
+    /// present the pre-existing visibility rule is restored (C10), and an unchanged set of ccusage
+    /// rows does not rebuild the section (C21).
+    /// </summary>
+    private void ApplyAgentUsage()
+    {
+        var agentRows = BuildAgentUsageRows();
+        var currentAgentRows = _supplementary?.Rows.Where(r => r.Group == "ccusage").ToList() ?? [];
+
+        if (AppendsAgentUsage)
+        {
+            if (_baseShowSupplementary)
+            {
+                // UpdateFromSnapshot assigns a non-null section for Claude/OpenAI before calling this (C24).
+                var section = _supplementary!;
+
+                if (!RowsMatch(currentAgentRows, agentRows))
+                {
+                    var rows = section.Rows.Where(r => r.Group != "ccusage").ToList();
+                    rows.AddRange(agentRows);
+                    Supplementary = CopyWithRows(section, rows);
+                }
+
+                ShowSupplementary = true;
+                return;
+            }
+
+            if (agentRows.Count == 0)
+            {
+                // C10: drop the ccusage rows and restore the existing visibility rule.
+                if (_supplementary is not null && currentAgentRows.Count > 0)
+                {
+                    Supplementary = IsAgentUsageOnly(_supplementary)
+                        ? null
+                        : CopyWithRows(_supplementary, _supplementary.Rows.Where(r => r.Group != "ccusage").ToList());
+                }
+
+                ShowSupplementary = false;
+                return;
+            }
+
+            // C20: the base section is hidden (or there is no snapshot yet), so show only the ccusage rows.
+            if (_supplementary is null || !IsAgentUsageOnly(_supplementary) || !RowsMatch(currentAgentRows, agentRows))
+            {
+                Supplementary = BuildAgentUsageOnly(agentRows);
+            }
+
+            ShowSupplementary = true;
+            return;
+        }
+
+        // AGY and OpenCode: the section exists only while a ccusage line is present (C8/E3).
+        if (agentRows.Count > 0)
+        {
+            if (_supplementary is null || !IsAgentUsageOnly(_supplementary) || !RowsMatch(currentAgentRows, agentRows))
+            {
+                Supplementary = BuildAgentUsageOnly(agentRows);
+            }
+
+            ShowSupplementary = true;
+        }
+        else
+        {
+            if (_supplementary is not null)
+            {
+                Supplementary = null;
+            }
+
+            ShowSupplementary = false;
+        }
+    }
+
+    private SupplementaryDetailsViewModel BuildAgentUsageOnly(IReadOnlyList<SupplementaryRowViewModel> agentRows) => new()
+    {
+        ProviderId = ProviderId,
+        ResetTitle = "",
+        Rows = agentRows,
+    };
+
+    /// <summary>True for a section that holds nothing but the ccusage rows (C19/C20): no reset part, no activity.</summary>
+    private static bool IsAgentUsageOnly(SupplementaryDetailsViewModel details) =>
+        !details.HasResetInfo
+        && details.ActivityPills.Count == 0
+        && string.IsNullOrEmpty(details.ActivityNote)
+        && details.Rows.All(r => r.Group == "ccusage");
+
+    private static bool RowsMatch(
+        IReadOnlyList<SupplementaryRowViewModel> left,
+        IReadOnlyList<SupplementaryRowViewModel> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            var a = left[i];
+            var b = right[i];
+            if (!string.Equals(a.Label, b.Label, StringComparison.Ordinal)
+                || !string.Equals(a.Value, b.Value, StringComparison.Ordinal)
+                || !string.Equals(a.Detail, b.Detail, StringComparison.Ordinal)
+                || !string.Equals(a.Badge, b.Badge, StringComparison.Ordinal)
+                || !string.Equals(a.Group, b.Group, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private List<SupplementaryRowViewModel> BuildAgentUsageRows()
+    {
+        var rows = new List<SupplementaryRowViewModel>(2);
+        if (_agentUsage?.Today is { } today)
+        {
+            rows.Add(AgentUsageRow("Today (ccusage)", today));
+        }
+
+        if (_agentUsage?.ThisMonth is { } month)
+        {
+            rows.Add(AgentUsageRow("This month (ccusage)", month));
+        }
+
+        return rows;
+    }
+
+    private static SupplementaryRowViewModel AgentUsageRow(string label, AgentUsageLine line) => new()
+    {
+        Label = label,
+        Value = $"{line.TokensText} · {line.CostText}",
+        Group = "ccusage",
+    };
+
+    private static SupplementaryDetailsViewModel CopyWithRows(
+        SupplementaryDetailsViewModel source,
+        IReadOnlyList<SupplementaryRowViewModel> rows) => new()
+        {
+            ProviderId = source.ProviderId,
+            SectionTitle = source.SectionTitle,
+            ResetTitle = source.ResetTitle,
+            ResetBadge = source.ResetBadge,
+            ResetSummary = source.ResetSummary,
+            ResetDetails = source.ResetDetails,
+            Rows = rows,
+            ActivityPills = source.ActivityPills,
+            ActivityTitle = source.ActivityTitle,
+            ActivityNote = source.ActivityNote,
+            IsResetDetailsExpanded = source.IsResetDetailsExpanded,
+        };
+
     public void UpdateFromSnapshot(ProviderSnapshot snapshot, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -386,9 +645,12 @@ public sealed class ProviderTabViewModel : ViewModelBase
         }
 
         AccountInfo = !string.IsNullOrEmpty(snapshot.Account) ? $"Account: {snapshot.Account}" : "";
-        var configuredNow = snapshot.Detection is null
-            ? snapshot.Ok
-            : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired;
+        // R-019 E13e: IsConfigured is also true when the snapshot has AdminOnly set (Admin API
+        // succeeded and OAuth is missing, expired or rejected 401/403).
+        var configuredNow = snapshot.AdminOnly
+            || (snapshot.Detection is null
+                ? snapshot.Ok
+                : snapshot.Detection.State is DetectionState.Connected or DetectionState.Limited or DetectionState.Expired);
         // 1.3.3: the banner is for a failing, configured service; a history gap is reported where the charts would be.
         ErrorMessage = snapshot.Error ?? "";
         HistoryNote = string.IsNullOrEmpty(snapshot.HistoryError) ? "" : $"⚠ {snapshot.HistoryError}";
@@ -434,7 +696,9 @@ public sealed class ProviderTabViewModel : ViewModelBase
         if (history is not null && history.Buckets.Count > 0)
         {
             var suffix = $" · last {history.Days} days";
-            ChartBuckets = history.Buckets.OrderBy(b => b.Day).TakeLast(history.Days).ToList();
+            var chartBuckets = history.Buckets.OrderBy(b => b.Day).TakeLast(history.Days).ToList();
+            ChartBuckets = chartBuckets;
+            ChartCosts = AlignCosts(history.DailyCosts, chartBuckets);
             ChartSeries = history.Series;
             ChartMetric = history.Metric;
             ChartTitle = "Usage per day" + suffix;
@@ -447,6 +711,7 @@ public sealed class ProviderTabViewModel : ViewModelBase
         else
         {
             ChartBuckets = [];
+            ChartCosts = [];
             ChartSeries = [];
             ModelRows = [];
             ProjectRows = [];
@@ -460,28 +725,46 @@ public sealed class ProviderTabViewModel : ViewModelBase
         LastUpdated = snapshot.FetchedAt;
         IsConfigured = configuredNow;
         HasSnapshot = true;
-        ShowSetupCard = !configuredNow && meterList.Count == 0;
+        // Every other provider keeps R-004's setup card. Only the OpenCode tab and the Overview
+        // tab never show it, so an error-only snapshot shows the error banner instead (E10, R-016
+        // I3), and a configured snapshot with no meters does not draw an empty gauge card.
+        // R-019 E13e: configuredNow is true when snapshot.AdminOnly is true, so the setup card is
+        // already hidden for admin-only Claude without a dedicated clause here.
+        var isOpenCode = string.Equals(ProviderId, "opencode", StringComparison.OrdinalIgnoreCase);
+        var isOverview = string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
+        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
+        ShowSetupCard = !configuredNow && meterList.Count == 0 && !isOpenCode && !isOverview;
         AccountLabel = !string.IsNullOrEmpty(snapshot.Account)
             ? snapshot.Account
             : ShowSetupCard ? $"{DisplayName} is not configured yet" : "";
 
-        var isClaude = string.Equals(ProviderId, "claude", StringComparison.OrdinalIgnoreCase);
+        // I14: Overview caption is always plain "Overview", never "Overview NN%".
+        if (isOverview)
+        {
+            TabTitle = DisplayName;
+        }
+
         var isOpenAi = string.Equals(ProviderId, "openai", StringComparison.OrdinalIgnoreCase);
 
         if (isClaude || isOpenAi)
         {
-            ShowSupplementary = configuredNow || snapshot.Stats.Any(IsSupplementaryStat);
             var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
             Supplementary = BuildSupplementary(snapshot, isClaude, isOpenAi);
             Supplementary.IsResetDetailsExpanded = wasExpanded;
         }
         else
         {
-            ShowSupplementary = false;
             Supplementary = null;
         }
 
-        StatTiles = snapshot.Stats.Where(s => !ShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
+        // C26: set after the section is assigned, so a BuildSupplementary exception cannot leave the
+        // base flag true while the section is still null.
+        _baseShowSupplementary = (isClaude || isOpenAi)
+            && (configuredNow || snapshot.Stats.Any(IsSupplementaryStat));
+
+        ApplyAgentUsage();
+
+        StatTiles = snapshot.Stats.Where(s => !_baseShowSupplementary || !IsSupplementaryStat(s)).Select(t => new StatTile(t.Label, t.Value, t.Detail)).ToList();
 
         // Stats summary
         if (snapshot.Stats.Count > 0)
@@ -492,6 +775,33 @@ public sealed class ProviderTabViewModel : ViewModelBase
         {
             StatsSummary = "";
         }
+    }
+
+    private static IReadOnlyList<DailyCost> AlignCosts(
+        IReadOnlyList<DailyCost> costs,
+        IReadOnlyList<UsageHistoryBucket> buckets)
+    {
+        if (costs.Count == 0)
+        {
+            return [];
+        }
+
+        var byDay = new Dictionary<DateOnly, DailyCost>();
+        foreach (var cost in costs)
+        {
+            byDay[cost.Day] = cost;
+        }
+
+        var aligned = new List<DailyCost>(buckets.Count);
+        foreach (var bucket in buckets)
+        {
+            if (byDay.TryGetValue(bucket.Day, out var cost))
+            {
+                aligned.Add(cost);
+            }
+        }
+
+        return aligned;
     }
 
     private static bool IsSupplementaryStat(Stat s)

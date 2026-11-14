@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- The macOS presentation layer (R-014). Windows keeps AIMonitor.Presentation.Wpf. -->
+    <!-- The macOS presentation layer (R-022). Windows keeps AIMonitor.Presentation.Wpf. -->
     <ApplicationIcon />
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>

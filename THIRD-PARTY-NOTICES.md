@@ -57,6 +57,45 @@ Licensed under the **Apache License 2.0** (SPDX: Apache-2.0).
 
 ---
 
+## ccusage (logic adapted, and optional external tool — not shipped)
+
+**© 2025 ryoppippi**
+<https://github.com/ccusage/ccusage>
+
+AI Usage Monitor can run a `ccusage` that the user installed separately (it is not bundled with the
+installer). The Claude transcript de-duplication rules (message/request keys, sidechain replay and
+survivor choice), the advisor-iteration records and the Claude config-directory resolution in
+`ClaudeTranscriptStore` / `ClaudeTranscriptPathResolver` were re-implemented in C# from ccusage's
+behaviour; no ccusage source code is included.
+
+Licensed under the **MIT License** (SPDX: MIT):
+
+```
+MIT License
+
+Copyright (c) 2025 ryoppippi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
 ## GDI+ / Windows Graphics Device Interface
 
 The Windows tray icon is rendered using GDI+ drawing routines available through

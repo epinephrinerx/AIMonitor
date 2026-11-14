@@ -48,9 +48,11 @@ public sealed class ClaudeTranscriptStoreFileTests : IDisposable
 
     /// <summary>Test-only seam via <see cref="ClaudeTranscriptStore"/>'s internal constructor: lets a
     /// test substitute a controlled stream in place of the real file open, to exercise cancellation
-    /// and I/O failure deterministically instead of racing a real file handle.</summary>
+    /// and I/O failure deterministically instead of racing a real file handle. The last argument is the
+    /// seen-set capacity at its spec'd default (P2b.5, B7), so these tests use the same de-duplication
+    /// bounds the product does.</summary>
     private ClaudeTranscriptStore CreateStore(Func<string, Stream> openFile) =>
-        new(_root, new FakeClock(FixedNow), TimeZoneInfo.Utc, openFile);
+        new([_root], new FakeClock(FixedNow), TimeZoneInfo.Utc, openFile, 400_000);
 
     private static Stream OpenRealFile(string path) =>
         new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -243,18 +245,46 @@ public sealed class ClaudeTranscriptStoreFileTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshAsync_SameMessageIdAcrossTwoFiles_CountsOnlyOnce()
+    public async Task RefreshAsync_SameMessageIdAcrossTwoFilesWithTheSameSessionName_CountsOnlyOnce()
     {
+        // P2b.4 keys a record on its id plus the session, and B2 derives that session from the file: a
+        // file at <root>\<project>\<file>.jsonl is the file name without extension. Two project folders
+        // each holding "session.jsonl" therefore describe one and the same session, and the record found
+        // in both is counted once. The two records tie on every survivor criterion (same 100 input
+        // tokens, same model, neither sidechain), so P2b.5's last branch keeps the first one and the
+        // counters never move.
+        WriteLines(RecordJson("shared-id"));
+        var otherProject = Path.Combine(_root, "C--work-other");
+        Directory.CreateDirectory(otherProject);
+        File.WriteAllText(Path.Combine(otherProject, "session.jsonl"), RecordJson("shared-id") + "\n");
+
+        var store = CreateStore();
+        await store.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(1, store.AllTotals.Messages);
+        Assert.Equal(100, store.AllTotals.InputTokens);
+        Assert.Equal(2, store.FilesScanned);
+        Assert.Equal(0, store.MalformedRecordCount);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SameMessageIdAcrossTwoFilesWithDifferentSessionNames_CountsBoth()
+    {
+        // The counterpart of the test above, and the reason the old "same id anywhere counts once" rule
+        // is obsolete: with no sessionId on the record and no requestId to pair it with, sid comes from
+        // the file (B2), so "session" and "session-b" are two sessions and two different keys. The same
+        // message id seen under both is two records - which is what ccusage counts, the reference the
+        // P2b section names.
         WriteLines(RecordJson("shared-id"));
         var otherProject = Path.Combine(_root, "C--work-other");
         Directory.CreateDirectory(otherProject);
         File.WriteAllText(Path.Combine(otherProject, "session-b.jsonl"), RecordJson("shared-id") + "\n");
 
         var store = CreateStore();
-        var added = await store.RefreshAsync(CancellationToken.None);
+        await store.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal(1, added);
-        Assert.Equal(1, store.AllTotals.Messages);
+        Assert.Equal(2, store.AllTotals.Messages);
+        Assert.Equal(200, store.AllTotals.InputTokens);
     }
 
     [Fact]
@@ -265,9 +295,14 @@ public sealed class ClaudeTranscriptStoreFileTests : IDisposable
 
         var added = await store.RefreshAsync(CancellationToken.None);
 
+        // P2b.2 fixes the wording for "no root exists": one exact, actionable sentence, and no path in it
+        // - which is what "sanitized" means here, so the old Assert.Contains(root) is now an
+        // Assert.DoesNotContain.
         Assert.Equal(0, added);
-        Assert.NotNull(store.LastDirectoryError);
-        Assert.Contains(missingRoot, store.LastDirectoryError!);
+        Assert.Equal(0, store.FilesScanned);
+        Assert.Equal("No Claude transcripts directory found.", store.LastDirectoryError);
+        Assert.DoesNotContain(missingRoot, store.LastDirectoryError!, StringComparison.Ordinal);
+        Assert.DoesNotContain(_root, store.LastDirectoryError!, StringComparison.Ordinal);
     }
 
     [Fact]

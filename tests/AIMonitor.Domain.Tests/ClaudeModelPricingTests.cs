@@ -49,21 +49,24 @@ public class ClaudeModelPricingTests
     [Fact]
     public void RateFor_SonnetFamilyRateDiffersFromSonnet5_SoTheEstimateCanBeWrong()
     {
-        // Not hypothetical rounding: the published input price dropped between 4.6 and 5, so a
-        // future claude-sonnet-7 is billed by the family prefix at the *older* pair, not the
-        // family's most recent published rate. The guess can be out by a real amount, in either
-        // direction.
+        // Rewritten for P2a (Docs/SPEC_R014.md §P2a): the prefix fallbacks moved to the current
+        // generation — "sonnet 2/10/0.10" — so a future claude-sonnet-7 now matches claude-sonnet-5
+        // on input and output (spec row: claude-sonnet-5 | 2 | 10) but still misses its cache read
+        // (prefix 0.10 vs published 0.20). The estimate can still be out by a real amount — now on
+        // the cache-read leg. And the family's published rows differ (claude-sonnet-4-6 3/15/0.30
+        // vs claude-sonnet-5 2/10/0.20), so pinning the prefix to any one row stays a guess.
         var older = ClaudeModelPricing.RateFor("claude-sonnet-4-6");
         var newer = ClaudeModelPricing.RateFor("claude-sonnet-5");
         var guessed = ClaudeModelPricing.RateFor("claude-sonnet-7");
 
+        Assert.Equal(PricingKind.Estimated, ClaudeModelPricing.PriceKind("claude-sonnet-7"));
+        Assert.Equal(newer.InputPerMillion, guessed.InputPerMillion);      // spec: prefix sonnet input 2
+        Assert.Equal(newer.OutputPerMillion, guessed.OutputPerMillion);    // spec: prefix sonnet output 10
+        Assert.Equal(0.10m, guessed.CacheReadPerMillion);                  // spec: prefix sonnet read 0.10
+        Assert.Equal(0.20m, newer.CacheReadPerMillion);                    // spec row claude-sonnet-5 read 0.20
+        Assert.NotEqual(newer.CacheReadPerMillion, guessed.CacheReadPerMillion);
         Assert.NotEqual(
             (older.InputPerMillion, older.OutputPerMillion), (newer.InputPerMillion, newer.OutputPerMillion));
-        Assert.Equal(PricingKind.Estimated, ClaudeModelPricing.PriceKind("claude-sonnet-7"));
-        Assert.NotEqual(
-            (guessed.InputPerMillion, guessed.OutputPerMillion), (newer.InputPerMillion, newer.OutputPerMillion));
-        Assert.Equal(
-            (older.InputPerMillion, older.OutputPerMillion), (guessed.InputPerMillion, guessed.OutputPerMillion));
     }
 
     [Fact]
@@ -118,12 +121,15 @@ public class ClaudeModelPricingTests
     [Fact]
     public void Cost_CacheMultipliers_MatchThePublishedFormula()
     {
-        // claude-sonnet-5 input rate is $2/M; 5-minute cache write is 1.25x, 1-hour write is 2x,
-        // and a cache read is 0.1x that input rate.
+        // Rewritten for P2a (Docs/SPEC_R014.md §P2a + decision A8): only the *writes* are multipliers
+        // of the input rate — "5m write stays ×1.25 and 1h write ×2.0" — while cache read is now an
+        // explicit per-model rate ("Replace the fixed cache-read multiplier with per-model rates").
+        // claude-sonnet-5 lists input 2 / cache read 0.20 (table row "2 | 10 | 0.20 | unchanged").
+        // Hand calc: 1M×(2.00×1.25 = 2.50) + 1M×(2.00×2.0 = 4.00) + 1M×0.20 = 2.50 + 4.00 + 0.20 = 6.70.
         var cost = ClaudeModelPricing.Cost(
             "claude-sonnet-5", cacheWrite5mTokens: 1_000_000, cacheWrite1hTokens: 1_000_000, cacheReadTokens: 1_000_000);
 
-        Assert.Equal(2.00m * 1.25m + 2.00m * 2.0m + 2.00m * 0.1m, cost);
+        Assert.Equal(6.70m, cost);
     }
 
     [Fact]

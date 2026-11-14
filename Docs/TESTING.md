@@ -24,7 +24,7 @@ dotnet format AIMonitor.sln --verify-no-changes --no-restore
 - ตัวแปร environment: automated test ไม่ต้องใช้ environment variable ใด ๆ; ห้ามใช้ provider
   credential จริง (API key, OAuth token, service-account) ใน automated test ไม่ว่ากรณีใด
 
-### macOS (R-014)
+### macOS (R-022)
 
 สองโปรเจกต์ WPF restore บน macOS ไม่ได้ (`NETSDK1100`) จึงใช้ solution filter
 `AIMonitor.CrossPlatform.slnf` ซึ่งคือ `AIMonitor.sln` ที่ตัดสองโปรเจกต์นั้นออก:
@@ -46,7 +46,7 @@ python3 scripts/assert_skips_are_documented.py artifacts/test-results
   `WindowsOnlyFactAttribute` ที่ทำให้ runner รายงานเป็น skip พร้อมเหตุผลขึ้นต้นด้วย `Windows-only:`
   แทนการ `return` เงียบ ๆ ซึ่งรายงานว่าผ่าน
 - `scripts/assert_skips_are_documented.py` อ่าน `.trx` แล้วล้มงานถ้ามี skip ที่เหตุผลไม่ขึ้นต้นด้วย
-  `Windows-only:` — เกณฑ์ "ไม่มี test ถูก skip เพราะแพลตฟอร์มโดยไม่จดไว้" ของ R-014 จึงวัดได้อัตโนมัติ
+  `Windows-only:` — เกณฑ์ "ไม่มี test ถูก skip เพราะแพลตฟอร์มโดยไม่จดไว้" ของ R-022 จึงวัดได้อัตโนมัติ
 - ตรวจว่าชั้น presentation ฝั่ง Windows ยังคอมไพล์ผ่านได้จากเครื่อง macOS (จับ CA1416 regression
   ก่อนขึ้น CI ของ Windows):
 
@@ -193,7 +193,7 @@ Pull request ใช้สอง workflow แยกกัน ไม่มี depl
 | Workflow | Runner | ขอบเขต |
 |---|---|---|
 | `.github/workflows/ci.yml` (`Windows verification`) | `windows-2025` | ทั้ง `AIMonitor.sln`: restore → format → build → full tests → verification tool → dependency audit → self-contained package |
-| `.github/workflows/ci-macos.yml` (`macOS verification`) | `macos-15` (arm64) | `AIMonitor.CrossPlatform.slnf`: restore → format → build → tests → ตรวจว่า skip ทุกตัวจดเหตุผลไว้ (R-014) |
+| `.github/workflows/ci-macos.yml` (`macOS verification`) | `macos-15` (arm64) | `AIMonitor.CrossPlatform.slnf`: restore → format → build → tests → ตรวจว่า skip ทุกตัวจดเหตุผลไว้ (R-022) |
 
 รายการด้านล่างคือ gates และ release verification policy; remote workflow run ยังไม่เกิดจนกว่าจะ push workflow
 
@@ -312,7 +312,7 @@ Critical smoke checklist (อ้างอิง parity ID จาก `Docs/FEATUR
 
 ## 12. Local packaging and synthetic screen evidence
 
-### macOS `.app` (R-014)
+### macOS `.app` (R-022)
 
 ```sh
 scripts/build_macos_app.sh            # ออกที่ artifacts/macos/AI Usage Monitor.app
@@ -321,7 +321,7 @@ scripts/build_macos_app.sh            # ออกที่ artifacts/macos/AI Us
 - **one-directory + self-contained เท่านั้น ห้าม single-file** — bundle แบบไฟล์เดียวแตกตัวเองลง temp
   ทุกครั้งที่เปิด ซึ่งเป็นราคาที่แอปที่เปิดพร้อม login ต้องจ่ายทุกเช้า (บทเรียนจากสาขา `Mac`)
 - เซ็นแบบ **ad-hoc** (`codesign -s -`) ซึ่งเป็นขั้นต่ำที่ binary arm64 ต้องมีถึงจะรันได้
-  **ไม่ได้เซ็นด้วย Developer ID และไม่ได้ notarize** ตามที่ R-014 กันไว้ เปิดครั้งแรกจาก Finder
+  **ไม่ได้เซ็นด้วย Developer ID และไม่ได้ notarize** ตามที่ R-022 กันไว้ เปิดครั้งแรกจาก Finder
   macOS จะเตือน
 - `LICENSE` กับ `THIRD-PARTY-NOTICES.md` ถูกใส่ทั้งใน `Contents/MacOS/` (ที่หน้า About อ่าน) และ
   `Contents/Resources/` (ที่คนเปิดดูใน Finder จะมอง) — GPL-3.0 ไม่ได้ขึ้นกับแพลตฟอร์ม

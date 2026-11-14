@@ -38,6 +38,7 @@
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
                       Margin="0,0,0,12">
+            <StackPanel>
             <ItemsControl x:Name="CardsItemsControl" ItemsSource="{Binding Cards}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -150,6 +151,27 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <TextBlock Text="Other agents" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,2,0,4" />
+            <TextBlock Text="{Binding OtherAgentsStatus}" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" />
+            <ItemsControl ItemsSource="{Binding OtherAgents}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource CardBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                                <TextBlock Text="{Binding Guidance}" FontSize="12" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </StackPanel>
         </ScrollViewer>
 
         <!-- Footer -->
