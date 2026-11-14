@@ -22,21 +22,23 @@ public sealed class ConnectionsViewModelTests
         page.Cards.Single(card => card.ProviderId == providerId);
 
     [Fact]
-    public async Task ShowsOneCardPerService()
+    public async Task ShowsOneCardPerService_ThenOpenCode()
     {
         var (page, _, _) = await BuildAsync();
 
-        Assert.Equal(["claude", "openai", "agy"], page.Cards.Select(card => card.ProviderId));
+        Assert.Equal(["claude", "openai", "agy", "opencode"], page.Cards.Select(card => card.ProviderId));
     }
 
     [Fact]
-    public async Task OnlyTheServiceThatTakesAKeyOffersOne()
+    public async Task OnlyTheServicesThatTakeAKeyOfferOne()
     {
         var (page, _, _) = await BuildAsync();
 
-        Assert.False(Card(page, "claude").NeedsKey);
+        // R-019: Claude takes an optional Anthropic Admin key for API usage and cost.
+        Assert.True(Card(page, "claude").NeedsKey);
         Assert.True(Card(page, "openai").NeedsKey);
         Assert.False(Card(page, "agy").NeedsKey);
+        Assert.False(Card(page, "opencode").NeedsKey);
     }
 
     [Fact]
@@ -177,7 +179,7 @@ public sealed class ConnectionsViewModelTests
     {
         var (page, _, secrets) = await BuildAsync();
 
-        await page.SaveAsync(Card(page, "claude"));
+        await page.SaveAsync(Card(page, "agy"));
 
         Assert.Contains("signed in on this machine", page.Message, StringComparison.Ordinal);
         Assert.Equal(0, secrets.SetCalls);

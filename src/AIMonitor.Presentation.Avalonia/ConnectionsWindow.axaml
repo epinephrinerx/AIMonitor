@@ -30,6 +30,7 @@
     </StackPanel>
 
     <ScrollViewer>
+      <StackPanel>
       <ItemsControl ItemsSource="{Binding Cards}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ConnectionCardViewModel">
@@ -54,6 +55,8 @@
                   <TextBlock Text="{Binding KeyLabel}" FontSize="12" />
                   <!-- PasswordChar: the key is a secret, and this page is often open on a shared screen. -->
                   <TextBox Text="{Binding Key}" PlaceholderText="{Binding KeyPlaceholder}" PasswordChar="•" />
+                  <TextBlock Text="{Binding KeyHint}" IsVisible="{Binding HasKeyHint}"
+                             TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
                   <StackPanel Spacing="6" IsVisible="{Binding HasExtra}">
                     <TextBlock Text="{Binding ExtraLabel}" FontSize="12" />
                     <TextBox Text="{Binding Extra}" PlaceholderText="{Binding ExtraPlaceholder}" />
@@ -69,6 +72,25 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+
+      <!-- Agents ccusage found that have no tab of their own, and how each one signs in (R-021). -->
+      <Border Classes="card" Margin="0,0,0,12">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Other agents" FontWeight="SemiBold" FontSize="14" />
+          <TextBlock Text="{Binding OtherAgentsStatus}" Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding OtherAgents}" IsVisible="{Binding HasOtherAgents}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:OtherAgentRow">
+                <StackPanel Spacing="2" Margin="0,4">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Guidance}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      </StackPanel>
     </ScrollViewer>
   </DockPanel>
 </Window>

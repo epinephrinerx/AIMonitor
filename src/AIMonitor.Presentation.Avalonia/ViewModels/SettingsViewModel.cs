@@ -42,8 +42,10 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _widgetRotationEnabled;
     private int _chartRangeDays;
     private bool _isSaving;
+    private bool _hasBudgetError;
 
-    public SettingsViewModel(SettingsSession session)
+    /// <param name="knownAgents">Agents ccusage has reported, so each gets a budget row; OpenCode always does.</param>
+    public SettingsViewModel(SettingsSession session, IReadOnlyList<string>? knownAgents = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _original = session.Current;
@@ -63,7 +65,10 @@ public sealed class SettingsViewModel : ObservableObject
         _widgetRotationEnabled = _original.WidgetRotationEnabled;
         _chartRangeDays = _original.ChartRangeDays;
 
-        SaveCommand = new AsyncCommand(SaveAsync, () => !HasIntervalError);
+        BudgetRows = CreateBudgetRows(knownAgents);
+        _hasBudgetError = BudgetRows.Any(row => row.HasError);
+
+        SaveCommand = new AsyncCommand(SaveAsync, () => !HasIntervalError && !HasBudgetError);
         CancelCommand = new RelayCommand(Cancel);
     }
 
@@ -76,6 +81,18 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand CancelCommand { get; }
 
     public IReadOnlyList<ProviderToggle> Providers { get; }
+
+    /// <summary>Monthly budget per agent (R-015), OpenCode first, then by name. Empty means no budget.</summary>
+    public IReadOnlyList<AgentBudgetRowViewModel> BudgetRows { get; }
+
+    public bool HasBudgetError
+    {
+        get => _hasBudgetError;
+        private set
+        {
+            if (Set(ref _hasBudgetError, value)) (SaveCommand as AsyncCommand)?.RaiseCanExecuteChanged();
+        }
+    }
 
     public IReadOnlyList<string> Themes { get; } = ["system", "light", "dark"];
 
@@ -166,7 +183,7 @@ public sealed class SettingsViewModel : ObservableObject
     public async Task SaveAsync()
     {
         Validate();
-        if (HasIntervalError) return;
+        if (HasIntervalError || HasBudgetError) return;
 
         IsSaving = true;
         try
@@ -192,6 +209,7 @@ public sealed class SettingsViewModel : ObservableObject
                 WidgetRotationEnabled = _widgetRotationEnabled,
                 ChartRangeDays = _chartRangeDays,
                 Providers = providers,
+                AgentBudgets = BuildBudgets(),
             }).ConfigureAwait(true);
 
             _original = _session.Current;
@@ -226,7 +244,46 @@ public sealed class SettingsViewModel : ObservableObject
                 || preference.Enabled;
         }
 
+        foreach (var row in BudgetRows)
+        {
+            row.Text = BudgetText(row.Agent);
+        }
+
         RequestClose?.Invoke(false);
+    }
+
+    private List<AgentBudgetRowViewModel> CreateBudgetRows(IReadOnlyList<string>? knownAgents)
+    {
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "opencode" };
+        foreach (var agent in _original.AgentBudgets.Keys.Concat(knownAgents ?? []))
+        {
+            var normalised = agent?.Trim().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(normalised)) agents.Add(normalised);
+        }
+
+        return [.. agents
+            .Select(agent => (Agent: agent, DisplayName: AgentUsagePresenter.AgentDisplayName(agent)))
+            .OrderBy(entry => string.Equals(entry.Agent, "opencode", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(entry => entry.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => new AgentBudgetRowViewModel(
+                entry.Agent, entry.DisplayName, BudgetText(entry.Agent), () => HasBudgetError = BudgetRows.Any(row => row.HasError)))];
+    }
+
+    private string BudgetText(string agent) =>
+        _original.AgentBudgets.TryGetValue(agent, out var value) ? value.ToString("0.00", CultureInfo.InvariantCulture) : string.Empty;
+
+    private Dictionary<string, decimal> BuildBudgets()
+    {
+        var budgets = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in BudgetRows)
+        {
+            if (row.TryGetValue(out var value))
+            {
+                budgets[row.Agent] = Math.Round(value, 2, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        return budgets;
     }
 
     private void Validate()

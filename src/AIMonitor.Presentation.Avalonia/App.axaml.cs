@@ -1,3 +1,4 @@
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
@@ -26,6 +27,9 @@ public sealed partial class App : global::Avalonia.Application
     private WidgetViewModel? _widget;
     private SettingsSession? _settings;
     private ProviderConnectionStore? _connections;
+    private IOpenCodeAuthReader? _openCodeAuthReader;
+    private OpenCodeAuthStatus? _openCodeStatus;
+    private Task? _openCodeCheck;
     private ConnectionsViewModel? _connectionsPage;
     private HttpClient? _updateHttpClient;
     private MenuBarHost? _menuBar;
@@ -61,12 +65,14 @@ public sealed partial class App : global::Avalonia.Application
         var startup = _platform.StartAsync().GetAwaiter().GetResult();
         _settings = startup.Settings;
         _connections = startup.Connections;
+        _openCodeAuthReader = startup.OpenCodeAuthReader;
         ApplyTheme(_settings.Current.Theme);
 
         _dashboard = new DashboardViewModel(startup.RefreshCoordinator, _settings, startup.AgentUsage);
         _dashboard.ThemeChanged += ApplyTheme;
         _dashboard.ExitRequested += Quit;
         _dashboard.Refreshed += OnRefreshed;
+        _dashboard.AgentUsageUpdated += (lastGood, lastError) => _connectionsPage?.UpdateOtherAgents(lastGood, lastError);
         _dashboard.OpenSettingsRequested += OpenSettings;
         _dashboard.OpenConnectionsRequested += OpenConnections;
         _dashboard.OpenAboutRequested += OpenAbout;
@@ -97,6 +103,7 @@ public sealed partial class App : global::Avalonia.Application
 
         StartRefreshTimer();
         _ = _dashboard.RefreshAsync();
+        CheckOpenCode();
 
         // The connections page is where a brand-new profile starts, because nothing can be shown
         // until at least one service is signed in.
@@ -184,7 +191,19 @@ public sealed partial class App : global::Avalonia.Application
     private void OpenSettings()
     {
         if (_settings is null) return;
-        Show(new SettingsWindow { DataContext = new SettingsViewModel(_settings) });
+        Show(new SettingsWindow { DataContext = new SettingsViewModel(_settings, KnownAgentNames()) });
+    }
+
+    /// <summary>Every agent ccusage has reported, so Settings can offer each one a budget row.</summary>
+    private IReadOnlyList<string>? KnownAgentNames()
+    {
+        if (_dashboard?.LatestAgentUsage is not { } report) return null;
+
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var agent in report.Daily.SelectMany(day => day.Agents)) agents.Add(agent.Agent);
+        foreach (var agent in report.Monthly.SelectMany(month => month.Agents)) agents.Add(agent.Agent);
+        foreach (var session in report.Sessions) agents.Add(session.Usage.Agent);
+        return agents.Count == 0 ? null : [.. agents];
     }
 
     private void OpenConnections()
@@ -192,13 +211,48 @@ public sealed partial class App : global::Avalonia.Application
         if (_settings is null || _connections is null || _dashboard is null) return;
 
         _connectionsPage = new ConnectionsViewModel(_settings, _connections);
-        // Named rather than discarded: a discard here would shadow the lambda's own parameter.
-        _connectionsPage.RedetectRequested += providerId => _ = _dashboard.RefreshAsync();
+        // "Check again" on the OpenCode card asks OpenCode only; the services are refreshed for the rest.
+        _connectionsPage.RedetectRequested += providerId =>
+        {
+            if (providerId is null or "opencode") CheckOpenCode();
+            if (providerId != "opencode") _ = _dashboard.RefreshAsync();
+        };
         _connectionsPage.Update(_dashboard.LatestSnapshots);
+        _connectionsPage.UpdateOpenCode(_openCodeStatus);
+        _connectionsPage.UpdateOtherAgents(_dashboard.LatestAgentUsage, null);
 
         var window = new ConnectionsWindow { DataContext = _connectionsPage };
         window.Closed += (_, _) => _connectionsPage = null;
         Show(window);
+    }
+
+    /// <summary>
+    /// Reads OpenCode's sign-ins off the UI thread, since it may run the OpenCode CLI. One check at a
+    /// time; the result is kept so the connections page shows it as soon as it opens.
+    /// </summary>
+    private void CheckOpenCode()
+    {
+        if (_openCodeAuthReader is not { } reader || _openCodeCheck is { IsCompleted: false }) return;
+
+        _openCodeCheck = Task.Run(async () =>
+        {
+            OpenCodeAuthStatus status;
+            try
+            {
+                status = await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                status = new OpenCodeAuthStatus(true, "", [], false,
+                    "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check.");
+            }
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                _openCodeStatus = status;
+                _connectionsPage?.UpdateOpenCode(status);
+            });
+        });
     }
 
     private void OpenAbout()

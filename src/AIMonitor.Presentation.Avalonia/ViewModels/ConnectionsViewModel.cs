@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
+using AIMonitor.Application.AgentUsage;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
@@ -43,6 +45,32 @@ public sealed class ConnectionCardViewModel : ObservableObject
 
     public bool HasExtra => Description.ExtraLabel.Length > 0;
 
+    /// <summary>
+    /// What the typed key looks like, before it is saved (R-019): only organization Admin keys can
+    /// read usage, and pasting an ordinary key is the usual mistake.
+    /// </summary>
+    public string KeyHint
+    {
+        get
+        {
+            var key = _key.Trim();
+            if (key.Length == 0) return string.Empty;
+
+            return ProviderId switch
+            {
+                "openai" => key.StartsWith("sk-admin-", StringComparison.Ordinal)
+                    ? "Admin API key format recognized (sk-admin-…)."
+                    : "API spend requires an organization Admin key (sk-admin-…). Project or user keys (e.g. sk-proj-…) cannot read organization usage or costs.",
+                "claude" => key.StartsWith("sk-ant-admin", StringComparison.Ordinal)
+                    ? "Admin API key format recognized (sk-ant-admin…)."
+                    : "API usage and cost require an organization Admin key (sk-ant-admin…). Ordinary or workspace API keys cannot read organization usage.",
+                _ => string.Empty,
+            };
+        }
+    }
+
+    public bool HasKeyHint => KeyHint.Length > 0;
+
     public string Status
     {
         get => _status;
@@ -79,7 +107,12 @@ public sealed class ConnectionCardViewModel : ObservableObject
     public string Key
     {
         get => _key;
-        set => Set(ref _key, value);
+        set
+        {
+            if (!Set(ref _key, value)) return;
+            Raise(nameof(KeyHint));
+            Raise(nameof(HasKeyHint));
+        }
     }
 
     public string Extra
@@ -102,11 +135,54 @@ public sealed class ConnectionCardViewModel : ObservableObject
         SetupHint = snapshot.SetupHint.Length > 0 ? snapshot.SetupHint : Description.SetupHint;
         Status = snapshot switch
         {
+            // R-019 E14: the Admin key works but Claude Code is not signed in, so there is usage and
+            // cost but no quota.
+            { AdminOnly: true, Error: null or "" } when ProviderId == "claude" =>
+                "Limited · Admin key connected · Claude Code not signed in",
             { Error: { Length: > 0 } error } => error,
             { Unauthorized: true } => "Signed in, but this account is not allowed to read usage",
             { Configured: true } => "Connected",
             _ => "Not signed in",
         };
+    }
+
+    /// <summary>OpenCode's card, from what <c>opencode auth list</c> or auth.json says (R-020). Null is "still checking".</summary>
+    public void ApplyOpenCode(OpenCodeAuthStatus? status)
+    {
+        SetupHint = Description.SetupHint;
+        if (status is null)
+        {
+            Status = "Checking...";
+            Account = string.Empty;
+            IsConnected = false;
+            return;
+        }
+
+        IsConnected = status.Installed && status.Error.Length == 0 && status.SignIns.Count > 0;
+        if (!status.Installed)
+        {
+            Status = "Not connected · OpenCode not found on PATH";
+            Account = string.Empty;
+            SetupHint = "Install OpenCode, then run `opencode auth login`.";
+        }
+        else if (status.Error.Length > 0)
+        {
+            Status = "Unavailable · could not check";
+            Account = string.Empty;
+            SetupHint = status.Error;
+        }
+        else if (status.SignIns.Count == 0)
+        {
+            Status = "Not connected · no providers signed in";
+            Account = string.Empty;
+            SetupHint = "Run `opencode auth login` to sign in.";
+        }
+        else
+        {
+            Status = status.Source == "auth.json" ? "Connected · detected from auth.json" : "Connected · detected from opencode auth list";
+            if (status.MayBeOutdated) Status += " · may be out of date (OpenCode 2.x keeps sign-ins in its database)";
+            Account = "Signed in: " + string.Join(", ", status.SignIns.Select(signIn => $"{signIn.Name} ({signIn.Kind})"));
+        }
     }
 }
 
@@ -124,7 +200,9 @@ public sealed class ConnectionsViewModel : ObservableObject
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
         _showAtStartup = session.Current.ShowConnectionsAtStartup;
 
-        Cards = [.. ProviderCatalog.All.Select(provider => new ConnectionCardViewModel(provider))];
+        OpenCodeCard = new ConnectionCardViewModel(ProviderCatalog.OpenCode);
+        OpenCodeCard.ApplyOpenCode(null);
+        Cards = [.. ProviderCatalog.All.Select(provider => new ConnectionCardViewModel(provider)), OpenCodeCard];
         RedetectAllCommand = new RelayCommand(() => RedetectRequested?.Invoke(null));
         CloseCommand = new RelayCommand(() => CloseRequested?.Invoke());
     }
@@ -134,6 +212,27 @@ public sealed class ConnectionsViewModel : ObservableObject
     public event Action? CloseRequested;
 
     public ObservableCollection<ConnectionCardViewModel> Cards { get; }
+
+    public ConnectionCardViewModel OpenCodeCard { get; }
+
+    /// <summary>Agents ccusage found that have no tab here, and how each signs in (R-021).</summary>
+    public string OtherAgentsStatus { get; private set; } = "Checking ccusage…";
+
+    public IReadOnlyList<OtherAgentRow> OtherAgents { get; private set; } = [];
+
+    public bool HasOtherAgents => OtherAgents.Count > 0;
+
+    public void UpdateOpenCode(OpenCodeAuthStatus? status) => OpenCodeCard.ApplyOpenCode(status);
+
+    public void UpdateOtherAgents(AgentUsageReport? lastGood, AgentUsageUnavailableException? lastError)
+    {
+        var result = OtherAgentsPresenter.Build(lastGood, lastError);
+        OtherAgentsStatus = result.Status;
+        OtherAgents = result.Rows;
+        Raise(nameof(OtherAgentsStatus));
+        Raise(nameof(OtherAgents));
+        Raise(nameof(HasOtherAgents));
+    }
 
     public ICommand RedetectAllCommand { get; }
 
@@ -166,6 +265,7 @@ public sealed class ConnectionsViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(snapshots);
         foreach (var card in Cards)
         {
+            if (ReferenceEquals(card, OpenCodeCard)) continue;
             card.Apply(snapshots.GetValueOrDefault(card.ProviderId));
         }
     }

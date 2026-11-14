@@ -61,6 +61,26 @@
         </StackPanel>
 
         <StackPanel Spacing="8">
+          <TextBlock Text="Monthly budgets" FontWeight="SemiBold" />
+          <TextBlock Text="In US dollars. The OpenCode and Overview gauges measure this month's ccusage cost against these. Leave a box empty for no budget."
+                     Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding BudgetRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AgentBudgetRowViewModel">
+                <StackPanel Margin="0,2">
+                  <Grid ColumnDefinitions="160,140">
+                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" Text="{Binding Text}" PlaceholderText="No budget" />
+                  </Grid>
+                  <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}"
+                             Foreground="{StaticResource SeverityCriticalBrush}" FontSize="12" Margin="160,2,0,0" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
           <TextBlock Text="Widget" FontWeight="SemiBold" />
           <CheckBox Content="Keep the widget above other windows" IsChecked="{Binding WidgetAlwaysOnTop}" />
           <CheckBox Content="Let the widget take turns between services" IsChecked="{Binding WidgetRotationEnabled}" />
