@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security;
 using AIMonitor.Application.Settings;
 using AIMonitor.Infrastructure.Windows;
@@ -5,9 +6,12 @@ using AIMonitor.TestSupport;
 
 namespace AIMonitor.Infrastructure.Tests.Windows;
 
+/// <summary>Drives the Windows "Run" registry key and asserts Windows path quoting, so the whole
+/// class is skipped elsewhere. macOS gets its own coverage from the LaunchAgent registrar.</summary>
+[SupportedOSPlatform("windows")]
 public sealed class WindowsStartupRegistrarTests
 {
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public async Task RegistryReadDenied_ReconciliationPreservesSavedIntent()
     {
         var registrar = new WindowsStartupRegistrar("Fixture", _ => throw new SecurityException("Synthetic denial"));
@@ -23,21 +27,21 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Empty(store.SavedSettings);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void DefaultValueName_MatchesLegacyParity()
     {
         var registrar = new WindowsStartupRegistrar();
         Assert.Equal("AIUsageMonitor", registrar.ValueName);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void IsRegistered_WhenKeyNotFound_ReturnsFalse()
     {
         var registrar = new WindowsStartupRegistrar("TestApp", _ => null);
         Assert.False(registrar.IsRegistered());
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void IsRegistered_WhenValueMissing_ReturnsFalse()
     {
         var fakeKey = new FakeWritableKey();
@@ -46,7 +50,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.False(registrar.IsRegistered());
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void IsRegistered_WhenValueEmpty_ReturnsFalse()
     {
         var fakeKey = new FakeWritableKey();
@@ -56,7 +60,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.False(registrar.IsRegistered());
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void IsRegistered_WhenValueExists_ReturnsTrue()
     {
         var fakeKey = new FakeWritableKey();
@@ -66,7 +70,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.True(registrar.IsRegistered());
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Register_QuotesExecutablePath()
     {
         var fakeKey = new FakeWritableKey();
@@ -78,7 +82,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Equal("\"C:\\Apps\\AIMonitor\\AIMonitor.exe\"", fakeKey.Values["TestApp"]);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Register_WithArguments_QuotesPathAndAppendsArguments()
     {
         var fakeKey = new FakeWritableKey();
@@ -89,7 +93,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Equal("\"C:\\Apps\\AIMonitor\\AIMonitor.exe\" --minimized --tray", fakeKey.Values["TestApp"]);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Register_WhenInputAlreadyHasQuotes_DoesNotDoubleQuote()
     {
         var fakeKey = new FakeWritableKey();
@@ -100,7 +104,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Equal("\"C:\\Apps\\AIMonitor\\AIMonitor.exe\" --tray", fakeKey.Values["TestApp"]);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Register_WhenKeyCannotBeOpened_ThrowsInvalidOperationException()
     {
         var registrar = new WindowsStartupRegistrar("TestApp", _ => null);
@@ -109,7 +113,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Contains("Cannot open registry key", ex.Message);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Register_WhenSecurityException_WrapsInInvalidOperationException()
     {
         var fakeKey = new FakeWritableKey { ThrowOnSet = new SecurityException("Permission denied") };
@@ -120,7 +124,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.IsType<SecurityException>(ex.InnerException);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Unregister_WhenValueExists_RemovesValue()
     {
         var fakeKey = new FakeWritableKey();
@@ -132,7 +136,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.False(fakeKey.Values.ContainsKey("TestApp"));
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Unregister_WhenValueDoesNotExist_DoesNotThrow()
     {
         var fakeKey = new FakeWritableKey();
@@ -142,7 +146,7 @@ public sealed class WindowsStartupRegistrarTests
         Assert.Null(exception);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the registrar writes HKCU\\...\\Run and normalises Windows paths")]
     public void Unregister_WhenKeyCannotBeOpened_DoesNotThrow()
     {
         var registrar = new WindowsStartupRegistrar("TestApp", _ => null);

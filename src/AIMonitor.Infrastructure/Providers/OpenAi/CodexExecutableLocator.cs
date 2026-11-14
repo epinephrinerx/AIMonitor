@@ -1,14 +1,15 @@
 namespace AIMonitor.Infrastructure.Providers.OpenAi;
 
 /// <summary>
-/// Finds the Codex CLI executable: first on <c>PATH</c> (<c>codex.exe</c>), then the newest
-/// <c>%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe</c> the Codex desktop app installs, matching the
-/// Python baseline. Every filesystem/environment access is injected so this is testable without
-/// touching the real machine's <c>PATH</c> or app-data folder.
+/// Finds the Codex CLI executable: first on <c>PATH</c> (<c>codex.exe</c> on Windows, <c>codex</c>
+/// elsewhere), then the newest <c>%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe</c> the Codex desktop
+/// app installs, matching the Python baseline. Every filesystem/environment access is injected so
+/// this is testable without touching the real machine's <c>PATH</c> or app-data folder.
 /// </summary>
 internal static class CodexExecutableLocator
 {
-    private const string ExecutableFileName = "codex.exe";
+    /// <summary>Windows spells it with a suffix; macOS does not.</summary>
+    private static readonly string ExecutableFileName = ExecutableNames.OnThisPlatform(ExecutableNames.Codex);
 
     /// <param name="pathDirectories">The directories on <c>PATH</c>, in order.</param>
     /// <param name="fileExists">Whether a given full path names an existing file.</param>

@@ -57,11 +57,14 @@ public sealed class UpdateDownloaderTests : IDisposable
             Release(url, "Setup-2.1.0.exe", 10), null));
     }
 
-    [Fact]
-    public async Task Download_StripsDirectoriesFromTheAssetName()
+    [Theory]
+    [InlineData(@"..\..\evil\Setup-2.1.0.exe")]
+    [InlineData("../../evil/Setup-2.1.0.exe")]
+    [InlineData(@"C:evil\Setup-2.1.0.exe")]
+    public async Task Download_StripsDirectoriesFromTheAssetName(string assetName)
     {
         var path = await Downloader(new byte[10]).DownloadAsync(
-            Release("https://github.com/x/Setup.exe", @"..\..\evil\Setup-2.1.0.exe", 10), null);
+            Release("https://github.com/x/Setup.exe", assetName, 10), null);
 
         Assert.Equal(_folder, Path.GetDirectoryName(path));
         Assert.Equal("Setup-2.1.0.exe", Path.GetFileName(path));

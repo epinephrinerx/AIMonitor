@@ -62,7 +62,8 @@ public sealed class AgyQuotaClient : IProviderQuotaClient
 
             string safeError = ex.Kind switch
             {
-                AgyErrorKind.NotInstalled => "AGY CLI was not found. Add agy.exe to PATH and restart AIMonitor.",
+                AgyErrorKind.NotInstalled =>
+                    $"AGY CLI was not found. Add {ExecutableNames.OnThisPlatform(ExecutableNames.Agy)} to PATH and restart AIMonitor.",
                 AgyErrorKind.Timeout => "AGY usage timed out or exceeded its output limit. Check AGY, then refresh.",
                 AgyErrorKind.InvalidResponse => "AGY returned no usable quota data. Check AGY /usage or update AGY, then refresh.",
                 AgyErrorKind.RateLimited => "AGY usage checks are temporarily limited. Try again later.",

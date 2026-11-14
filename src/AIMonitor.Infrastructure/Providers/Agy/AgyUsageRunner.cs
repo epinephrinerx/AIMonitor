@@ -37,7 +37,12 @@ public sealed class AgyUsageRunner : IAgyUsageRunner
         try
         {
             var path = _resolve();
-            if (string.IsNullOrWhiteSpace(path)) throw new AgyUsageException("AGY CLI was not found. Install AGY and add agy.exe to PATH, then restart AIMonitor.", AgyErrorKind.NotInstalled);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new AgyUsageException(
+                    $"AGY CLI was not found. Install AGY and add {ExecutableNames.OnThisPlatform(ExecutableNames.Agy)} to PATH, then restart AIMonitor.",
+                    AgyErrorKind.NotInstalled);
+            }
             process = _start(BuildStartInfo(path));
             stdout = ReadPipeAsync(process.Output, _outputLimit, retain: true, deadline);
             stderr = ReadPipeAsync(process.Error, _outputLimit, retain: false, deadline);
@@ -120,7 +125,7 @@ public sealed class AgyUsageRunner : IAgyUsageRunner
             {
                 var fullDirectory = directory.Trim().Trim('"');
                 if (!Path.IsPathFullyQualified(fullDirectory)) continue;
-                var path = Path.Combine(fullDirectory, "agy.exe");
+                var path = Path.Combine(fullDirectory, ExecutableNames.OnThisPlatform(ExecutableNames.Agy));
                 if (File.Exists(path)) return path;
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
