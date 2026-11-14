@@ -18,6 +18,9 @@ public sealed record StatTile(string Label, string Value, string Detail)
     public bool HasDetail => Detail.Length > 0;
 }
 
+/// <summary>"Today (ccusage)" with its tokens and cost: one line of what ccusage recorded for this agent.</summary>
+public sealed record AgentUsageRow(string Label, string Value);
+
 /// <summary>One service's readings as the dashboard shows them.</summary>
 public sealed class ProviderViewModel : ObservableObject
 {
@@ -39,6 +42,10 @@ public sealed class ProviderViewModel : ObservableObject
     private string _chartTitle = "Usage per day";
     private string _modelTitle = "By model";
     private string _projectTitle = "By project";
+    private IReadOnlyList<DailyCost> _chartCosts = [];
+    private string _emptyMessage = string.Empty;
+    private readonly int _meterColumnsCap = int.MaxValue;
+    private AgentUsageSummary? _agentUsage;
 
     public ProviderViewModel(string providerId, string title)
     {
@@ -47,9 +54,24 @@ public sealed class ProviderViewModel : ObservableObject
         _tabTitle = title;
         // The standing advice for this service, the way the Windows build reads it from its own
         // catalogue: a service that has never been refreshed still has something useful to say.
-        _defaultSetupHint = ProviderCatalog.For(providerId).SetupHint;
+        // OpenCode and the Overview are not services with a sign-in of their own, so they have no
+        // catalogue entry and no setup card.
+        _defaultSetupHint = ProviderCatalog.All
+            .FirstOrDefault(provider => string.Equals(provider.Id, providerId, StringComparison.Ordinal))
+            ?.SetupHint ?? string.Empty;
         _setupHint = _defaultSetupHint;
+
+        if (IsOverview)
+        {
+            // R-016: the Overview says what it is waiting for, and never lays out more than three
+            // budget gauges in a row.
+            _emptyMessage = "Checking ccusage...";
+            _meterColumnsCap = 3;
+        }
     }
+
+    private bool IsOverview =>
+        string.Equals(ProviderId, OverviewSnapshotBuilder.ProviderId, StringComparison.OrdinalIgnoreCase);
 
     public string ProviderId { get; }
 
@@ -218,6 +240,33 @@ public sealed class ProviderViewModel : ObservableObject
         private set => Set(ref _hasHistory, value);
     }
 
+    /// <summary>The priced cost of each day in <see cref="ChartBuckets"/>, same order, for the cost line (R-017).</summary>
+    public IReadOnlyList<DailyCost> ChartCosts
+    {
+        get => _chartCosts;
+        private set => Set(ref _chartCosts, value);
+    }
+
+    /// <summary>
+    /// What the Overview shows while it has no gauges: "Checking ccusage...", "No agent usage
+    /// recorded this month" or the month-rollover wait (R-016 I3/I4). Empty on every other tab.
+    /// </summary>
+    public string EmptyMessage
+    {
+        get => _emptyMessage;
+        private set
+        {
+            if (Set(ref _emptyMessage, value)) Raise(nameof(HasEmptyMessage));
+        }
+    }
+
+    public bool HasEmptyMessage => _emptyMessage.Length > 0;
+
+    /// <summary>What ccusage recorded for this agent today and this month (R-014 P4).</summary>
+    public ObservableCollection<AgentUsageRow> AgentUsageRows { get; } = [];
+
+    public bool HasAgentUsage => AgentUsageRows.Count > 0;
+
     public bool HasModelRows => _modelRows.Count > 0;
 
     public bool HasProjectRows => _projectRows.Count > 0;
@@ -226,6 +275,35 @@ public sealed class ProviderViewModel : ObservableObject
     /// A null snapshot means this refresh skipped the service (the user switched monitoring off),
     /// which must not be shown as a failure or wipe the last good readings.
     /// </summary>
+    /// <summary>The Overview's empty-state text from <see cref="OverviewSnapshotBuilder.EmptyMessage"/>;
+    /// other tabs ignore it.</summary>
+    public void UpdateOverviewEmptyMessage(string? message)
+    {
+        if (IsOverview) EmptyMessage = message ?? string.Empty;
+    }
+
+    /// <summary>
+    /// The ccusage rows for this agent. Only the tabs that are an agent ccusage knows about show
+    /// them (Claude, OpenAI / Codex, AGY, OpenCode); the rest ignore the summary.
+    /// </summary>
+    public void SetAgentUsage(AgentUsageSummary? summary)
+    {
+        _agentUsage = ProviderId is "claude" or "openai" or "agy" or OpenCodeSnapshotBuilder.ProviderId ? summary : null;
+
+        AgentUsageRows.Clear();
+        if (_agentUsage?.Today is { } today)
+        {
+            AgentUsageRows.Add(new AgentUsageRow("Today (ccusage)", $"{today.TokensText} · {today.CostText}"));
+        }
+
+        if (_agentUsage?.ThisMonth is { } month)
+        {
+            AgentUsageRows.Add(new AgentUsageRow("This month (ccusage)", $"{month.TokensText} · {month.CostText}"));
+        }
+
+        Raise(nameof(HasAgentUsage));
+    }
+
     public void Apply(ProviderSnapshot? snapshot)
     {
         if (snapshot is null)
@@ -277,6 +355,7 @@ public sealed class ProviderViewModel : ObservableObject
         if (history is null || history.Buckets.Count == 0)
         {
             ChartBuckets = [];
+            ChartCosts = [];
             ChartSeries = [];
             ModelRows = [];
             ProjectRows = [];
@@ -286,6 +365,7 @@ public sealed class ProviderViewModel : ObservableObject
 
         var suffix = $" · last {history.Days} days";
         ChartBuckets = [.. history.Buckets.OrderBy(bucket => bucket.Day).TakeLast(history.Days)];
+        ChartCosts = AlignCosts(history.DailyCosts, ChartBuckets);
         ChartSeries = history.Series;
         ChartMetric = history.Metric;
         ChartTitle = "Usage per day" + suffix;
@@ -301,11 +381,22 @@ public sealed class ProviderViewModel : ObservableObject
         MeterSections.Clear();
         var groups = Meters.GroupBy(meter => meter.Section, StringComparer.Ordinal).ToList();
         // One column count for every row, so a two-card row and a three-card row still line up.
-        var columns = groups.Count == 0 ? 0 : groups.Max(group => group.Count());
+        var columns = groups.Count == 0 ? 0 : Math.Min(groups.Max(group => group.Count()), _meterColumnsCap);
         foreach (var group in groups)
         {
             MeterSections.Add(new MeterSection(group.Key, [.. group], columns));
         }
+    }
+
+    /// <summary>One cost per chart day that has one, in the chart's order; days without a price are skipped.</summary>
+    private static IReadOnlyList<DailyCost> AlignCosts(IReadOnlyList<DailyCost> costs, IReadOnlyList<UsageHistoryBucket> buckets)
+    {
+        if (costs.Count == 0) return [];
+
+        var byDay = new Dictionary<DateOnly, DailyCost>();
+        foreach (var cost in costs) byDay[cost.Day] = cost;
+
+        return [.. buckets.Where(bucket => byDay.ContainsKey(bucket.Day)).Select(bucket => byDay[bucket.Day])];
     }
 }
 

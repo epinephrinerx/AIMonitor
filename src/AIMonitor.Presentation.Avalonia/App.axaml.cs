@@ -63,7 +63,7 @@ public sealed partial class App : global::Avalonia.Application
         _connections = startup.Connections;
         ApplyTheme(_settings.Current.Theme);
 
-        _dashboard = new DashboardViewModel(startup.RefreshCoordinator, _settings);
+        _dashboard = new DashboardViewModel(startup.RefreshCoordinator, _settings, startup.AgentUsage);
         _dashboard.ThemeChanged += ApplyTheme;
         _dashboard.ExitRequested += Quit;
         _dashboard.Refreshed += OnRefreshed;
@@ -74,7 +74,7 @@ public sealed partial class App : global::Avalonia.Application
 
         _widget = new WidgetViewModel([.. _dashboard.Providers]);
         _widget.ExpandRequested += ShowDashboard;
-        _widget.RefreshRequested += () => _ = _dashboard.RefreshAsync();
+        _widget.RefreshRequested += () => _ = _dashboard.RefreshAsync(manual: true);
         _widget.QuitRequested += Quit;
 
         _window = new MainWindow { DataContext = _dashboard };
@@ -127,7 +127,7 @@ public sealed partial class App : global::Avalonia.Application
                 _menuBar = new MenuBarHost();
                 _menuBar.OpenDashboardRequested += ShowDashboard;
                 _menuBar.OpenWidgetRequested += ShowWidget;
-                _menuBar.RefreshRequested += () => _ = _dashboard?.RefreshAsync();
+                _menuBar.RefreshRequested += () => _ = _dashboard?.RefreshAsync(manual: true);
                 _menuBar.QuitRequested += Quit;
                 if (_dashboard is not null)
                 {
@@ -158,7 +158,7 @@ public sealed partial class App : global::Avalonia.Application
     private NativeMenu BuildApplicationMenu()
     {
         var file = new NativeMenuItem("File") { Menu = new NativeMenu() };
-        file.Menu!.Add(Item("Refresh now", () => _ = _dashboard?.RefreshAsync()));
+        file.Menu!.Add(Item("Refresh now", () => _ = _dashboard?.RefreshAsync(manual: true)));
         file.Menu.Add(Item("Usage log", OpenUsageLog));
         file.Menu.Add(new NativeMenuItemSeparator());
         file.Menu.Add(Item("Settings…", OpenSettings));

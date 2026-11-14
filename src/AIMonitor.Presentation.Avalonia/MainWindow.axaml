@@ -97,18 +97,21 @@
     <Border DockPanel.Dock="Top" Margin="16,8,16,12"
             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
       <ListBox Classes="tabstrip"
-               ItemsSource="{Binding Providers}"
-               SelectedItem="{Binding SelectedProvider, Mode=TwoWay}">
+               ItemsSource="{Binding Tabs}"
+               SelectedItem="{Binding SelectedTab, Mode=TwoWay}">
         <ListBox.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel Orientation="Horizontal" />
           </ItemsPanelTemplate>
         </ListBox.ItemsPanel>
-        <ListBox.ItemTemplate>
-          <DataTemplate x:DataType="vm:ProviderViewModel">
+        <ListBox.DataTemplates>
+          <DataTemplate DataType="vm:ProviderViewModel">
             <TextBlock Text="{Binding TabTitle}" />
           </DataTemplate>
-        </ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:AllAgentsTabViewModel">
+            <TextBlock Text="{Binding TabTitle}" />
+          </DataTemplate>
+        </ListBox.DataTemplates>
       </ListBox>
     </Border>
 
@@ -121,9 +124,9 @@
     </Border>
 
     <ScrollViewer Margin="16,0,16,0">
-      <ContentControl Content="{Binding SelectedProvider}">
-        <ContentControl.ContentTemplate>
-          <DataTemplate x:DataType="vm:ProviderViewModel">
+      <ContentControl Content="{Binding SelectedTab}">
+        <ContentControl.DataTemplates>
+          <DataTemplate DataType="vm:ProviderViewModel">
             <StackPanel Spacing="12">
 
               <!-- A failed refresh, said once at the top. -->
@@ -141,6 +144,11 @@
                           HorizontalAlignment="Left" Padding="14,5"
                           Command="{Binding $parent[Window].((vm:DashboardViewModel)DataContext).OpenConnectionsCommand}" />
                 </StackPanel>
+              </Border>
+
+              <!-- The Overview, while ccusage has nothing for it yet. -->
+              <Border Classes="card" IsVisible="{Binding HasEmptyMessage}" Padding="20">
+                <TextBlock Classes="caption" Text="{Binding EmptyMessage}" TextWrapping="Wrap" FontSize="13" />
               </Border>
 
               <!-- One row of gauge cards per section; every row shares a column count so the
@@ -211,6 +219,20 @@
                 </ItemsControl>
               </Border>
 
+              <!-- What ccusage recorded for this agent. -->
+              <Border Classes="card" IsVisible="{Binding HasAgentUsage}" Padding="16,10">
+                <ItemsControl ItemsSource="{Binding AgentUsageRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:AgentUsageRow">
+                      <Grid ColumnDefinitions="180,*" Margin="0,2">
+                        <TextBlock Classes="caption" Text="{Binding Label}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+
               <!-- A history failure belongs where the charts would be, not in the banner above:
                    it must never look as though the live quota failed too. -->
               <TextBlock Classes="caption" Text="{Binding HistoryNote}"
@@ -223,7 +245,8 @@
                   <controls:StackedColumnChartControl Height="260"
                                                       Buckets="{Binding ChartBuckets}"
                                                       Series="{Binding ChartSeries}"
-                                                      Metric="{Binding ChartMetric}" />
+                                                      Metric="{Binding ChartMetric}"
+                                                      Costs="{Binding ChartCosts}" />
                 </StackPanel>
               </Border>
 
@@ -253,7 +276,111 @@
 
             </StackPanel>
           </DataTemplate>
-        </ContentControl.ContentTemplate>
+
+          <!-- Every agent ccusage found, as on Windows: today, this month, by day, by month, and the
+               latest sessions. -->
+          <DataTemplate DataType="vm:AllAgentsTabViewModel">
+            <StackPanel Spacing="12" Margin="0,0,0,16">
+              <Border Classes="card" IsVisible="{Binding ShowInstallHint}" Padding="20">
+                <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" />
+              </Border>
+
+              <StackPanel Spacing="12" IsVisible="{Binding ShowContent}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="caption" Text="{Binding StatusText}" TextWrapping="Wrap" />
+                  <TextBlock Grid.Column="1" Classes="caption" Text="{Binding PricingText}"
+                             ToolTip.Tip="{Binding PricingToolTip}" />
+                </Grid>
+
+                <Border Classes="card" IsVisible="{Binding ShowError}" Padding="12,8"
+                        BorderBrush="{StaticResource SeverityHighBrush}">
+                  <TextBlock Text="{Binding ErrorText, StringFormat='⚠ {0}'}" TextWrapping="Wrap" />
+                </Border>
+
+                <Grid ColumnDefinitions="*,*">
+                  <Border Classes="card" Margin="0,0,6,0" Padding="16,12"
+                          IsVisible="{Binding Today, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="caption" Text="Today" />
+                      <ContentControl Content="{Binding Today}" />
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="1" Classes="card" Margin="6,0,0,0" Padding="16,12"
+                          IsVisible="{Binding ThisMonth, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="caption" Text="This month" />
+                      <ContentControl Content="{Binding ThisMonth}" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+
+                <TextBlock Text="Daily" FontSize="14" FontWeight="SemiBold" IsVisible="{Binding HasDays}" />
+                <ItemsControl ItemsSource="{Binding Days}" IsVisible="{Binding HasDays}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:AgentUsagePeriod">
+                      <Border Classes="card" Margin="0,0,0,8" Padding="16,10">
+                        <ContentControl Content="{Binding}" />
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="Monthly" FontSize="14" FontWeight="SemiBold" IsVisible="{Binding HasMonths}" />
+                <ItemsControl ItemsSource="{Binding Months}" IsVisible="{Binding HasMonths}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:AgentUsagePeriod">
+                      <Border Classes="card" Margin="0,0,0,8" Padding="16,10">
+                        <ContentControl Content="{Binding}" />
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="Recent sessions" FontSize="14" FontWeight="SemiBold" IsVisible="{Binding HasSessions}" />
+                <Border Classes="card" Padding="16,10" IsVisible="{Binding HasSessions}">
+                  <ItemsControl ItemsSource="{Binding Sessions}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:AgentUsageSessionLine">
+                        <Grid ColumnDefinitions="140,90,140,*,Auto" Margin="0,3">
+                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                          <TextBlock Grid.Column="1" Classes="caption" Text="{Binding ShortId}" FontFamily="Menlo" />
+                          <TextBlock Grid.Column="2" Classes="caption" Text="{Binding LastActivityText}" />
+                          <TextBlock Grid.Column="3" Text="{Binding TokensText}" HorizontalAlignment="Right" Margin="0,0,16,0" />
+                          <TextBlock Grid.Column="4" Text="{Binding CostText}" MinWidth="110" TextAlignment="Right" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+              </StackPanel>
+            </StackPanel>
+          </DataTemplate>
+
+          <!-- One period: its total, then one line per agent. -->
+          <DataTemplate DataType="vm:AgentUsagePeriod">
+            <StackPanel Spacing="4">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" FontWeight="SemiBold">
+                  <Run Text="{Binding TokensText}" />
+                  <Run Text=" · " />
+                  <Run Text="{Binding CostText}" />
+                </TextBlock>
+              </Grid>
+              <ItemsControl ItemsSource="{Binding Agents}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AgentUsageLine">
+                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="12,1,0,1">
+                      <TextBlock Classes="caption" Text="{Binding DisplayName}" FontSize="13" />
+                      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding TokensText}" FontSize="13" Margin="0,0,16,0" />
+                      <TextBlock Grid.Column="2" Classes="caption" Text="{Binding CostText}" FontSize="13" MinWidth="110" TextAlignment="Right" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </ContentControl.DataTemplates>
       </ContentControl>
     </ScrollViewer>
 

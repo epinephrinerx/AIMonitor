@@ -1,8 +1,12 @@
 using System.Globalization;
+using AIMonitor.Application.AgentUsage;
+using AIMonitor.Application.OpenCode;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Windows;
 using AIMonitor.Infrastructure;
+using AIMonitor.Infrastructure.AgentUsage;
+using AIMonitor.Infrastructure.OpenCode;
 using AIMonitor.Infrastructure.Providers.Agy;
 using AIMonitor.Infrastructure.Providers.Claude;
 using AIMonitor.Infrastructure.Providers.OpenAi;
@@ -16,7 +20,9 @@ internal sealed record StartupResult(
     SettingsSession Settings,
     LatestRefreshCoordinator RefreshCoordinator,
     ProviderConnectionStore Connections,
-    IStartupRegistrar StartupRegistrar);
+    IStartupRegistrar StartupRegistrar,
+    CachedAgentUsageSource AgentUsage,
+    IOpenCodeAuthReader OpenCodeAuthReader);
 
 /// <summary>
 /// Owns everything the app needs from the operating system and from
@@ -114,7 +120,11 @@ internal sealed class PlatformHost : IAsyncDisposable
         var connections = new ProviderConnectionStore(secretStore, settings);
         _refreshCoordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(BuildProviders(connections)));
 
-        return new StartupResult(settings, _refreshCoordinator, connections, startupRegistrar);
+        // ccusage is read at most every 15 minutes unless the user asks, as on Windows.
+        var agentUsage = new CachedAgentUsageSource(
+            new CcUsageAgentUsageSource(SystemClock.Instance), SystemClock.Instance, TimeSpan.FromMinutes(15));
+
+        return new StartupResult(settings, _refreshCoordinator, connections, startupRegistrar, agentUsage, new OpenCodeAuthReader());
     }
 
     private ProviderClientRegistration[] BuildProviders(ProviderConnectionStore connections)
@@ -123,12 +133,16 @@ internal sealed class PlatformHost : IAsyncDisposable
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var clock = SystemClock.Instance;
 
+        // The saved Anthropic Admin key is read at the start of every refresh, never cached (R-019 E6).
         var claude = new ClaudeLiveQuotaClient(
             _httpClient,
             Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"),
             userProfile,
             clock,
-            PlatformAdapters.CreateClaudeCredentialReader());
+            PlatformAdapters.CreateClaudeCredentialReader(),
+            xdgConfigHome: Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
+            adminKeyReader: async cancellationToken =>
+                await connections.GetClaudeAdminKeyAsync(cancellationToken).ConfigureAwait(false));
 
         var openAi = new ReconfigurableQuotaClient(
             connections,
