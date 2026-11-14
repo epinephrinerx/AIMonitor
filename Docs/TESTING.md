@@ -37,9 +37,9 @@ dotnet format AIMonitor.CrossPlatform.slnf --verify-no-changes --no-restore
 python3 scripts/assert_skips_are_documented.py artifacts/test-results
 ```
 
-- ผลที่ต้องได้บน macOS arm64 (วัดจริงเมื่อ 2026-11-14 ด้วย SDK 10.0.401 หลัง merge main 2.0.4 และพอร์ตแท็บ agent):
+- ผลที่ต้องได้บน macOS arm64 (วัดจริงเมื่อ 2026-11-14 ด้วย SDK 10.0.401 หลังทำให้ Mac เท่ากับ Windows):
   Domain 344 ผ่าน · Application 241 ผ่าน · Infrastructure 1,761 ผ่าน 28 skip ·
-  Presentation.Avalonia 385 ผ่าน — รวม 2,731 ผ่าน / 28 skip / 0 แดง
+  Presentation.Avalonia 452 ผ่าน — รวม 2,798 ผ่าน / 28 skip / 0 แดง
 - 28 ตัวที่ skip คือเทสต์ที่ต้องใช้ Windows จริงทั้งหมด — `WindowsStartupRegistrarTests` 14 ตัว
   (เขียน `HKCU\...\Run` และ assert การ quote path แบบ Windows) · `NamedMutexSingleInstanceTests`
   5 ตัว (named mutex + named pipe) · DPAPI 2 ตัวใน `DpapiSecretStoreTests` (crypt32) ·
