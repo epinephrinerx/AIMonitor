@@ -1,0 +1,35 @@
+{
+  "rateLimitsByLimitId": {
+    "codex": {
+      "limitId": "codex",
+      "limitName": null,
+      "planType": "plus",
+      "credits": {
+        "hasCredits": true,
+        "unlimited": false,
+        "balance": "150"
+      },
+      "rateLimitReachedType": null,
+      "primary": {
+        "usedPercent": 25.0,
+        "windowDurationMins": 300,
+        "resetsAt": 1893456000
+      }
+    },
+    "model-gpt-5": {
+      "limitId": "model-gpt-5",
+      "limitName": "GPT-5",
+      "planType": "team",
+      "credits": {
+        "hasCredits": true,
+        "unlimited": true,
+        "balance": null
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "primary": {
+        "usedPercent": 100.0,
+        "windowDurationMins": 60
+      }
+    }
+  }
+}

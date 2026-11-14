@@ -1,0 +1,15 @@
+{
+  "limits": [
+    {
+      "kind": "session",
+      "percent": 40,
+      "severity": "normal",
+      "resets_at": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "five_hour": {
+    "utilization": 41.75,
+    "locked_reason": "manual-hold-example",
+    "resets_at": "2026-01-01T00:00:00Z"
+  }
+}

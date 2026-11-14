@@ -1,0 +1,19 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AIMonitor.Presentation.Avalonia.App"
+             Name="AI Usage Monitor"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <!-- Defined once here because the dashboard styles and the menu-bar icon both draw severity. -->
+    <SolidColorBrush x:Key="SeverityNormalBrush">#2E7D32</SolidColorBrush>
+    <SolidColorBrush x:Key="SeverityHighBrush">#F9A825</SolidColorBrush>
+    <SolidColorBrush x:Key="SeverityVeryHighBrush">#EF6C00</SolidColorBrush>
+    <SolidColorBrush x:Key="SeverityCriticalBrush">#C62828</SolidColorBrush>
+    <!-- The unused part of a gauge. Dim enough to stay behind the reading in both themes. -->
+    <SolidColorBrush x:Key="GaugeTrackBrush" Color="#808080" Opacity="0.25" />
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+</Application>

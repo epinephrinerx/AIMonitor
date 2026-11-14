@@ -1,0 +1,5 @@
+{
+  "limits": [
+    { "kind": "SENTINEL_KIND_UNSAFE_9f3c", "percent": -1.0 }
+  ]
+}

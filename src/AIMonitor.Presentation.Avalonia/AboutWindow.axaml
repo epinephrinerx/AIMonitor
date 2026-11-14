@@ -1,0 +1,67 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AIMonitor.Presentation.Avalonia.ViewModels"
+        x:Class="AIMonitor.Presentation.Avalonia.AboutWindow"
+        x:DataType="vm:AboutViewModel"
+        Title="About AI Usage Monitor"
+        Width="620" Height="600"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel LastChildFill="True" Margin="18">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                HorizontalAlignment="Right" Margin="0,14,0,0">
+      <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}" />
+      <Button Content="{Binding ReleaseButtonText}" Command="{Binding OpenReleasesCommand}" />
+      <Button Content="Close" Command="{Binding CloseCommand}" IsCancel="True" MinWidth="88" />
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,14">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="{Binding AppName}" FontSize="20" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding Edition}" FontSize="20" Opacity="0.6" />
+      </StackPanel>
+      <TextBlock Text="{Binding AppVersion, StringFormat='Version {0}'}" Opacity="0.75" />
+      <TextBlock Text="{Binding DeveloperName}" />
+      <TextBlock Text="{Binding DeveloperEmail}" Opacity="0.75" FontSize="12" />
+      <Button Content="{Binding ProjectUrl}" Command="{Binding OpenProjectCommand}"
+              Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Left"
+              FontSize="12" />
+      <TextBlock Text="{Binding UpdateStatus}" IsVisible="{Binding HasUpdateStatus}"
+                 Margin="0,6,0,0" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding LicenseSummary}" TextWrapping="Wrap" Opacity="0.75"
+                 FontSize="12" Margin="0,6,0,0" />
+    </StackPanel>
+
+    <TabControl>
+      <TabItem Header="Licence">
+        <ScrollViewer>
+          <StackPanel>
+            <TextBlock Text="{Binding LicenseText}" IsVisible="{Binding HasLicenseText}"
+                       FontFamily="Menlo, Monaco, monospace" FontSize="11" TextWrapping="Wrap" />
+            <TextBlock Text="The licence file is not beside the app. A build that ships without it does not meet GPL-3.0."
+                       TextWrapping="Wrap" FontSize="12">
+              <TextBlock.IsVisible>
+                <Binding Path="HasLicenseText" Converter="{x:Static BoolConverters.Not}" />
+              </TextBlock.IsVisible>
+            </TextBlock>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="Third-party notices">
+        <ScrollViewer>
+          <StackPanel>
+            <TextBlock Text="{Binding NoticesText}" IsVisible="{Binding HasNoticesText}"
+                       FontFamily="Menlo, Monaco, monospace" FontSize="11" TextWrapping="Wrap" />
+            <TextBlock Text="The notices file is not beside the app."
+                       TextWrapping="Wrap" FontSize="12">
+              <TextBlock.IsVisible>
+                <Binding Path="HasNoticesText" Converter="{x:Static BoolConverters.Not}" />
+              </TextBlock.IsVisible>
+            </TextBlock>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>

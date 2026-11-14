@@ -1,0 +1,29 @@
+<Project>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!--
+    === Single version source of truth (PAR-035) ===
+    Update VersionPrefix here only.  AssemblyVersion, FileVersion and
+    InformationalVersion are all derived from it automatically.
+    build_installer.ps1 reads this value and passes /DAppVersion to Inno Setup.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>2.0.4</VersionPrefix>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+    <Product>AI Usage Monitor</Product>
+    <Company>Apichart Chantanis</Company>
+    <Copyright>Copyright © 2025 Apichart Chantanis. Licensed under GPL-3.0.</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>

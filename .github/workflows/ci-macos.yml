@@ -1,0 +1,49 @@
+name: macOS verification
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          global-json-file: global.json
+      # AIMonitor.CrossPlatform.slnf is AIMonitor.sln minus the two WPF projects, which cannot be
+      # restored off Windows. The Windows workflow still verifies the whole solution.
+      - name: Restore
+        run: dotnet restore AIMonitor.CrossPlatform.slnf
+      - name: Format
+        run: dotnet format AIMonitor.CrossPlatform.slnf --verify-no-changes --no-restore
+      - name: Build
+        run: dotnet build AIMonitor.CrossPlatform.slnf --no-restore
+      - name: Tests
+        run: dotnet test AIMonitor.CrossPlatform.slnf --no-build --no-restore --logger trx --results-directory artifacts/test-results
+      # R-022: a test may only be skipped here for a Windows dependency that says so in its skip
+      # reason. Any other skip is an undocumented hole and fails the job.
+      - name: Skips are documented
+        run: python3 scripts/assert_skips_are_documented.py artifacts/test-results
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: macos-test-results
+          path: artifacts/test-results/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+# Screen/upgrade acceptance remains a documented manual gate.
+# This workflow never installs, signs, notarizes or releases the application.

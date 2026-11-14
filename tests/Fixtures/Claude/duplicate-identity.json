@@ -1,0 +1,14 @@
+{
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "percent": 10.0,
+      "scope": { "model": { "display_name": "Example Model" } }
+    },
+    {
+      "kind": "weekly_scoped",
+      "percent": 20.0,
+      "scope": { "model": { "display_name": "Example Model" } }
+    }
+  ]
+}

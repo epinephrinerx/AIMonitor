@@ -1,0 +1,8 @@
+{
+  "limits": [
+    "not-an-object",
+    123,
+    null,
+    { "kind": "session", "percent": 7.0 }
+  ]
+}

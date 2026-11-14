@@ -1,0 +1,11 @@
+{
+  "summary": {
+    "lifetimeTokens": 4500000,
+    "peakDailyTokens": 120000
+  },
+  "dailyUsageBuckets": [
+    { "startDate": "2026-01-03", "tokens": 82000 },
+    { "startDate": "2026-01-04", "tokens": 95500 },
+    { "startDate": "2026-01-05", "tokens": 61200 }
+  ]
+}

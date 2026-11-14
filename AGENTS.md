@@ -1,10 +1,24 @@
-# AGENTS.md
+# Repository instructions for Codex and compatible agents
 
-ข้อกำหนดและบริบทของโปรเจกต์นี้อยู่ใน **[GUIDELINES.md](GUIDELINES.md)** ไฟล์เดียว
-อ่านไฟล์นั้นก่อนแก้โปรเจกต์ และเขียนบันทึกใหม่ลงไปที่นั่น ไม่ใช่ที่ไฟล์นี้
+เอกสารกลางของโครงการอยู่ที่:
 
-@GUIDELINES.md
+- `Docs/AI_WORKFLOW.md` — workflow, authority, handoff และ Definition of Done
+- `Docs/ARCHITECTURE.md` — system boundaries, dependency rules และ data flow
+- `Docs/TESTING.md` — commands และ verification policy
+- `Requirements.md` — สิ่งที่ตกลงกันไว้
 
-ไฟล์นี้มีอยู่เพราะเครื่องมือแต่ละตัวมองหาชื่อของตัวเอง - Claude Code อ่าน `CLAUDE.md`
-และ Codex อ่าน `AGENTS.md` การเก็บเนื้อหาไว้ที่เดียวทำให้ทั้งสองไม่มีวันคลาดกัน
-ก่อนหน้านี้เคยแยกกันสองไฟล์ แล้วฉบับหนึ่งตกไป 63 บรรทัดโดยไม่มีใครรู้
+อ่านเฉพาะเอกสารที่เกี่ยวข้องกับงาน: ใช้ `Docs/ARCHITECTURE.md` เมื่อเปลี่ยน boundaries, interfaces, storage หรือ data flow และใช้ `Docs/TESTING.md` เมื่อแก้ behavior, tests, build หรือ CI
+
+กติกาหลัก:
+
+- รักษาการเปลี่ยนแปลงให้ตรง scope และอย่าเขียนทับงานที่มีอยู่
+- ตรวจ Git diff ก่อนและหลังแก้ไข
+- รัน verification ตามความเสี่ยงและแก้ failure ที่เกิดจากงานนี้
+- อย่าอ้างว่า test ผ่านหากไม่ได้รันจริง
+- ห้าม deploy, publish, ลบข้อมูล, เปลี่ยน production หรือเปิดเผย secrets โดยไม่มีคำสั่งชัดเจน
+- ห้ามใส่ `Co-Authored-By:` ที่ชี้ไปหา agent ใน commit ใช้ `Assisted-by: <เครื่องมือ> (<ผู้ให้บริการ>)` ตามข้อ 5.4 ของ `Docs/AI_WORKFLOW.md`
+- เมื่อส่งมอบ ให้สรุปผล ไฟล์ที่เปลี่ยน คำสั่งที่รัน ผลลัพธ์ และความเสี่ยงที่เหลือ
+
+Local tests ใช้ disposable fixtures และไม่มี production access: `YES` — ใช้เฉพาะ synthetic data และห้ามใช้ credentials จริง
+
+หากงานเกี่ยวข้องกับ OpenAI API, ChatGPT หรือ Codex ให้ใช้ official OpenAI documentation ที่เป็นปัจจุบันก่อนตัดสินใจด้าน API หรือผลิตภัณฑ์

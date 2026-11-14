@@ -1,0 +1,23 @@
+{
+  "rateLimitsByLimitId": {
+    "codex": {
+      "primary": {
+        "usedPercent": 42.5,
+        "windowDurationMins": 300,
+        "resetsAt": 1893456000
+      },
+      "secondary": {
+        "usedPercent": 61.0,
+        "windowDurationMins": 10080,
+        "resetsAt": 1893974400
+      }
+    },
+    "model-gpt-5": {
+      "limitName": "GPT-5",
+      "primary": {
+        "usedPercent": 15.0,
+        "windowDurationMins": 60
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "solution": {
+    "path": "AIMonitor.sln",
+    "projects": [
+      "src\\AIMonitor.Application\\AIMonitor.Application.csproj",
+      "src\\AIMonitor.Domain\\AIMonitor.Domain.csproj",
+      "src\\AIMonitor.Infrastructure\\AIMonitor.Infrastructure.csproj",
+      "src\\AIMonitor.Presentation.Avalonia\\AIMonitor.Presentation.Avalonia.csproj",
+      "tests\\AIMonitor.Application.Tests\\AIMonitor.Application.Tests.csproj",
+      "tests\\AIMonitor.Domain.Tests\\AIMonitor.Domain.Tests.csproj",
+      "tests\\AIMonitor.Infrastructure.Tests\\AIMonitor.Infrastructure.Tests.csproj",
+      "tests\\AIMonitor.Presentation.Avalonia.Tests\\AIMonitor.Presentation.Avalonia.Tests.csproj",
+      "tests\\AIMonitor.TestSupport\\AIMonitor.TestSupport.csproj"
+    ]
+  }
+}

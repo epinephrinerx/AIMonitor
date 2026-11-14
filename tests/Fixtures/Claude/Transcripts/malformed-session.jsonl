@@ -1,0 +1,5 @@
+{"type":"assistant","timestamp":"2026-01-15T10:00:00Z","cwd":"/home/dev/project-alpha","message":{"id":"ok-1","model":"claude-haiku-4-5","usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"assistant","timestamp":"2026-01-15T10:05:00Z", this is not valid json
+{"type":"assistant","timestamp":"2026-01-15T10:10:00Z","cwd":"/home/dev/project-alpha","message":{"id":"bad-1","model":"claude-haiku-4-5","usage":{"input_tokens":"lots","output_tokens":50}}}
+{"type":"assistant","timestamp":"not-a-date","cwd":"/home/dev/project-alpha","message":{"id":"bad-2","model":"claude-haiku-4-5","usage":{"input_tokens":10,"output_tokens":10}}}
+{"type":"assistant","timestamp":"2026-01-15T10:20:00Z","cwd":"/home/dev/project-alpha","message":{"id":"ok-2","model":"claude-haiku-4-5","usage":{"input_tokens":200,"output_tokens":100}}}

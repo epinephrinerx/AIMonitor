@@ -1,0 +1,14 @@
+{
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "percent": 10.0,
+      "scope": { "model": { "display_name": "SENTINEL_DISPLAY_UNSAFE_9f3c" } }
+    },
+    {
+      "kind": "weekly_scoped",
+      "percent": 20.0,
+      "scope": { "model": { "display_name": "SENTINEL_DISPLAY_UNSAFE_9f3c" } }
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+using System.Collections.ObjectModel;
+
+namespace AIMonitor.Domain;
+
+/// <summary>Everything one provider tab needs to render itself for a single refresh.</summary>
+public sealed record ProviderSnapshot
+{
+    public string ProviderId { get; }
+
+    public bool Configured { get; }
+
+    public IReadOnlyList<Meter> Meters { get; }
+
+    public IReadOnlyList<Stat> Stats { get; }
+
+    public UsageHistory? History { get; }
+
+    public string Account { get; }
+
+    /// <summary>A refresh that produced nothing usable. Non-null means the service failed.</summary>
+    public string? Error { get; }
+
+    /// <summary>
+    /// The history could not be read, but everything else in this snapshot is good. Kept separate
+    /// from <see cref="Error"/> so a history failure never hides live quota data.
+    /// </summary>
+    public string? HistoryError { get; }
+
+    public bool Unauthorized { get; }
+
+    public string SetupHint { get; }
+
+    public string ValueNote { get; }
+
+    public DateTimeOffset? FetchedAt { get; }
+
+    public DetectionInfo? Detection { get; }
+
+    /// <summary>
+    /// True when the Anthropic Admin API produced usable stats for this refresh, regardless of
+    /// whether Claude Code OAuth is also present (R-019 E2). Lets the tab and the Connections card
+    /// show "Admin key connected · Claude Code not signed in" when OAuth is missing but the Admin
+    /// call succeeded.
+    /// </summary>
+    public bool AdminApiConnected { get; }
+
+    /// <summary>
+    /// True when the Admin API call succeeded and Claude Code OAuth is missing, expired or rejected
+    /// (401/403). In this state the tab has no setup card, no error, no setup hint, no quota meters,
+    /// the note "Claude Code not signed in — quota unavailable; API usage from Admin key",
+    /// <see cref="FetchedAt"/> = clock now and <see cref="Unauthorized"/> false. The tab and the
+    /// Connections card decide admin-only display from this flag alone (R-019 E2, E12a).
+    /// </summary>
+    public bool AdminOnly { get; }
+
+    public bool Ok => Configured && Error is null;
+
+    public ProviderSnapshot(
+        string providerId,
+        bool configured = false,
+        IReadOnlyList<Meter>? meters = null,
+        IReadOnlyList<Stat>? stats = null,
+        UsageHistory? history = null,
+        string account = "",
+        string? error = null,
+        string? historyError = null,
+        bool unauthorized = false,
+        string setupHint = "",
+        string valueNote = "",
+        DateTimeOffset? fetchedAt = null,
+        DetectionInfo? detection = null,
+        bool adminApiConnected = false,
+        bool adminOnly = false)
+    {
+        ProviderId = DomainGuard.RequireNonBlank(providerId, nameof(providerId));
+        Configured = configured;
+        Meters = DomainGuard.ToReadOnlyCopy(meters);
+        RequireUniqueMeterKeys(Meters);
+        Stats = DomainGuard.ToReadOnlyCopy(stats);
+        History = history;
+        Account = account ?? string.Empty;
+        Error = error;
+        HistoryError = historyError;
+        Unauthorized = unauthorized;
+        SetupHint = setupHint ?? string.Empty;
+        ValueNote = valueNote ?? string.Empty;
+        FetchedAt = fetchedAt;
+        Detection = detection;
+        AdminApiConnected = adminApiConnected;
+        AdminOnly = adminOnly;
+    }
+
+    /// <summary>
+    /// Two meters sharing one key would make reading order ambiguous and let a consumer overwrite
+    /// one window's state with another's. Compared with ordinal identity, matching the exact
+    /// comparer <see cref="MeterReadingOrder"/> uses to break ties.
+    /// </summary>
+    private static void RequireUniqueMeterKeys(IReadOnlyList<Meter> meters)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var meter in meters)
+        {
+            if (!seen.Add(meter.Key))
+            {
+                throw new ArgumentException($"Duplicate meter key '{meter.Key}'.", nameof(meters));
+            }
+        }
+    }
+}

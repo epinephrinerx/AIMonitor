@@ -1,0 +1,557 @@
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Reflection;
+using System.Windows;
+using System.Windows.Threading;
+using AIMonitor.Application.AgentUsage;
+using AIMonitor.Application.Providers;
+using AIMonitor.Application.Reports;
+using AIMonitor.Application.Settings;
+using AIMonitor.Application.Version;
+using AIMonitor.Infrastructure.AgentUsage;
+using AIMonitor.Infrastructure.OpenCode;
+using AIMonitor.Infrastructure.Providers.Claude;
+using AIMonitor.Infrastructure.Providers.Agy;
+using AIMonitor.Infrastructure.Providers.OpenAi;
+using AIMonitor.Infrastructure.Storage;
+using AIMonitor.Infrastructure.Time;
+using AIMonitor.Infrastructure.Windows;
+using AIMonitor.Presentation.Wpf.Theme;
+using AIMonitor.Presentation.Wpf.Tray;
+using AIMonitor.Presentation.Wpf.Updates;
+using AIMonitor.Presentation.Wpf.ViewModels;
+
+namespace AIMonitor.Presentation.Wpf;
+
+/// <summary>
+/// Composition Root and application lifecycle coordinator for AIMonitor 2.0.
+/// Conforms to Docs/ARCHITECTURE.md Section 6 and ADR-0001, ADR-0002, ADR-0003.
+/// </summary>
+public partial class App : System.Windows.Application
+{
+    internal static readonly Type ApplicationLayerReference = typeof(AIMonitor.Application.AssemblyMarker);
+    internal static readonly Type InfrastructureReference = typeof(AIMonitor.Infrastructure.AssemblyMarker);
+
+    private NamedMutexSingleInstance? _singleInstanceCoordinator;
+    private HttpClient? _httpClient;
+    private LatestRefreshCoordinator? _refreshCoordinator;
+    private JsonSettingsStore? _settingsStore;
+    private SettingsSession? _settingsSession;
+    private DpapiSecretStore? _secretStore;
+    private ProviderConnectionStore? _connectionStore;
+    private ReconfigurableQuotaClient? _openAiClient;
+    private WindowsStartupRegistrar? _startupRegistrar;
+    private LiveSettingsApplier? _liveSettingsApplier;
+    private DispatcherTimer? _refreshTimer;
+    private UpdateCoordinator? _updateCoordinator;
+    private CachedAgentUsageSource? _agentUsageSource;
+
+    public ProviderConnectionStore? ConnectionStore => _connectionStore;
+
+    private MainWindow? _mainWindow;
+    private WidgetWindow? _widgetWindow;
+    private MainWindowViewModel? _mainViewModel;
+    private WidgetViewModel? _widgetViewModel;
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
+        // 1. Single-Instance Check (PAR-023, ADR-0003)
+        _singleInstanceCoordinator = new NamedMutexSingleInstance();
+        var acquired = await _singleInstanceCoordinator.TryAcquireAsync();
+        if (!acquired)
+        {
+            // Secondary instance: signal running primary instance, then terminate cleanly
+            await _singleInstanceCoordinator.NotifyExistingInstanceAsync(e.Args);
+            Shutdown(0);
+            return;
+        }
+
+        // Primary instance: listen for activation requests from secondary launches
+        _singleInstanceCoordinator.Activated += OnSingleInstanceActivated;
+
+        // 2. Storage & One-Time Migration (ADR-0002, PAR-026, PAR-029)
+        var localAppData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIUsageMonitor");
+        Directory.CreateDirectory(localAppData);
+
+        var settingsPath = Path.Combine(localAppData, "settings.json");
+        var secretsPath = Path.Combine(localAppData, "secrets.dat");
+
+        _settingsStore = new JsonSettingsStore(settingsPath);
+        _secretStore = new DpapiSecretStore(secretsPath);
+        _startupRegistrar = new WindowsStartupRegistrar();
+
+        var firstLaunch = false;
+        if (!_settingsStore.Exists)
+        {
+            ILegacySettingsReader legacyReader = new LegacyRegistrySettingsReader();
+            try
+            {
+                var legacyValues = legacyReader.ReadAll();
+                firstLaunch = legacyValues.Count == 0;
+                legacyReader = new CapturedLegacySettings(legacyValues);
+            }
+            catch
+            {
+                // An unreadable legacy profile is never treated as a fresh profile.
+            }
+
+            var migrationUseCase = new MigrateLegacySettingsUseCase(
+                _settingsStore,
+                _secretStore,
+                legacyReader,
+                new LegacyDpapiSecretUnsealer());
+
+            await migrationUseCase.ExecuteAsync();
+        }
+
+        _settingsSession = await SettingsSession.CreateAsync(_settingsStore);
+        try
+        {
+            var preserveInstallerIntent = File.Exists(Path.Combine(AppContext.BaseDirectory, "preserve-startup-intent"));
+            await StartupSettingsReconciler.ReconcileAsync(_settingsSession, _startupRegistrar, Environment.ProcessPath!, firstLaunch, preserveInstallerIntent);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            // Startup registration is optional; failure must not prevent the dashboard from opening.
+        }
+
+        // 3. Theme Application (PAR-028)
+        TitleBarTheme.Install(ThemeManager.Instance);
+        ThemeManager.Instance.ApplyTheme(_settingsSession.Current.Theme);
+
+        // 4. Provider Clients & Refresh Orchestration (PAR-001, PAR-002, PAR-003, PAR-004, PAR-029)
+        _httpClient = new HttpClient();
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var clock = SystemClock.Instance;
+
+        _connectionStore = new ProviderConnectionStore(_secretStore!, _settingsSession);
+
+        // Claude client reads the saved Admin API key at the start of each refresh through an
+        // injected reader (R-019 E6). The key is not cached between refreshes; a saved-key change
+        // triggers the existing Changed → refresh path through the connection store.
+        var claudeClient = new ClaudeLiveQuotaClient(
+            _httpClient,
+            Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR"),
+            userProfile,
+            clock,
+            xdgConfigHome: Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
+            adminKeyReader: async ct => await _connectionStore.GetClaudeAdminKeyAsync(ct).ConfigureAwait(false));
+
+        _openAiClient = new ReconfigurableQuotaClient(
+            _connectionStore,
+            "openai",
+            conn =>
+            {
+                double? monthlyBudget = double.TryParse(conn.Extra, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedBudget) && parsedBudget > 0
+                    ? parsedBudget
+                    : null;
+                return new OpenAiLiveQuotaClient(_httpClient, userProfile, clock, savedAdminKey: conn.Key, monthlyBudgetUsd: monthlyBudget);
+            });
+
+        var agyClient = new AgyQuotaClient(new AgyUsageRunner(), clock);
+
+        _agentUsageSource = new CachedAgentUsageSource(
+            new CcUsageAgentUsageSource(clock),
+            clock,
+            TimeSpan.FromMinutes(15));
+
+        var registrations = new[]
+        {
+            new ProviderClientRegistration("claude", claudeClient),
+            new ProviderClientRegistration("openai", _openAiClient),
+            new ProviderClientRegistration("agy", agyClient)
+        };
+
+        var refreshUseCase = new RefreshProvidersUseCase(registrations);
+        _refreshCoordinator = new LatestRefreshCoordinator(refreshUseCase);
+
+        // 5. ViewModels
+        _mainViewModel = new MainWindowViewModel(_refreshCoordinator, _settingsSession, agentUsage: _agentUsageSource, openCodeAuthReader: new OpenCodeAuthReader());
+        _mainViewModel.RequestOpenLog += OpenUsageLogDialog;
+        _mainViewModel.RequestOpenAbout += OpenAboutDialog;
+        _mainViewModel.RequestCheckUpdates += () => _ = _updateCoordinator?.CheckAsync(interactive: true);
+        _mainViewModel.RequestExit += ShutdownApp;
+        _mainViewModel.RequestConnect += OpenConnectDialog;
+        _widgetViewModel = new WidgetViewModel(_mainViewModel.ProviderTabs);
+        _widgetViewModel.ActiveProviderSource = () => _mainViewModel.ActiveProviderTabId;
+        _widgetViewModel.RequestExpand += SwitchToDashboardMode;
+        _widgetViewModel.RequestRefresh += async () => await _mainViewModel.RefreshAsync();
+        _widgetViewModel.RequestQuit += ShutdownApp;
+
+        // 6. Periodic Refresh Timer
+        _refreshTimer = new DispatcherTimer();
+        _refreshTimer.Tick += async (s, args) => await _mainViewModel.RefreshAsync();
+        _refreshTimer.Start();
+
+        // 7. Live Settings & Tray Lifecycle Coordinator
+        _liveSettingsApplier = new LiveSettingsApplier(
+            _widgetViewModel,
+            _mainViewModel,
+            CreateTrayHost,
+            interval =>
+            {
+                if (_refreshTimer is null)
+                {
+                    return;
+                }
+
+                // A zero interval is "Manual only": no periodic refresh.
+                if (interval <= TimeSpan.Zero)
+                {
+                    _refreshTimer.Stop();
+                    return;
+                }
+
+                _refreshTimer.Interval = interval;
+                _refreshTimer.Start();
+            },
+            () => (_mainWindow?.IsVisible ?? false) || (_widgetWindow?.IsVisible ?? false),
+            SwitchToDashboardMode);
+        _liveSettingsApplier.Apply(_settingsSession.Current);
+
+        // 7b. Updates: asked about on every launch and from About > Check for updates
+        _updateCoordinator = CreateUpdateCoordinator();
+
+        // 8. Initial Window
+        var startMinimizedRequested = e.Args.Any(a => a is "--minimized" or "--tray" or "-m");
+        if (!TrayPolicy.ShouldStartHidden(_settingsSession.Current, startMinimizedRequested))
+        {
+            SwitchToDashboardMode();
+        }
+
+        // Initial background fetch
+        _ = _mainViewModel.RefreshAsync();
+        _mainViewModel.RequestOpenCodeCheck();
+        _ = _updateCoordinator.CheckAsync(interactive: false);
+
+        _settingsSession.Changed += OnSettingsChanged;
+    }
+
+    private UpdateCoordinator CreateUpdateCoordinator()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        var installed = version is null ? "2.0.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+        return new UpdateCoordinator(
+            new GitHubVersionChecker(_httpClient),
+            new UpdateDownloader(_httpClient),
+            new WpfUpdateUi(() => _mainWindow?.IsVisible == true ? _mainWindow : null),
+            installed,
+            path =>
+            {
+                try
+                {
+                    // The installer is a per-user Inno Setup wizard; it closes this app itself if still open.
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            },
+            ShutdownApp);
+    }
+
+    private sealed class CapturedLegacySettings(IReadOnlyDictionary<string, object?> values) : ILegacySettingsReader
+    {
+        public IReadOnlyDictionary<string, object?> ReadAll() => values;
+    }
+
+    private ITrayHost CreateTrayHost()
+    {
+        var host = new TrayIconHost();
+        host.OpenDashboardRequested += SwitchToDashboardMode;
+        host.OpenWidgetRequested += SwitchToWidgetMode;
+        host.RefreshRequested += async () =>
+        {
+            if (_mainViewModel is not null) await _mainViewModel.RefreshAsync();
+        };
+        host.OpenSettingsRequested += OpenSettingsDialog;
+        host.ExitRequested += ShutdownApp;
+        return host;
+    }
+
+    private void OnSettingsChanged(AppSettings settings)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            _liveSettingsApplier?.Apply(settings);
+        });
+    }
+
+    public void SwitchToDashboardMode()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (_widgetWindow is not null && _widgetWindow.IsVisible)
+            {
+                _widgetWindow.Hide();
+            }
+
+            if (_mainWindow is null && _settingsSession is not null)
+            {
+                var window = new MainWindow(_mainViewModel!, _settingsSession);
+                window.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_mainWindow, window))
+                    {
+                        _mainWindow = null;
+                    }
+                };
+                _mainWindow = window;
+            }
+
+            _mainWindow?.Show();
+            if (_mainWindow?.WindowState == WindowState.Minimized)
+            {
+                _mainWindow.WindowState = WindowState.Normal;
+            }
+            _mainWindow?.Activate();
+        });
+    }
+
+    public void SwitchToWidgetMode()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (_mainWindow is not null && _mainWindow.IsVisible)
+            {
+                _mainWindow.Hide();
+            }
+
+            if (_widgetWindow is null && _settingsSession is not null)
+            {
+                var window = new WidgetWindow(_widgetViewModel!, _settingsSession);
+                window.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_widgetWindow, window))
+                    {
+                        _widgetWindow = null;
+                    }
+                };
+                _widgetWindow = window;
+            }
+
+            _widgetWindow?.Show();
+            _widgetWindow?.Activate();
+        });
+    }
+
+    public void OpenSettingsDialog()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (_settingsSession is null) return;
+
+            var applier = new AppearanceApplier(
+                ThemeManager.Instance.ApplyTheme,
+                _widgetViewModel,
+                new DashboardPreviewResizer(() => _mainWindow).Resize,
+                _settingsSession.Current.DashboardWidth,
+                _settingsSession.Current.DashboardHeight);
+
+            var knownAgents = CollectKnownAgentNames();
+            var vm = new SettingsViewModel(
+                _settingsSession,
+                _startupRegistrar!,
+                settings =>
+                {
+                    // E27: the preview moves the OpenCode gauge as budget rows change (E5).
+                    applier.Apply(settings);
+                    _mainViewModel?.ApplyAgentBudgets(settings.AgentBudgets);
+                },
+                knownAgents);
+            var dialog = new SettingsDialog(vm)
+            {
+                Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
+            };
+
+            dialog.ShowDialog();
+        });
+    }
+
+    private IReadOnlyList<string>? CollectKnownAgentNames()
+    {
+        var lastGood = _agentUsageSource?.LastGood;
+        if (lastGood is null)
+        {
+            return null;
+        }
+
+        var agents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var day in lastGood.Daily)
+        {
+            foreach (var agent in day.Agents)
+            {
+                agents.Add(agent.Agent);
+            }
+        }
+
+        foreach (var month in lastGood.Monthly)
+        {
+            foreach (var agent in month.Agents)
+            {
+                agents.Add(agent.Agent);
+            }
+        }
+
+        foreach (var session in lastGood.Sessions)
+        {
+            agents.Add(session.Usage.Agent);
+        }
+
+        return agents.Count == 0 ? null : agents.ToList().AsReadOnly();
+    }
+
+    public void OpenUsageLogDialog()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            var providers = new (string, string)[]
+            {
+                ("claude", "Claude"),
+                ("openai", "OpenAI / Codex"),
+                ("agy", "Gemini / AGY")
+            };
+
+            var snapshots = _mainViewModel?.LatestSnapshots ?? new Dictionary<string, Domain.ProviderSnapshot>();
+            var chartRangeDays = _settingsSession?.Current.ChartRangeDays ?? 14;
+            var report = UsageReportGenerator.Build(providers, snapshots, chartRangeDays, "Total tokens");
+            var vm = new UsageLogViewModel(report);
+            var dialog = new UsageLogDialog(vm)
+            {
+                Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
+            };
+            dialog.ShowDialog();
+        });
+    }
+
+    public void OpenAboutDialog(AboutPage page = AboutPage.Version)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            var vm = new AboutViewModel(new GitHubVersionChecker(_httpClient));
+            vm.RequestInstall = release => _ = _updateCoordinator?.OfferAsync(release);
+            var dialog = new AboutDialog(vm, page)
+            {
+                Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
+            };
+            dialog.ShowDialog();
+        });
+    }
+
+    public void OpenConnectDialog(string providerId)
+    {
+        Dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                if (ConnectionStore is null || _mainViewModel is null) return;
+
+                var meta = ProviderMeta.TryGet(providerId);
+                if (meta is null) return;
+
+                ProviderConnection connection;
+                try
+                {
+                    connection = await ConnectionStore.GetAsync(providerId);
+                }
+                catch (Exception)
+                {
+                    // Never forward the exception text, headers, response bodies or the key into
+                    // the message (R-019 E8). A generic message keeps the dialog safe to show.
+                    System.Windows.MessageBox.Show(
+                        _mainWindow?.IsVisible == true ? _mainWindow : null,
+                        "Failed to load connection settings. Please try again.",
+                        "Connection Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+
+                _mainViewModel.LatestSnapshots.TryGetValue(providerId, out var snapshot);
+                var detection = snapshot?.Detection;
+
+                var vm = new ConnectDialogViewModel(meta, detection, connection, ConnectionStore);
+                var dialog = new ConnectDialog(vm)
+                {
+                    Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
+                };
+
+                var result = dialog.ShowDialog();
+                if (result == true)
+                {
+                    await _mainViewModel.RefreshAsync();
+                }
+            }
+            catch (Exception)
+            {
+                // Never forward the exception text, headers, response bodies or the key into the
+                // message (R-019 E8). A generic message keeps the dialog safe to show.
+                System.Windows.MessageBox.Show(
+                    _mainWindow?.IsVisible == true ? _mainWindow : null,
+                    "An error occurred. Please try again.",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        });
+    }
+
+    private void OnSingleInstanceActivated(string[] args)
+    {
+        Dispatcher.InvokeAsync(SwitchToDashboardMode);
+    }
+
+    public void ShutdownApp()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _mainWindow?.RequestExplicitExit();
+            _widgetWindow?.Close();
+            Shutdown();
+        });
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        // Flush pending settings FIRST (before disposing the single-instance coordinator/mutex, tray,
+        // HTTP client, and theme) because releasing the mutex allows a relaunched process to load settings
+        // before this process has finished writing.
+        // OnExit is a void lifecycle method that cannot be async-awaited; we block with a bounded timeout
+        // to prevent process termination before the atomic file write completes.
+        // Because SettingsSession uses ConfigureAwait(false) internally, this will not deadlock.
+        var flushed = false;
+        try
+        {
+            if (_settingsSession is not null)
+            {
+                flushed = _settingsSession.FlushAsync().Wait(TimeSpan.FromSeconds(2));
+            }
+        }
+        catch
+        {
+            // Non-fatal during application exit
+        }
+
+        // If flush timed out, do NOT dispose SettingsSession: the process is exiting, and disposing
+        // the session's underlying gate would throw ObjectDisposedException and strand queued waiters.
+        if (flushed)
+        {
+            _settingsSession?.Dispose();
+        }
+
+        _refreshTimer?.Stop();
+        _liveSettingsApplier?.Shutdown();
+        _ = _refreshCoordinator?.DisposeAsync();
+        _openAiClient?.Dispose();
+        _httpClient?.Dispose();
+        _singleInstanceCoordinator?.Dispose();
+        ThemeManager.Instance.Dispose();
+
+        base.OnExit(e);
+    }
+}
