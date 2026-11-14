@@ -48,7 +48,7 @@ public sealed class ClaudeKeychainCredentialReaderTests
     private static ClaudeKeychainCredentialReader Reader(FakeSecurity security) =>
         new(Service, security.Run);
 
-    [Fact]
+    [MacOSOnlyFact("the reader refuses to speak to a Keychain that is not there")]
     public async Task ReadAsync_AsksTheKeychainForClaudesOwnItem()
     {
         var security = new FakeSecurity { Output = CredentialJson(Now.AddHours(1)) };
@@ -59,7 +59,7 @@ public sealed class ClaudeKeychainCredentialReaderTests
         Assert.Equal(["find-generic-password", "-s", Service, "-w"], invocation.Arguments);
     }
 
-    [Fact]
+    [MacOSOnlyFact("the reader refuses to speak to a Keychain that is not there")]
     public async Task ReadAsync_AllowsTimeForTheAccessPromptTheUserHasToAnswer()
     {
         var security = new FakeSecurity { Output = CredentialJson(Now.AddHours(1)) };
