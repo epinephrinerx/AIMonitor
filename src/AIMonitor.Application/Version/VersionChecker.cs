@@ -32,17 +32,36 @@ public interface IVersionChecker
 public sealed partial class GitHubVersionChecker : IVersionChecker
 {
     public const string DefaultRepo = "epinephrinerx/AIMonitor";
+
+    /// <summary>
+    /// How many releases are tested against the branch before the check gives up. Each test is one
+    /// anonymous request, and GitHub allows sixty of those an hour.
+    /// </summary>
+    public const int MaxBranchComparisons = 10;
+
     private readonly HttpClient _httpClient;
     private readonly string _repo;
+    private readonly string? _branch;
 
-    public GitHubVersionChecker(HttpClient? httpClient = null, string repo = DefaultRepo)
+    /// <param name="branch">
+    /// When set, only releases whose tag is part of this branch's history count. The macOS edition
+    /// passes its own branch, because every release from main is a Windows build it cannot install.
+    /// When null, the repository's latest release is used, as the Windows edition always has.
+    /// </param>
+    public GitHubVersionChecker(HttpClient? httpClient = null, string repo = DefaultRepo, string? branch = null)
     {
         _httpClient = httpClient ?? new HttpClient();
         _repo = string.IsNullOrWhiteSpace(repo) ? DefaultRepo : repo.Trim();
+        _branch = string.IsNullOrWhiteSpace(branch) ? null : branch.Trim();
     }
 
     public async Task<ReleaseInfo> CheckLatestAsync(string installedVersion, CancellationToken cancellationToken = default)
     {
+        if (_branch is not null)
+        {
+            return await CheckLatestOnBranchAsync(_branch, installedVersion, cancellationToken).ConfigureAwait(false);
+        }
+
         var latestUrl = $"https://api.github.com/repos/{_repo}/releases/latest";
         var tagsUrl = $"https://api.github.com/repos/{_repo}/tags?per_page=100";
 
@@ -210,6 +229,138 @@ public sealed partial class GitHubVersionChecker : IVersionChecker
             throw new UpdateCheckException("Could not read GitHub's answer.", ex);
         }
     }
+
+    /// <summary>
+    /// The newest published release whose tag lies on <paramref name="branch"/>. A release's
+    /// <c>target_commitish</c> cannot decide this: GitHub ignores it whenever the tag already
+    /// existed, so it often names main or a bare commit. Asking GitHub to compare the branch with
+    /// the tag can: "behind" or "identical" means the tag is in the branch's history.
+    /// </summary>
+    private async Task<ReleaseInfo> CheckLatestOnBranchAsync(string branch, string installedVersion, CancellationToken cancellationToken)
+    {
+        var releasesUrl = $"https://api.github.com/repos/{_repo}/releases?per_page=100";
+        var candidates = new List<(string Tag, string Name, string Url, string Published)>();
+
+        using (var response = await SendAsync(releasesUrl, installedVersion, cancellationToken).ConfigureAwait(false))
+        {
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new UpdateCheckException("GitHub does not show this repository to an anonymous request, so the update check cannot see its releases.");
+            }
+
+            ThrowIfFailed(response);
+            try
+            {
+                var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(content);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    throw new UpdateCheckException("Could not read GitHub's answer.");
+                }
+
+                foreach (var release in doc.RootElement.EnumerateArray())
+                {
+                    if (IsTrue(release, "draft") || IsTrue(release, "prerelease")) continue;
+
+                    var tag = release.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
+                    if (ParseVersion(tag).Length == 0) continue;
+
+                    var name = release.TryGetProperty("name", out var n) && !string.IsNullOrWhiteSpace(n.GetString()) ? n.GetString()! : tag;
+                    var url = release.TryGetProperty("html_url", out var u) ? u.GetString() ?? "" : "";
+                    if (url.Length == 0) url = $"https://github.com/{_repo}/releases/tag/{tag}";
+                    var published = release.TryGetProperty("published_at", out var p) ? p.GetString() ?? "" : "";
+                    if (published.Length >= 10) published = published[..10];
+
+                    candidates.Add((tag, name, url, published));
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new UpdateCheckException("Could not read GitHub's answer.", ex);
+            }
+        }
+
+        var comparisons = 0;
+        foreach (var candidate in candidates.OrderByDescending(c => ParseVersion(c.Tag), new VersionTupleComparer()))
+        {
+            if (comparisons++ == MaxBranchComparisons)
+            {
+                throw new UpdateCheckException($"Could not find a release from the {branch} branch among the newest {MaxBranchComparisons} releases.");
+            }
+
+            if (await IsOnBranchAsync(branch, candidate.Tag, installedVersion, cancellationToken).ConfigureAwait(false))
+            {
+                // No installer is offered: the downloader only fetches Windows setup programs, and
+                // the macOS edition sends the user to the release page instead.
+                return new ReleaseInfo(
+                    candidate.Tag,
+                    candidate.Name,
+                    candidate.Url,
+                    candidate.Published,
+                    IsNewer(candidate.Tag, installedVersion));
+            }
+        }
+
+        throw new UpdateCheckException($"No release has been published from the {branch} branch yet.");
+    }
+
+    private async Task<bool> IsOnBranchAsync(string branch, string tag, string installedVersion, CancellationToken cancellationToken)
+    {
+        var compareUrl = $"https://api.github.com/repos/{_repo}/compare/{Uri.EscapeDataString(branch)}...{Uri.EscapeDataString(tag)}";
+        using var response = await SendAsync(compareUrl, installedVersion, cancellationToken).ConfigureAwait(false);
+
+        // A tag GitHub cannot resolve is simply not on the branch; a missing branch is not either.
+        if (response.StatusCode == HttpStatusCode.NotFound) return false;
+        ThrowIfFailed(response);
+
+        try
+        {
+            var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(content);
+            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : null;
+            return status is "behind" or "identical";
+        }
+        catch (JsonException ex)
+        {
+            throw new UpdateCheckException("Could not read GitHub's answer.", ex);
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(string url, string installedVersion, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("User-Agent", $"AIUsageMonitor/{installedVersion}");
+        request.Headers.Add("Accept", "application/vnd.github+json");
+
+        try
+        {
+            return await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new UpdateCheckException($"Could not reach GitHub: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new UpdateCheckException("GitHub request timed out.", ex);
+        }
+    }
+
+    private static void ThrowIfFailed(HttpResponseMessage response)
+    {
+        if (response.StatusCode is HttpStatusCode.Forbidden or (HttpStatusCode)429)
+        {
+            throw new UpdateCheckException("GitHub is rate-limiting this check. Try again later.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new UpdateCheckException($"GitHub returned HTTP {(int)response.StatusCode}.");
+        }
+    }
+
+    private static bool IsTrue(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
 
     public static int[] ParseVersion(string text)
     {

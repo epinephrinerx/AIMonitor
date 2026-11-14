@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The macOS presentation layer (R-014). Windows keeps AIMonitor.Presentation.Wpf. -->
+    <ApplicationIcon />
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AIMonitor.Application\AIMonitor.Application.csproj" />
+    <ProjectReference Include="..\AIMonitor.Domain\AIMonitor.Domain.csproj" />
+    <!-- Composition root only, per Docs/ARCHITECTURE.md §5. -->
+    <ProjectReference Include="..\AIMonitor.Infrastructure\AIMonitor.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the test project reach the composition root's own rules (start-hidden argument
+         parsing) without making them part of the app's public surface. -->
+    <InternalsVisibleTo Include="AIMonitor.Presentation.Avalonia.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+  </ItemGroup>
+
+</Project>

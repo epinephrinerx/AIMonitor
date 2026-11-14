@@ -16,12 +16,82 @@ dotnet format AIMonitor.sln --verify-no-changes --no-restore
 
 ข้อกำหนดเบื้องต้น:
 
-- Runtime: .NET 10 SDK บน Windows (Windows Desktop targeting pack/runtime มาพร้อมกับชุด SDK/runtime ที่ติดตั้งอยู่แล้ว ไม่ต้องติดตั้ง workload แยก)
+- Runtime: .NET 10 SDK บน Windows สำหรับทั้ง solution (Windows Desktop targeting pack/runtime มาพร้อมกับชุด SDK/runtime ที่ติดตั้งอยู่แล้ว ไม่ต้องติดตั้ง workload แยก) ·
+  บน macOS arm64 ใช้ได้เฉพาะชุด cross-platform ตามหัวข้อย่อยด้านล่าง
 - Package manager: NuGet ผ่าน `dotnet` CLI (ไม่ใช้ package manager อื่น)
 - Services ที่ต้องใช้: ไม่มี — ไม่มี database, ไม่มี container และไม่มี service ภายนอกที่ automated test
   ต้อง provision เอง (ทุก external dependency ถูกแทนด้วย fake ตาม §5)
 - ตัวแปร environment: automated test ไม่ต้องใช้ environment variable ใด ๆ; ห้ามใช้ provider
   credential จริง (API key, OAuth token, service-account) ใน automated test ไม่ว่ากรณีใด
+
+### macOS (R-014)
+
+สองโปรเจกต์ WPF restore บน macOS ไม่ได้ (`NETSDK1100`) จึงใช้ solution filter
+`AIMonitor.CrossPlatform.slnf` ซึ่งคือ `AIMonitor.sln` ที่ตัดสองโปรเจกต์นั้นออก:
+
+```sh
+dotnet restore AIMonitor.CrossPlatform.slnf
+dotnet build AIMonitor.CrossPlatform.slnf --no-restore
+dotnet test AIMonitor.CrossPlatform.slnf --no-build --no-restore --logger trx --results-directory artifacts/test-results
+dotnet format AIMonitor.CrossPlatform.slnf --verify-no-changes --no-restore
+python3 scripts/assert_skips_are_documented.py artifacts/test-results
+```
+
+- ผลที่ต้องได้บน macOS arm64 (วัดจริงเมื่อ 2026-10-31 ด้วย SDK 10.0.401): Domain 218 ผ่าน ·
+  Application 119 ผ่าน · Infrastructure 885 ผ่าน 21 skip · Presentation.Avalonia 211 ผ่าน —
+  รวม 1,433 ผ่าน / 21 skip / 0 แดง
+- 21 ตัวที่ skip คือเทสต์ที่ต้องใช้ Windows จริงทั้งหมด — `WindowsStartupRegistrarTests` 14 ตัว
+  (เขียน `HKCU\...\Run` และ assert การ quote path แบบ Windows) · `NamedMutexSingleInstanceTests`
+  5 ตัว (named mutex + named pipe) · DPAPI 2 ตัวใน `DpapiSecretStoreTests` (crypt32) ทุกตัวใช้
+  `WindowsOnlyFactAttribute` ที่ทำให้ runner รายงานเป็น skip พร้อมเหตุผลขึ้นต้นด้วย `Windows-only:`
+  แทนการ `return` เงียบ ๆ ซึ่งรายงานว่าผ่าน
+- `scripts/assert_skips_are_documented.py` อ่าน `.trx` แล้วล้มงานถ้ามี skip ที่เหตุผลไม่ขึ้นต้นด้วย
+  `Windows-only:` — เกณฑ์ "ไม่มี test ถูก skip เพราะแพลตฟอร์มโดยไม่จดไว้" ของ R-014 จึงวัดได้อัตโนมัติ
+- ตรวจว่าชั้น presentation ฝั่ง Windows ยังคอมไพล์ผ่านได้จากเครื่อง macOS (จับ CA1416 regression
+  ก่อนขึ้น CI ของ Windows):
+
+```sh
+dotnet build src/AIMonitor.Presentation.Wpf/AIMonitor.Presentation.Wpf.csproj -p:EnableWindowsTargeting=true
+dotnet build tests/AIMonitor.Presentation.Wpf.Tests/AIMonitor.Presentation.Wpf.Tests.csproj -p:EnableWindowsTargeting=true
+```
+
+  เป็นการ build เพื่อตรวจ compile เท่านั้น — binary ที่ได้รันบน macOS ไม่ได้ และ `dotnet test` ของสอง
+  โปรเจกต์นี้ยังต้องรันบน Windows
+
+#### Smoke ของ adapter macOS กับ OS จริง
+
+unit test แทน `security`/`launchctl` ด้วย fake เพื่อให้รันได้ทุก OS จึงไม่ได้พิสูจน์ว่า macOS ตัวจริง
+ยอมรับสิ่งที่เราเขียน `tools/AIMonitor.MacOSSmoke` (อยู่นอก `AIMonitor.sln` เหมือน `AIMonitor.ScreenEvidence`)
+รันของจริงให้ดู:
+
+```sh
+dotnet run --project tools/AIMonitor.MacOSSmoke
+```
+
+ทุกอย่างที่มันแตะแยกจากแอปที่ติดตั้งไว้ และเก็บกวาดให้เองเมื่อจบ — Keychain service
+`AIMonitor2.secrets.smoke` · LaunchAgent label `net.apichart.aiusagemonitor.smoke` · socket ใน temp
+directory ของตัวเอง ครอบ 18 ข้อ: seal/unseal ผ่าน Keychain จริงและไฟล์ไม่มี plaintext ·
+เขียน/ลบ plist ใน `~/Library/LaunchAgents` จริงและ `plutil -lint` ผ่าน · เปิดโปรเซสที่สองจริงแล้ว
+ตัวที่สองออกด้วย exit 0 ขณะที่ตัวแรกได้รับ argument ที่ส่งมา · บอกว่าเครื่องนี้เก็บ login ของ Claude Code
+ไว้ที่ไหน (ถาม metadata เท่านั้น ไม่อ่านค่า จึงไม่ทำให้กล่องขออนุญาตของ Keychain เด้ง) exit code
+เป็น 0 เมื่อผ่านทุกข้อ
+
+ผลล่าสุด: ผ่านทั้ง 18 ข้อบน macOS 27.0.1 arm64 เมื่อ 2026-10-31 และยืนยันว่าเครื่องนี้**ไม่มี**
+`~/.claude/.credentials.json` แต่**มี** Keychain item ชื่อ service `Claude Code-credentials`
+
+#### เปิดแอป Avalonia บนเครื่องตัวเอง
+
+```sh
+AI_USAGE_MONITOR_SETTINGS_SCOPE=devrun \
+  dotnet run --project src/AIMonitor.Presentation.Avalonia
+```
+
+**ต้องตั้ง `AI_USAGE_MONITOR_SETTINGS_SCOPE` ทุกครั้งที่รันเพื่อทดลอง** ไม่งั้นแอปจะเขียนทับ settings
+ของแอปที่ติดตั้งไว้จริง สร้าง login item จริง และใช้ Keychain item จริง scope นี้ต่อท้ายทั้งสี่อย่าง
+(โฟลเดอร์ข้อมูล · Keychain service · LaunchAgent label · socket ของ single instance) ตามบทเรียนของ
+สาขา `Mac` ที่ว่า scope ซึ่งครอบไม่ครบยังลบของจริงได้อยู่ดี เก็บกวาดหลังทดลองด้วยการลบ
+`~/Library/Application Support/AIUsageMonitor.<scope>` และ
+`~/Library/LaunchAgents/net.apichart.aiusagemonitor.<scope>.plist`
 
 ## 2. Test levels
 
@@ -30,7 +100,7 @@ dotnet format AIMonitor.sln --verify-no-changes --no-restore
 | Unit | Business rule ล้วนใน `Domain` และ use case orchestration ใน `Application` แบบ isolated | `tests/AIMonitor.Domain.Tests/`, `tests/AIMonitor.Application.Tests/` | `dotnet test tests/AIMonitor.Domain.Tests` และ `dotnet test tests/AIMonitor.Application.Tests` |
 | Integration | Adapter จริงของ `Infrastructure`: settings JSON read/write, DPAPI secret store, legacy registry import, single-instance/named pipe, HTTP/process client เทียบ fixture | `tests/AIMonitor.Infrastructure.Tests/` | `dotnet test tests/AIMonitor.Infrastructure.Tests` |
 | Contract | Parsing ของ provider payload (Claude transcript, Codex App Server response — รวม capability ที่ยังเป็น experimental เช่น `chatgptAuthTokens`, OpenAI Admin API, Gemini Cloud Monitoring) เทียบ golden fixture ที่ไม่มี secret; Codex App Server contract test ต้องตรวจจับเมื่อ capability experimental หายไป/เปลี่ยน แล้วยืนยันว่าระบบแสดง Codex error ที่ actionable แทน silent failure และ**ไม่** fallback ไป OpenAI Admin API mode โดยอัตโนมัติเมื่อมี Codex OAuth อยู่แล้วแต่ใช้งานไม่ได้ (PAR-008); ต้องมี test แยกยืนยันว่า OpenAI Admin API mode (PAR-010) ทำงานเฉพาะกรณีไม่มี Codex OAuth source เลยเท่านั้น | `tests/AIMonitor.Infrastructure.Tests/Providers/`, fixtures ที่ `tests/Fixtures/` | `dotnet test tests/AIMonitor.Infrastructure.Tests --filter Category=Contract` |
-| UI/component | ViewModel binding/command และ custom-drawn control logic (gauge/chart layout, widget paging) โดยไม่ต้อง render หน้าจอจริง | `tests/AIMonitor.Presentation.Wpf.Tests/` | `dotnet test tests/AIMonitor.Presentation.Wpf.Tests` |
+| UI/component | ViewModel binding/command และ custom-drawn control logic (gauge/chart layout, widget paging) โดยไม่ต้อง render หน้าจอจริง | `tests/AIMonitor.Presentation.Wpf.Tests/` (Windows), `tests/AIMonitor.Presentation.Avalonia.Tests/` (ข้ามแพลตฟอร์ม — ข้อความเมนูบาร์, การเลือกหน้าต่างโควตาที่ไอคอนวาด, การหมุน/ปักหมุดของ widget, dashboard) | `dotnet test tests/AIMonitor.Presentation.Wpf.Tests` · `dotnet test tests/AIMonitor.Presentation.Avalonia.Tests` |
 | Smoke | ตรวจแอปจริงบน Windows หลัง build/installer | ดู §8 Manual verification | Manual (ยังไม่มี automated smoke script ในเฟสนี้) |
 
 ## 3. เลือกชุดตรวจสอบตามการเปลี่ยนแปลง
@@ -118,9 +188,14 @@ historical compatibility checks; they do not imply runtime registration.
 
 ## 7. CI quality gates
 
-Pull request ใช้ `.github/workflows/ci.yml` บน Windows runner: restore → format → build → full tests
-→ dependency audit → self-contained package ไม่มี deployment/release step รายการด้านล่างคือ gates
-และ release verification policy; remote workflow run ยังไม่เกิดจนกว่าจะ push workflow
+Pull request ใช้สอง workflow แยกกัน ไม่มี deployment/release step ทั้งคู่:
+
+| Workflow | Runner | ขอบเขต |
+|---|---|---|
+| `.github/workflows/ci.yml` (`Windows verification`) | `windows-2025` | ทั้ง `AIMonitor.sln`: restore → format → build → full tests → verification tool → dependency audit → self-contained package |
+| `.github/workflows/ci-macos.yml` (`macOS verification`) | `macos-15` (arm64) | `AIMonitor.CrossPlatform.slnf`: restore → format → build → tests → ตรวจว่า skip ทุกตัวจดเหตุผลไว้ (R-014) |
+
+รายการด้านล่างคือ gates และ release verification policy; remote workflow run ยังไม่เกิดจนกว่าจะ push workflow
 
 1. `dotnet format --verify-no-changes`
 2. `dotnet build AIMonitor.sln` พร้อม warnings-as-errors ตามที่ `Directory.Build.props` กำหนดจากส่วนกลาง
@@ -132,9 +207,12 @@ Pull request ใช้ `.github/workflows/ci.yml` บน Windows runner: restore
    สำเร็จ — `dotnet build -c Release` เพียงอย่างเดียวไม่พอเพราะไม่ได้ยืนยัน self-contained runtime
    ที่ Inno Setup ต้องใช้จริง
 7. `dotnet list package --vulnerable --include-transitive` (dependency/security check)
+8. บน macOS: `dotnet test AIMonitor.CrossPlatform.slnf` แล้วตามด้วย
+   `python3 scripts/assert_skips_are_documented.py artifacts/test-results` — ข้อ 1–4 ของรายการนี้
+   ต้องเขียวบนทั้งสอง OS ส่วนข้อ 5–6 เป็นของ Windows เท่านั้น
 
-CI configuration: `.github/workflows/ci.yml`, `windows-2025`, SDK จาก `global.json`, actions pin ด้วย
-commit SHA และใช้ `contents: read`/ไม่คง checkout credentials ผล local gatesอยู่ใน `STATUS_2026-10-14.md`
+CI configuration: ทั้งสอง workflow ใช้ SDK จาก `global.json`, pin actions ด้วย commit SHA ชุดเดียวกัน
+และใช้ `contents: read`/ไม่คง checkout credentials ผล local gates อยู่ใน `STATUS_2026-10-14.md`
 
 Flaky test ห้าม rerun จนเขียวแล้วละเลย ให้เก็บหลักฐาน เปิด issue และ quarantine เฉพาะเมื่อมีเจ้าของกับ
 วันติดตามชัดเจน
@@ -233,6 +311,28 @@ Critical smoke checklist (อ้างอิง parity ID จาก `Docs/FEATUR
   local rolling log และ error report ที่ผู้ใช้ส่งมาเอง
 
 ## 12. Local packaging and synthetic screen evidence
+
+### macOS `.app` (R-014)
+
+```sh
+scripts/build_macos_app.sh            # ออกที่ artifacts/macos/AI Usage Monitor.app
+```
+
+- **one-directory + self-contained เท่านั้น ห้าม single-file** — bundle แบบไฟล์เดียวแตกตัวเองลง temp
+  ทุกครั้งที่เปิด ซึ่งเป็นราคาที่แอปที่เปิดพร้อม login ต้องจ่ายทุกเช้า (บทเรียนจากสาขา `Mac`)
+- เซ็นแบบ **ad-hoc** (`codesign -s -`) ซึ่งเป็นขั้นต่ำที่ binary arm64 ต้องมีถึงจะรันได้
+  **ไม่ได้เซ็นด้วย Developer ID และไม่ได้ notarize** ตามที่ R-014 กันไว้ เปิดครั้งแรกจาก Finder
+  macOS จะเตือน
+- `LICENSE` กับ `THIRD-PARTY-NOTICES.md` ถูกใส่ทั้งใน `Contents/MacOS/` (ที่หน้า About อ่าน) และ
+  `Contents/Resources/` (ที่คนเปิดดูใน Finder จะมอง) — GPL-3.0 ไม่ได้ขึ้นกับแพลตฟอร์ม
+- เลขเวอร์ชันแทนที่จาก `VersionPrefix` ใน `Directory.Build.props` ที่เดียว (PAR-035) ไม่มี literal
+  ใน `Info.plist.template`; `MacBundleTests` คุมว่าแม่แบบกับสคริปต์ยังตรงกัน
+
+ผลล่าสุด: build ผ่านบน macOS 27.0.1 arm64 เมื่อ 2026-10-31 — `plutil -lint` ผ่าน ·
+`codesign --verify --deep --strict` ผ่าน · `CFBundleShortVersionString` = 2.0.2 ·
+executable เป็น Mach-O arm64 · เอกสารทั้งสองไฟล์อยู่ครบทั้งสองที่ · ขนาด 111 MB
+**ยังไม่ได้เปิดจาก Finder จริง**
+
 
 ```powershell
 ./scripts/verify_packages.ps1

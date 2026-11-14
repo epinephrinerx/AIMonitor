@@ -126,19 +126,25 @@ local server name (`AIUsageMonitor|<username>|<scope>`) ซึ่งเป็น
 ├── src/
 │   ├── AIMonitor.Domain/                 # entities, value objects, business rules — ไม่ผูก framework
 │   ├── AIMonitor.Application/            # use cases, orchestration, port interfaces
-│   ├── AIMonitor.Infrastructure/         # provider clients, settings/secret store, Windows integrations
-│   └── AIMonitor.Presentation.Wpf/       # WPF app: Views, ViewModels, composition root, tray host
+│   ├── AIMonitor.Infrastructure/         # provider clients, settings/secret store, Windows + macOS integrations
+│   ├── AIMonitor.Presentation.Wpf/       # WPF app (Windows): Views, ViewModels, composition root, tray host
+│   └── AIMonitor.Presentation.Avalonia/  # Avalonia app (macOS): Views, ViewModels, gauge + history charts, menu bar extra, composition root — R-014
 ├── tests/
 │   ├── AIMonitor.Domain.Tests/
 │   ├── AIMonitor.Application.Tests/
 │   ├── AIMonitor.Infrastructure.Tests/
 │   ├── AIMonitor.Presentation.Wpf.Tests/
+│   ├── AIMonitor.Presentation.Avalonia.Tests/
 │   └── AIMonitor.TestSupport/            # fakes, fixture factories ที่ใช้ร่วมกันหลาย test project
 ├── installer/                             # AIMonitor2.iss, in-place upgrade (ADR-0003)
-├── .github/workflows/ci.yml               # Windows verification; no deployment
-├── scripts/                              # dependency audit / portable compiler tools
+├── build/macos/Info.plist.template        # แม่แบบ Info.plist ของ .app (R-014)
+├── .github/workflows/ci.yml               # Windows verification (ทั้ง solution); no deployment
+├── .github/workflows/ci-macos.yml         # macOS verification (cross-platform filter); no deployment
+├── scripts/                              # dependency audit / portable compiler tools / build_macos_app.sh
 ├── tools/AIMonitor.ScreenEvidence/        # synthetic WPF screen renderer (no real credentials)
+├── tools/AIMonitor.MacOSSmoke/            # drives the real macOS adapters, isolated and self-cleaning
 ├── AIMonitor.sln                         # classic solution format
+├── AIMonitor.CrossPlatform.slnf          # solution ลบสองโปรเจกต์ WPF ออก สำหรับ macOS/Linux (R-014)
 ├── global.json                           # pin .NET SDK 10.0.401, rollForward: latestPatch
 ├── Directory.Build.props                 # nullable/implicit usings/warnings-as-errors ส่วนกลาง
 ├── AGENTS.md / CLAUDE.md / Requirements.md
@@ -153,7 +159,7 @@ local server name (`AIUsageMonitor|<username>|<scope>`) ซึ่งเป็น
 |---|---|---|---|
 | `AIMonitor.Domain` | Value object และ business rule ล้วน: severity thresholds (PAR-016), pricing tier EXACT/ESTIMATED/UNKNOWN (PAR-007), ordering ของ quota window (PAR-005), detection status model (PAR-002) | Types และ pure function เท่านั้น ไม่มี I/O | Coding Owner |
 | `AIMonitor.Application` | Use case orchestration: refresh provider, coalesce in-flight request, build report จาก snapshot ที่แสดงอยู่, one-time legacy migration, update check | Use case classes + port interfaces (`IUsageProviderClient`, `ISettingsStore`, `ISecretStore`, `IStartupRegistrar`, `ISingleInstanceCoordinator`, `IUpdateChecker`, `IClock`) | Coding Owner |
-| `AIMonitor.Infrastructure` | Implement ports: HTTP/process client ต่อ provider, `ClaudeTranscriptStore` (read-only incremental JSONL ingestion ของ Claude CLI transcripts พร้อม checkpoint/de-duplication/retention — PAR-006), `OpenAiCredentialResolver` + `OpenAiLiveQuotaClient` (credential priority ตาม PAR-008, Admin API spend/budget/history ตาม PAR-010), `CodexJsonRpcClient` + `CodexAppServerLauncher` + `CodexEnvironmentSanitizer` + `CodexExecutableLocator` + `CodexQuotaMapper` (Codex App Server protocol ผ่าน disposable temporary `CODEX_HOME` — PAR-009), `JsonSettingsStore`, `DpapiSecretStore`, `LegacySettingsReader` (read-only), `WindowsStartupRegistrar` (HKCU Run), `NamedMutexSingleInstance` + named pipe activation server (scope ACL ผูกกับ current user SID เท่านั้น — ดู ADR-0003), `TrayIconHost` (`System.Windows.Forms.NotifyIcon` โดยตรง ไม่ผ่าน `WindowsFormsIntegration`), `RollingFileLogger`, `GitHubReleaseChecker` | Adapter class ต่อ port หนึ่งชนิด | Coding Owner |
+| `AIMonitor.Infrastructure` | Implement ports: HTTP/process client ต่อ provider, `ClaudeTranscriptStore` (read-only incremental JSONL ingestion ของ Claude CLI transcripts พร้อม checkpoint/de-duplication/retention — PAR-006), `OpenAiCredentialResolver` + `OpenAiLiveQuotaClient` (credential priority ตาม PAR-008, Admin API spend/budget/history ตาม PAR-010), `CodexJsonRpcClient` + `CodexAppServerLauncher` + `CodexEnvironmentSanitizer` + `CodexExecutableLocator` + `CodexQuotaMapper` (Codex App Server protocol ผ่าน disposable temporary `CODEX_HOME` — PAR-009), `JsonSettingsStore`, `DpapiSecretStore`, `LegacySettingsReader` (read-only), `WindowsStartupRegistrar` (HKCU Run), `NamedMutexSingleInstance` + named pipe activation server (scope ACL ผูกกับ current user SID เท่านั้น — ดู ADR-0003), `TrayIconHost` (`System.Windows.Forms.NotifyIcon` โดยตรง ไม่ผ่าน `WindowsFormsIntegration`), `RollingFileLogger`, `GitHubReleaseChecker`; และฝั่ง macOS (R-014) `KeychainSecretProtector` (AES-GCM ใต้ key ที่อยู่ใน login Keychain แทน DPAPI), `LaunchAgentStartupRegistrar` (plist ใน `~/Library/LaunchAgents` แทน Run key — ลบไฟล์เมื่อปิดสวิตช์ ไม่ `launchctl bootout`), `LocalSocketSingleInstance` (Unix domain socket ตัวเดียวทำหน้าที่ทั้ง lock และช่องส่ง activation แทน named mutex + named pipe), `ClaudeKeychainCredentialReader` ต่อท้าย `ClaudeCredentialFileReader` ผ่าน `ChainedClaudeCredentialReader` เพราะ Claude Code บน macOS เก็บ login ไว้ใน Keychain ไม่ใช่ไฟล์ (ไล่ไฟล์ก่อนเพื่อให้ `CLAUDE_CONFIG_DIR` ยังใช้ได้ และไปต่อเฉพาะเมื่อผลเป็น `Missing` เท่านั้น ไม่กลบ login ที่มีอยู่แต่เสีย/หมดอายุ) โดย `PlatformAdapters` เป็นตัวเลือกให้ตาม OS | Adapter class ต่อ port หนึ่งชนิด | Coding Owner |
 | `AIMonitor.Presentation.Wpf` | Composition root (DI wiring), MainWindow (dashboard, PAR-014/PAR-018), WidgetWindow (compact mode, PAR-019/PAR-020), SettingsDialog (PAR-026/PAR-027), LogDialog/ReportViewer (PAR-030/PAR-031), AboutDialog/ReadmeDialog (PAR-034), custom-drawn gauge/chart controls (ADR-0001) | ViewModel public property/command ต่อ View | Coding Owner |
 
 ## 5. Dependency rules
@@ -167,6 +173,10 @@ local server name (`AIUsageMonitor|<username>|<scope>`) ซึ่งเป็น
   package ภายนอกใด ๆ นอกจาก .NET base class library ที่ไม่มีผลข้างเคียง
 - `Infrastructure` implement interface ที่ `Application` ประกาศไว้ (`Application` ไม่ reference
   `Infrastructure` ไม่ว่ากรณีใด — dependency inversion ทางเดียว)
+- `Domain`/`Application`/`Infrastructure` target `net10.0` ทั้งสามตัว (R-014) — ของที่มีแค่บน Windows
+  อยู่หลัง `[SupportedOSPlatform("windows")]` ระดับ type หรือ member ไม่ใช่ผูกทั้งโปรเจกต์ไว้กับ
+  `net10.0-windows` เพื่อให้ analyzer CA1416 เป็นตัวบังคับว่า call site ใดต้องอยู่บน Windows
+  ส่วน `Presentation.Wpf` ยังเป็น `net10.0-windows` ตามเดิม
 - ห้ามสร้าง circular dependency ระหว่าง project ใด ๆ ข้างต้น
 - `AIMonitor.TestSupport` (fakes/fixture factories) reference ได้เฉพาะ `Domain`/`Application` interface
   ไม่ reference `Infrastructure` จริง เพื่อบังคับให้ unit/application test ใช้ fake เสมอ
