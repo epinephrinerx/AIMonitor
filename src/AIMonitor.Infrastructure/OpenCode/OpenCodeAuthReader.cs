@@ -10,6 +10,19 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
 {
     private const string ErrorText = "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check.";
     private const int AuthFileLimit = 1024 * 1024;
+
+    /// <summary>
+    /// Where the user's home is named. OpenCode keeps auth.json under ~/.local/share on every OS, but
+    /// only Windows calls home USERPROFILE; macOS and Linux call it HOME.
+    /// </summary>
+    internal static readonly string ProfileVariable = OperatingSystem.IsWindows() ? "USERPROFILE" : "HOME";
+
+    /// <summary>
+    /// The names OpenCode installs under, in the order they are tried in each PATH directory. npm on
+    /// Windows installs a .cmd shim beside or instead of the .exe; elsewhere it is a plain executable.
+    /// </summary>
+    internal static readonly string[] ExecutableFileNames =
+        OperatingSystem.IsWindows() ? ["opencode.exe", "opencode.cmd"] : ["opencode"];
     private readonly Func<string?> _path;
     private readonly Func<string, string?> _environment;
     private readonly Func<string, int, CancellationToken, Task<byte[]?>> _readFile;
@@ -85,7 +98,7 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
 
     private string? GetProfileRoot()
     {
-        var profile = _environment("USERPROFILE");
+        var profile = _environment(ProfileVariable);
         return !string.IsNullOrWhiteSpace(profile) && Path.IsPathRooted(profile) && !IsDriveRelative(profile)
             ? Path.Combine(profile, ".local", "share") : null;
     }
@@ -225,7 +238,7 @@ public sealed class OpenCodeAuthReader : IOpenCodeAuthReader
     internal static string? ResolveExecutable(string? searchPath, Func<string, bool> fileExists)
     {
         foreach (var entry in (searchPath ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        { var dir = entry.Trim().Trim('"'); if (!Path.IsPathRooted(dir) || IsDriveRelative(dir)) continue; foreach (var ext in new[] { "exe", "cmd" }) { var path = Path.Combine(dir, "opencode." + ext); if (fileExists(path)) return path; } }
+        { var dir = entry.Trim().Trim('"'); if (!Path.IsPathRooted(dir) || IsDriveRelative(dir)) continue; foreach (var name in ExecutableFileNames) { var path = Path.Combine(dir, name); if (fileExists(path)) return path; } }
         return null;
     }
     private static bool IsDriveRelative(string path) => path.Length >= 2 && path[1] == ':' && char.IsLetter(path[0])

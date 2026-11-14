@@ -224,7 +224,7 @@ public sealed class ClaudeTranscriptStoreRootsTests : IDisposable
 
     // -- combining roots and deduplicating across them ---------------------------------------------
 
-    [Fact]
+    [WindowsOnlyFact("the fixture needs a directory that exists yet cannot be listed, which only a Windows junction to a missing target produces; elsewhere the only way is withholding permissions, which the spec's IgnoreInaccessible deliberately hides, as it does an access-denied ACL on Windows")]
     public async Task RefreshAsync_UnreadableRoot_ReportsTheDirectoryError_AndStillScansTheOtherRoots()
     {
         var unreadable = CreateUnreadableRoot("unreadable");

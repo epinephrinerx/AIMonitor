@@ -385,11 +385,11 @@ public sealed class OpenCodeAuthReaderFixRound1Tests
 
         if (userProfile is null)
         {
-            h.Env.Remove("USERPROFILE");
+            h.Env.Remove(OpenCodeAuthReader.ProfileVariable);
         }
         else
         {
-            h.Env["USERPROFILE"] = userProfile;
+            h.Env[OpenCodeAuthReader.ProfileVariable] = userProfile;
         }
 
         // Files that a working-directory-relative path would find must stay unread.
@@ -409,9 +409,9 @@ public sealed class OpenCodeAuthReaderFixRound1Tests
     {
         var h = new ReaderHarness();
         h.SetVersion("1.19.5");
-        h.Env.Remove("USERPROFILE");
-        h.Env["XDG_DATA_HOME"] = @"D:\xdg\data";
-        h.AddFile(@"D:\xdg\data\opencode\auth.json", """{"fromxdg":{"type":"oauth"}}""");
+        h.Env.Remove(OpenCodeAuthReader.ProfileVariable);
+        h.Env["XDG_DATA_HOME"] = ReaderHarness.XdgRoot;
+        h.AddFile(Path.Combine(ReaderHarness.XdgRoot, "opencode", "auth.json"), """{"fromxdg":{"type":"oauth"}}""");
 
         var status = await h.ReadAsync();
 

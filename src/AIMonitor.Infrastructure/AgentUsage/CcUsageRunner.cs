@@ -261,9 +261,20 @@ internal sealed class CcUsageRunner : ICcUsageRunner
         return result?.ToString() ?? "";
     }
 
-    private static string? ResolveExecutable()
+    /// <summary>
+    /// The names ccusage installs under, in the order they are tried in each PATH directory. npm on
+    /// Windows installs a .cmd shim beside or instead of an .exe; on macOS and Linux it links a plain
+    /// executable, so looking for the Windows names there never found it.
+    /// </summary>
+    internal static readonly string[] ExecutableFileNames =
+        OperatingSystem.IsWindows() ? ["ccusage.exe", "ccusage.cmd"] : ["ccusage"];
+
+    private static string? ResolveExecutable() =>
+        ResolveExecutable(Environment.GetEnvironmentVariable("PATH"), File.Exists);
+
+    internal static string? ResolveExecutable(string? searchPath, Func<string, bool> fileExists)
     {
-        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var directory in (searchPath ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             try
             {
@@ -272,11 +283,11 @@ internal sealed class CcUsageRunner : ICcUsageRunner
                 if (!Path.IsPathRooted(fullDirectory)) continue;
                 if (IsDriveRelative(fullDirectory)) continue;
 
-                var exePath = Path.Combine(fullDirectory, "ccusage.exe");
-                if (File.Exists(exePath)) return exePath;
-
-                var cmdPath = Path.Combine(fullDirectory, "ccusage.cmd");
-                if (File.Exists(cmdPath)) return cmdPath;
+                foreach (var name in ExecutableFileNames)
+                {
+                    var path = Path.Combine(fullDirectory, name);
+                    if (fileExists(path)) return path;
+                }
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
         }

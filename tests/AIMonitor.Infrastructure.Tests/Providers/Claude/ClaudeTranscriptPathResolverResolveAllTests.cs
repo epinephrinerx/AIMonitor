@@ -22,20 +22,31 @@ namespace AIMonitor.Infrastructure.Tests.Providers.Claude;
 [Trait("Category", "Contract")]
 public sealed class ClaudeTranscriptPathResolverResolveAllTests
 {
-    private const string Profile = @"C:\Users\dev";
+    private static readonly string Profile = OnThisOs(@"C:\Users\dev")!;
 
     // The two default roots P2b.1 rule 2 specifies when CLAUDE_CONFIG_DIR is unset.
     private static readonly string DefaultXdgProjects = Path.Combine(Profile, ".config", "claude", "projects");
     private static readonly string DefaultDotClaudeProjects = Path.Combine(Profile, ".claude", "projects");
 
+    /// <summary>
+    /// The contract is written in Windows paths. Elsewhere a drive letter is not a root, so the resolver
+    /// would rightly drop every one of them; each fixture is moved to the same layout under "/"
+    /// (<c>D:\a\b</c> becomes <c>/D/a/b</c>). Drive-relative entries such as <c>C:x</c> keep their
+    /// spelling and stay unusable. What is under test is the rule, not how Windows spells a path.
+    /// </summary>
+    private static string? OnThisOs(string? windowsPath) =>
+        windowsPath is null || OperatingSystem.IsWindows()
+            ? windowsPath
+            : System.Text.RegularExpressions.Regex.Replace(windowsPath, @"([A-Za-z]):\\", "/$1/").Replace('\\', '/');
+
     private static IReadOnlyList<string> ResolveAll(string? claudeConfigDir, string? xdgConfigHome = null) =>
-        ClaudeTranscriptPathResolver.ResolveAll(claudeConfigDir, xdgConfigHome, Profile);
+        ClaudeTranscriptPathResolver.ResolveAll(OnThisOs(claudeConfigDir), OnThisOs(xdgConfigHome), Profile);
 
     private static void AssertProjects(IReadOnlyList<string> actual, params string[] expectedProjectsDirectories) =>
         // B18: the result keeps the spelling the entry was written with, so the comparison sees through
         // to the directory it denotes - GetFullPath plus OrdinalIgnoreCase, exactly rule 3's identity.
         Assert.Equal(
-            expectedProjectsDirectories.Select(Path.GetFullPath),
+            expectedProjectsDirectories.Select(path => Path.GetFullPath(OnThisOs(path)!)),
             actual.Select(Path.GetFullPath),
             StringComparer.OrdinalIgnoreCase);
 
@@ -235,7 +246,7 @@ public sealed class ClaudeTranscriptPathResolverResolveAllTests
     {
         // The profile arrives as an argument (P2b.6: App.xaml.cs passes it), so a different profile means
         // different defaults - nothing is read from the environment.
-        var other = @"C:\Users\someone-else";
+        var other = OnThisOs(@"C:\Users\someone-else")!;
 
         AssertProjects(
             ClaudeTranscriptPathResolver.ResolveAll(null, null, other),

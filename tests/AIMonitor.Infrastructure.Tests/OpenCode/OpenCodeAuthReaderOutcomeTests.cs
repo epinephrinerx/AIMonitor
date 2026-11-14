@@ -535,14 +535,14 @@ public sealed class OpenCodeAuthReaderOutcomeTests
     {
         var h = new ReaderHarness();
         h.SetVersion("1.19.5");
-        h.Env["XDG_DATA_HOME"] = @"D:\xdg\data";
-        h.AddFile(@"D:\xdg\data\opencode\auth.json", """{"fromxdg":{"type":"oauth"}}""");
+        h.Env["XDG_DATA_HOME"] = ReaderHarness.XdgRoot;
+        h.AddFile(Path.Combine(ReaderHarness.XdgRoot, "opencode", "auth.json"), """{"fromxdg":{"type":"oauth"}}""");
         h.SetAuthJson("""{"fromprofile":{"type":"oauth"}}""");
 
         var status = await h.ReadAsync();
 
         Assert.Equal(new[] { "fromxdg|OAuth" }, ReaderHarness.Pairs(status));
-        Assert.Equal(new[] { @"D:\xdg\data\opencode\auth.json" }, h.AccessedPaths, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(new[] { Path.Combine(ReaderHarness.XdgRoot, "opencode", "auth.json") }, h.AccessedPaths, StringComparer.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -566,7 +566,7 @@ public sealed class OpenCodeAuthReaderOutcomeTests
 
         Assert.Equal(new[] { "fromprofile|API key" }, ReaderHarness.Pairs(status));
         Assert.Equal(
-            new[] { @"C:\Users\tester\.local\share\opencode\auth.json" },
+            new[] { ReaderHarness.DefaultAuthJson },
             h.AccessedPaths,
             StringComparer.OrdinalIgnoreCase);
     }

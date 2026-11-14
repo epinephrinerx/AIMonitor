@@ -194,9 +194,16 @@ internal sealed class ReaderHarness
 {
     public const string ExpectedErrorText = "Could not read OpenCode sign-ins. Run `opencode auth list` in a terminal to check.";
 
-    public const string DefaultExe = @"C:\tools\bin\opencode.exe";
+    // Paths are this OS's own: a C:\ path is not rooted on macOS, so the reader would rightly refuse it.
+    public static readonly string DefaultBin = OperatingSystem.IsWindows() ? @"C:\tools\bin" : "/tools/bin";
 
-    public const string DefaultAuthJson = @"C:\Users\tester\.local\share\opencode\auth.json";
+    public static readonly string DefaultProfile = OperatingSystem.IsWindows() ? @"C:\Users\tester" : "/Users/tester";
+
+    public static readonly string XdgRoot = OperatingSystem.IsWindows() ? @"D:\xdg\data" : "/xdg/data";
+
+    public static readonly string DefaultExe = Path.Combine(DefaultBin, OpenCodeAuthReader.ExecutableFileNames[0]);
+
+    public static readonly string DefaultAuthJson = Path.Combine(DefaultProfile, ".local", "share", "opencode", "auth.json");
 
     public static readonly string[] VersionArguments = ["--version"];
 
@@ -207,8 +214,8 @@ internal sealed class ReaderHarness
 
     public ReaderHarness()
     {
-        Env["PATH"] = @"C:\tools\bin";
-        Env["USERPROFILE"] = @"C:\Users\tester";
+        Env["PATH"] = DefaultBin;
+        Env[OpenCodeAuthReader.ProfileVariable] = DefaultProfile;
         AddFile(DefaultExe, "");
     }
 
@@ -291,7 +298,8 @@ internal sealed class ReaderHarness
         SetListJson(json);
     }
 
-    public static string Normalize(string path) => path.Replace('/', '\\');
+    // Only Windows treats / and \ as the same separator; on macOS a backslash is part of a name.
+    public static string Normalize(string path) => OperatingSystem.IsWindows() ? path.Replace('/', '\\') : path;
 
     /// <summary>The ONLY place that builds the reader under test.</summary>
     public OpenCodeAuthReader CreateReader() =>
