@@ -11,7 +11,35 @@
     <Style Selector="Border.card">
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="Padding" Value="14" />
-      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundListLowBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+    </Style>
+    <!-- The state chip: a word and a glyph, with colour as the third cue rather than the only one. -->
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="9,2" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.chip.good">
+      <Setter Property="BorderBrush" Value="{StaticResource SeverityNormalBrush}" />
+    </Style>
+    <Style Selector="Border.chip.good TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource SeverityNormalBrush}" />
+    </Style>
+    <Style Selector="Border.chip.warning">
+      <Setter Property="BorderBrush" Value="{StaticResource SeverityHighBrush}" />
+    </Style>
+    <Style Selector="Border.chip.warning TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource SeverityHighBrush}" />
+    </Style>
+    <Style Selector="Border.chip.serious">
+      <Setter Property="BorderBrush" Value="{StaticResource SeverityVeryHighBrush}" />
+    </Style>
+    <Style Selector="Border.chip.serious TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource SeverityVeryHighBrush}" />
+    </Style>
+    <Style Selector="Border.chip.muted">
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+      <Setter Property="Opacity" Value="0.75" />
     </Style>
   </Window.Styles>
 
@@ -40,21 +68,43 @@
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="2">
                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14" />
-                    <TextBlock Text="{Binding Tagline}" Opacity="0.65" FontSize="12" />
+                    <TextBlock Text="{Binding Account}" IsVisible="{Binding HasAccount}" FontSize="12" Opacity="0.85" />
+                    <TextBlock Text="{Binding SourceLine}" Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
                   </StackPanel>
-                  <TextBlock Grid.Column="1" Text="{Binding Status}" VerticalAlignment="Center"
-                             TextWrapping="Wrap" MaxWidth="260" TextAlignment="Right" FontSize="12" />
+                  <Border Grid.Column="1" Classes="chip" VerticalAlignment="Top"
+                          Classes.good="{Binding IsGood}" Classes.warning="{Binding IsWarning}"
+                          Classes.serious="{Binding IsSerious}" Classes.muted="{Binding IsMuted}">
+                    <TextBlock Text="{Binding StateChip}" FontSize="12" FontWeight="SemiBold" />
+                  </Border>
                 </Grid>
 
-                <TextBlock Text="{Binding Account}" IsVisible="{Binding HasAccount}"
-                           Opacity="0.75" FontSize="12" />
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
 
-                <TextBlock Text="{Binding SetupHint}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="{Binding ConnectButtonText}" Command="{Binding ToggleEditCommand}" />
+                  <Button Content="Re-detect" Command="{Binding RedetectCommand}"
+                          ToolTip.Tip="Check this service again, and only this one" />
+                </StackPanel>
 
-                <StackPanel Spacing="6" IsVisible="{Binding NeedsKey}">
+                <StackPanel Spacing="6" IsVisible="{Binding IsEditing}">
+                  <TextBlock Text="Found on this machine" FontSize="12" FontWeight="SemiBold" IsVisible="{Binding HasFoundLine}" />
+                  <TextBlock Text="{Binding FoundLine}" IsVisible="{Binding HasFoundLine}" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding AlsoPresent}" IsVisible="{Binding HasAlsoPresent}" FontSize="12" Opacity="0.65"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding SetupHint}" IsVisible="{Binding ShowSignInHelp}"
+                           TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+
+                <StackPanel Spacing="6" IsVisible="{Binding ShowKeyEditor}">
                   <TextBlock Text="{Binding KeyLabel}" FontSize="12" />
-                  <!-- PasswordChar: the key is a secret, and this page is often open on a shared screen. -->
-                  <TextBox Text="{Binding Key}" PlaceholderText="{Binding KeyPlaceholder}" PasswordChar="•" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <!-- PasswordChar: the key is a secret, and this page is often open on a shared screen. -->
+                    <TextBox Text="{Binding Key}" PlaceholderText="{Binding KeyFieldPlaceholder}" PasswordChar="•"
+                             RevealPassword="{Binding IsKeyRevealed}" />
+                    <Button Grid.Column="1" Content="{Binding RevealButtonText}" Command="{Binding ToggleRevealCommand}"
+                            Margin="6,0,0,0" />
+                  </Grid>
                   <TextBlock Text="{Binding KeyHint}" IsVisible="{Binding HasKeyHint}"
                              TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
                   <StackPanel Spacing="6" IsVisible="{Binding HasExtra}">
@@ -62,8 +112,9 @@
                     <TextBox Text="{Binding Extra}" PlaceholderText="{Binding ExtraPlaceholder}" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Save key" Click="OnSaveKey" />
-                    <Button Content="Clear saved key" Click="OnClearKey" />
+                    <Button Content="Save" Click="OnSaveKey" Classes="accent" />
+                    <Button Content="Clear saved key" Click="OnClearKey" IsEnabled="{Binding HasSavedKey}" />
+                    <Button Content="Cancel" Command="{Binding ToggleEditCommand}" />
                   </StackPanel>
                 </StackPanel>
 

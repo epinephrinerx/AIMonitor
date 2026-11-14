@@ -3,17 +3,42 @@
              x:Class="AIMonitor.Presentation.Avalonia.App"
              Name="AI Usage Monitor"
              RequestedThemeVariant="Default">
+  <!-- The 1.3.3 colours the Windows edition uses (Theme/ThemePalette.cs there), so both editions
+       read the same: warm planes and surfaces, the blue accent, and fixed status colours (PAR-028). -->
   <Application.Resources>
-    <!-- Defined once here because the dashboard styles and the menu-bar icon both draw severity. -->
-    <SolidColorBrush x:Key="SeverityNormalBrush">#2E7D32</SolidColorBrush>
-    <SolidColorBrush x:Key="SeverityHighBrush">#F9A825</SolidColorBrush>
-    <SolidColorBrush x:Key="SeverityVeryHighBrush">#EF6C00</SolidColorBrush>
-    <SolidColorBrush x:Key="SeverityCriticalBrush">#C62828</SolidColorBrush>
-    <!-- The unused part of a gauge. Dim enough to stay behind the reading in both themes. -->
-    <SolidColorBrush x:Key="GaugeTrackBrush" Color="#808080" Opacity="0.25" />
+    <ResourceDictionary>
+      <!-- Status colours are never themed (1.3.3 STATUS); the dashboard, widget and menu bar share them. -->
+      <SolidColorBrush x:Key="SeverityNormalBrush">#0CA30C</SolidColorBrush>
+      <SolidColorBrush x:Key="SeverityHighBrush">#FAB219</SolidColorBrush>
+      <SolidColorBrush x:Key="SeverityVeryHighBrush">#EC835A</SolidColorBrush>
+      <SolidColorBrush x:Key="SeverityCriticalBrush">#D03B3B</SolidColorBrush>
+
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppPlaneBrush">#F9F9F7</SolidColorBrush>
+          <SolidColorBrush x:Key="AppSurfaceBrush">#FCFCFB</SolidColorBrush>
+          <SolidColorBrush x:Key="AppBorderBrush">#1A0B0B0B</SolidColorBrush>
+          <SolidColorBrush x:Key="AppAccentBrush">#2A78D6</SolidColorBrush>
+          <!-- The unused part of a gauge: the palette's track colour. -->
+          <SolidColorBrush x:Key="GaugeTrackBrush">#DCDBD4</SolidColorBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppPlaneBrush">#0D0D0D</SolidColorBrush>
+          <SolidColorBrush x:Key="AppSurfaceBrush">#1A1A19</SolidColorBrush>
+          <SolidColorBrush x:Key="AppBorderBrush">#1AFFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="AppAccentBrush">#3987E5</SolidColorBrush>
+          <SolidColorBrush x:Key="GaugeTrackBrush">#3A3A37</SolidColorBrush>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
   </Application.Resources>
 
   <Application.Styles>
-    <FluentTheme />
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#2A78D6" RegionColor="#F9F9F7" />
+        <ColorPaletteResources x:Key="Dark" Accent="#3987E5" RegionColor="#0D0D0D" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
   </Application.Styles>
 </Application>

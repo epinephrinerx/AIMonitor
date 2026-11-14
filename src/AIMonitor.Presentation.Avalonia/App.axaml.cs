@@ -276,11 +276,13 @@ public sealed partial class App : global::Avalonia.Application
         _connectionsPage.RedetectRequested += providerId =>
         {
             if (providerId is null or "opencode") CheckOpenCode();
-            if (providerId != "opencode") _ = _dashboard.RefreshAsync();
+            // A card's Re-detect asks only its own service again; "Check all again" asks everyone.
+            if (providerId != "opencode") _ = _dashboard.RefreshAsync(manual: true, onlyProviderId: providerId);
         };
         _connectionsPage.Update(_dashboard.LatestSnapshots);
         _connectionsPage.UpdateOpenCode(_openCodeStatus);
         _connectionsPage.UpdateOtherAgents(_dashboard.LatestAgentUsage, null);
+        _ = _connectionsPage.LoadSavedKeysAsync();
 
         _connectionsWindow = new ConnectionsWindow { DataContext = _connectionsPage };
         _connectionsWindow.Closed += (_, _) =>

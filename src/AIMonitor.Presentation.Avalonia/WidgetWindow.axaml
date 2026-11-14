@@ -45,7 +45,7 @@
   <!-- The whole card is the drag handle: a frameless window has no title bar to grab. The menu is
        built when it opens (code-behind), so its check marks always match what is on show. -->
   <Border Name="Root"
-          Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+          Background="{DynamicResource AppSurfaceBrush}"
           BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
           BorderThickness="1"
           CornerRadius="10"

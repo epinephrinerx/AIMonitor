@@ -177,6 +177,21 @@ public sealed class ProviderViewModel : ObservableObject
     }
 
     private bool _hasSnapshot;
+    private SupplementaryDetailsViewModel? _supplementary;
+    private bool _showSupplementary;
+
+    /// <summary>Claude's and Codex's supplementary section; null for the other tabs.</summary>
+    public SupplementaryDetailsViewModel? Supplementary
+    {
+        get => _supplementary;
+        private set => Set(ref _supplementary, value);
+    }
+
+    public bool ShowSupplementary
+    {
+        get => _showSupplementary;
+        private set => Set(ref _showSupplementary, value);
+    }
 
     /// <summary>True once the service has answered at least once, configured or not; the widget only
     /// leaves out unconfigured services after it knows which those are.</summary>
@@ -342,9 +357,26 @@ public sealed class ProviderViewModel : ObservableObject
 
         RebuildSections();
 
+        // Claude and Codex gather plan, credits, limit reason, reset rights and activity into their
+        // own section, as on Windows; those stats then leave the plain tiles.
+        if (SupplementaryDetailsBuilder.AppliesTo(ProviderId))
+        {
+            var wasExpanded = Supplementary?.IsResetDetailsExpanded ?? false;
+            Supplementary = SupplementaryDetailsBuilder.Build(ProviderId, snapshot);
+            Supplementary.IsResetDetailsExpanded = wasExpanded;
+        }
+        else
+        {
+            Supplementary = null;
+        }
+
+        ShowSupplementary = Supplementary is not null
+            && (snapshot.Configured || snapshot.Stats.Any(SupplementaryDetailsBuilder.IsSupplementaryStat));
+
         StatTiles.Clear();
         foreach (var stat in snapshot.Stats)
         {
+            if (ShowSupplementary && SupplementaryDetailsBuilder.IsSupplementaryStat(stat)) continue;
             StatTiles.Add(new StatTile(stat.Label, stat.Value, stat.Detail));
         }
 

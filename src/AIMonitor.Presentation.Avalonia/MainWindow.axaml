@@ -6,7 +6,8 @@
         x:DataType="vm:DashboardViewModel"
         Title="AI Usage Monitor"
         Width="1120" Height="820"
-        MinWidth="300" MinHeight="220">
+        MinWidth="300" MinHeight="220"
+        Background="{DynamicResource AppPlaneBrush}">
 
   <Window.Styles>
     <Style Selector="TextBlock.caption">
@@ -16,8 +17,8 @@
     <Style Selector="Border.card">
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="Padding" Value="12,10" />
-      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundListLowBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
 
@@ -40,7 +41,19 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ListBox.tabstrip > ListBoxItem:selected">
-      <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+
+    <Style Selector="Border.badge">
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+    </Style>
+    <Style Selector="Border.pill">
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="10,3" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
     </Style>
 
     <Style Selector="TextBlock.severity">
@@ -235,6 +248,73 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+              </Border>
+
+              <!-- Claude's and Codex's supplementary details (R-007, R-009–R-011): plan, credits,
+                   limit reason, reset rights and activity, as on Windows. -->
+              <Border Classes="card" IsVisible="{Binding ShowSupplementary}" Padding="16,12">
+                <StackPanel Spacing="10" DataContext="{Binding Supplementary}" x:DataType="vm:SupplementaryDetailsViewModel">
+                  <TextBlock Text="{Binding SectionTitle}" FontSize="14" FontWeight="SemiBold" />
+
+                  <ItemsControl ItemsSource="{Binding Rows}" IsVisible="{Binding HasRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SupplementaryRowViewModel">
+                        <Grid ColumnDefinitions="Auto,170,*" Margin="0,3">
+                          <Border Classes="badge" Margin="0,0,10,0" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding Badge}" FontSize="10" FontWeight="SemiBold" />
+                          </Border>
+                          <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Label}" TextWrapping="Wrap"
+                                     VerticalAlignment="Center" />
+                          <StackPanel Grid.Column="2">
+                            <TextBlock Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Classes="caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}"
+                                       TextWrapping="Wrap" />
+                          </StackPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <Border BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0"
+                          Padding="0,10,0,0" IsVisible="{Binding HasResetInfo}">
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="{Binding ResetTitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Border Classes="badge" IsVisible="{Binding HasResetBadge}">
+                          <TextBlock Text="{Binding ResetBadge}" FontSize="10" FontWeight="SemiBold" />
+                        </Border>
+                      </StackPanel>
+                      <TextBlock Classes="caption" Text="{Binding ResetSummary}" TextWrapping="Wrap" />
+                      <Expander Header="How resets work" IsVisible="{Binding HasResetDetails}"
+                                IsExpanded="{Binding IsResetDetailsExpanded}" HorizontalAlignment="Stretch">
+                        <SelectableTextBlock Text="{Binding ResetDetails}" TextWrapping="Wrap" FontSize="12" />
+                      </Expander>
+                    </StackPanel>
+                  </Border>
+
+                  <Border BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0"
+                          Padding="0,10,0,0" IsVisible="{Binding HasActivity}">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="{Binding ActivityTitle}" FontWeight="SemiBold" />
+                      <ItemsControl ItemsSource="{Binding ActivityPills}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <WrapPanel />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SupplementaryPillViewModel">
+                            <Border Classes="pill" Margin="0,0,6,6">
+                              <TextBlock Text="{Binding DisplayText}" FontSize="12" />
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <TextBlock Classes="caption" Text="{Binding ActivityNote}" IsVisible="{Binding HasActivityNote}"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
               </Border>
 
               <!-- What ccusage recorded for this agent. -->
