@@ -21,16 +21,22 @@ internal sealed class MenuBarHost : IDisposable
     private static readonly TimeSpan RotateEvery = TimeSpan.FromSeconds(2);
 
     private readonly TrayIcon _icon = new();
+    private readonly NativeMenu _menu = new();
     private readonly DispatcherTimer _rotation;
     private readonly Dictionary<string, IReadOnlyList<MeterViewModel>> _lastGood = new(StringComparer.Ordinal);
     private IReadOnlyList<MenuBarReading> _readings = [];
+    // The services the icon takes turns through: only those with a five-hour reading, so the icon
+    // never shows a blank tile (as the Windows tray does).
+    private IReadOnlyList<MenuBarReading> _rotationOrder = [];
     private int _position;
     private bool _disposed;
 
     public MenuBarHost()
     {
         _icon.ToolTipText = "AI Usage Monitor";
-        _icon.Menu = new NativeMenu();
+        _icon.Menu = _menu;
+        // Refilled each time it opens, as the Windows tray menu is: the quota rows carry live countdowns.
+        _menu.Opening += (_, _) => FillMenu();
         _rotation = new DispatcherTimer { Interval = RotateEvery };
         _rotation.Tick += (_, _) => Advance();
         Rebuild();
@@ -42,6 +48,8 @@ internal sealed class MenuBarHost : IDisposable
 
     public event Action? RefreshRequested;
 
+    public event Action? OpenSettingsRequested;
+
     public event Action? QuitRequested;
 
     public bool IsVisible
@@ -52,15 +60,23 @@ internal sealed class MenuBarHost : IDisposable
 
     /// <summary>The service the icon is currently showing, for tests and for the tooltip.</summary>
     public MenuBarReading? Current =>
-        _readings.Count == 0 ? null : _readings[Math.Clamp(_position, 0, _readings.Count - 1)];
+        _rotationOrder.Count > 0
+            ? _rotationOrder[Math.Clamp(_position, 0, _rotationOrder.Count - 1)]
+            : _readings.Count == 0 ? null : _readings[0];
 
     public void UpdateReadings(IEnumerable<ProviderViewModel> providers)
     {
         ArgumentNullException.ThrowIfNull(providers);
         _readings = MenuBarReadings.Build(providers, _lastGood);
 
-        var withData = _readings.Count(reading => reading.HasData);
-        if (withData > 1)
+        var order = _readings.Where(reading => reading.HasData).ToList();
+        if (!order.Select(reading => reading.ProviderId).SequenceEqual(_rotationOrder.Select(reading => reading.ProviderId)))
+        {
+            _position = 0;
+        }
+
+        _rotationOrder = order;
+        if (order.Count > 1)
         {
             _rotation.Start();
         }
@@ -77,16 +93,21 @@ internal sealed class MenuBarHost : IDisposable
 
     private void Advance()
     {
-        if (_readings.Count == 0) return;
-        _position = (_position + 1) % _readings.Count;
+        if (_rotationOrder.Count == 0) return;
+        _position = (_position + 1) % _rotationOrder.Count;
         Draw();
     }
 
     private void Rebuild()
     {
         Draw();
+        FillMenu();
+    }
 
-        var menu = new NativeMenu();
+    private void FillMenu()
+    {
+        var menu = _menu;
+        menu.Items.Clear();
         menu.Add(Command("Open AI Usage Monitor", () => OpenDashboardRequested?.Invoke()));
         menu.Add(Command("Show widget", () => OpenWidgetRequested?.Invoke()));
         menu.Add(new NativeMenuItemSeparator());
@@ -111,9 +132,8 @@ internal sealed class MenuBarHost : IDisposable
         menu.Add(new NativeMenuItemSeparator());
         menu.Add(Command("Refresh now", () => RefreshRequested?.Invoke()));
         menu.Add(new NativeMenuItemSeparator());
+        menu.Add(Command("Settings…", () => OpenSettingsRequested?.Invoke()));
         menu.Add(Command("Quit AI Usage Monitor", () => QuitRequested?.Invoke()));
-
-        _icon.Menu = menu;
     }
 
     private void Draw()
@@ -128,7 +148,7 @@ internal sealed class MenuBarHost : IDisposable
 
         _icon.ToolTipText = reading is null
             ? "AI Usage Monitor"
-            : MenuBarText.Tooltip(reading, _position, _readings.Count, DateTimeOffset.Now, TimeZoneInfo.Local);
+            : MenuBarText.Tooltip(reading, _position, Math.Max(1, _rotationOrder.Count), DateTimeOffset.Now, TimeZoneInfo.Local);
     }
 
     private static IBrush SeverityBrush(Severity severity) => Resource(

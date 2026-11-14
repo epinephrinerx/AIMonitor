@@ -89,7 +89,20 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
-    public async Task Refresh_SaysSoWhenAServiceReportsAProblem()
+    public async Task Refresh_ComposesTheFooterTheWayWindowsDoes()
+    {
+        var (dashboard, _, _) = await BuildAsync(new AppSettings { RefreshIntervalSeconds = 180 });
+
+        await dashboard.RefreshAsync();
+        dashboard.RefreshStatusText(DateTimeOffset.UtcNow.AddMinutes(5), 85);
+
+        Assert.StartsWith("Updated 5m ago (", dashboard.Status, StringComparison.Ordinal);
+        Assert.Contains("auto-refresh every 3 minutes · default", dashboard.Status, StringComparison.Ordinal);
+        Assert.EndsWith("85 MB resident", dashboard.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AProblemWithOneService_IsShownOnItsTab()
     {
         var (dashboard, _, _) = await BuildAsync(
             snapshots: id => id == "agy"
@@ -98,7 +111,8 @@ public sealed class DashboardViewModelTests
 
         await dashboard.RefreshAsync();
 
-        Assert.Contains("1 service(s) reported a problem", dashboard.Status, StringComparison.Ordinal);
+        Assert.Equal("agy not installed", dashboard.Providers[2].ErrorMessage);
+        Assert.StartsWith("Updated", dashboard.Status, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -181,5 +195,134 @@ public sealed class DashboardViewModelTests
 
         Assert.False(openAi.Configured);
         Assert.False(openAi.HasError);
+    }
+
+    // ---- Parity with the Windows dashboard header and refresh (PAR-003, PAR-015) ----
+
+    [Fact]
+    public async Task TheHeaderSelectors_StartOnTheSavedChoices()
+    {
+        var (dashboard, _, _) = await BuildAsync(new AppSettings
+        {
+            ChartMetric = "Output tokens",
+            ChartRangeDays = 30,
+            RefreshIntervalSeconds = 0,
+        });
+
+        Assert.Equal("Output tokens", dashboard.SelectedMetric.Value);
+        Assert.Equal(30, dashboard.SelectedRange.Value);
+        Assert.Equal("Manual only", dashboard.SelectedInterval.Label);
+    }
+
+    [Fact]
+    public async Task ChoosingAMetric_SavesIt_AndAsksTheServicesAgain()
+    {
+        var (dashboard, session, clients) = await BuildAsync();
+
+        dashboard.SelectedMetric = dashboard.MetricOptions.Single(option => option.Value == "Equivalent value");
+        await session.FlushAsync();
+        for (var i = 0; i < 50 && clients["claude"].Requests.Count == 0; i++) await Task.Delay(10);
+
+        Assert.Equal("Equivalent value", session.Current.ChartMetric);
+        Assert.Equal("Equivalent value", clients["claude"].Requests[^1].Metric);
+    }
+
+    [Fact]
+    public async Task ChoosingAnInterval_SavesIt()
+    {
+        var (dashboard, session, _) = await BuildAsync();
+
+        dashboard.SelectedInterval = dashboard.IntervalOptions.Single(option => option.Value == 600);
+        await session.FlushAsync();
+
+        Assert.Equal(600, session.Current.RefreshIntervalSeconds);
+    }
+
+    [Fact]
+    public async Task ASettingSavedElsewhere_MovesTheHeaderSelector()
+    {
+        var (dashboard, session, _) = await BuildAsync();
+
+        await session.UpdateAsync(s => s with { ChartRangeDays = 90 });
+
+        Assert.Equal(90, dashboard.SelectedRange.Value);
+    }
+
+    [Fact]
+    public async Task TheRefreshButton_SaysWhenItIsWorking()
+    {
+        var release = new TaskCompletionSource();
+        var session = await SettingsSession.CreateAsync(new InMemorySettingsStore());
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+            [new ProviderClientRegistration("claude", new GatedClient(() => release.Task))]));
+        var dashboard = new DashboardViewModel(coordinator, session);
+
+        Assert.Equal("Refresh", dashboard.RefreshButtonText);
+        var running = dashboard.RefreshAsync();
+        Assert.Equal("Refreshing…", dashboard.RefreshButtonText);
+        release.SetResult();
+        await running;
+        Assert.Equal("Refresh", dashboard.RefreshButtonText);
+    }
+
+    [Fact]
+    public async Task ARefreshAskedForDuringOne_StillRunsAfterIt()
+    {
+        var release = new TaskCompletionSource();
+        var calls = 0;
+        var store = new InMemorySettingsStore();
+        var session = await SettingsSession.CreateAsync(store);
+        var slow = new GatedClient(async () =>
+        {
+            Interlocked.Increment(ref calls);
+            await release.Task;
+        });
+        var coordinator = new LatestRefreshCoordinator(new RefreshProvidersUseCase(
+            [new ProviderClientRegistration("claude", slow)]));
+        var dashboard = new DashboardViewModel(coordinator, session);
+
+        var first = dashboard.RefreshAsync();
+        var second = dashboard.RefreshAsync();
+        release.SetResult();
+        await first;
+        await second;
+
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task ReDetectingOneService_LeavesTheOthersAsTheyWere()
+    {
+        var round = 0;
+        var (dashboard, _, clients) = await BuildAsync(
+            snapshots: id => TestData.Snapshot(id, meters: [TestData.Meter(percent: round == 0 ? 10 : 50)]));
+        await dashboard.RefreshAsync();
+        round = 1;
+
+        await dashboard.RefreshAsync(manual: true, onlyProviderId: "openai");
+
+        Assert.Equal(10, dashboard.Providers[0].Meters[0].Percent);
+        Assert.Equal(50, dashboard.Providers[1].Meters[0].Percent);
+        Assert.True(dashboard.LatestSnapshots.ContainsKey("claude"));
+    }
+
+    [Fact]
+    public async Task TheAppearanceCheckMark_FollowsTheSavedTheme()
+    {
+        var (dashboard, session, _) = await BuildAsync(new AppSettings { Theme = "dark" });
+
+        Assert.True(dashboard.IsDarkTheme);
+        await session.UpdateAsync(s => s with { Theme = "system" });
+        Assert.True(dashboard.IsSystemTheme);
+        Assert.False(dashboard.IsDarkTheme);
+    }
+
+    private sealed class GatedClient(Func<Task> before) : IProviderQuotaClient
+    {
+        public async Task<ProviderSnapshot> GetSnapshotAsync(ProviderSnapshotRequest request, CancellationToken cancellationToken)
+        {
+            await before();
+            return TestData.Snapshot("claude");
+        }
     }
 }

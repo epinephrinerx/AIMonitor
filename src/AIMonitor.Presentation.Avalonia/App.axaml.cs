@@ -8,6 +8,7 @@ using AIMonitor.Presentation.Avalonia.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -35,6 +36,10 @@ public sealed partial class App : global::Avalonia.Application
     private MenuBarHost? _menuBar;
     private MainWindow? _window;
     private WidgetWindow? _widgetWindow;
+    // One of each at a time, as on Windows: asking again brings the open one forward.
+    private SettingsWindow? _settingsWindow;
+    private ConnectionsWindow? _connectionsWindow;
+    private AboutWindow? _aboutWindow;
     private DispatcherTimer? _refreshTimer;
 
     public App()
@@ -77,13 +82,21 @@ public sealed partial class App : global::Avalonia.Application
         _dashboard.OpenConnectionsRequested += OpenConnections;
         _dashboard.OpenAboutRequested += OpenAbout;
         _dashboard.OpenUsageLogRequested += OpenUsageLog;
+        _dashboard.PrintUsageLogRequested += PrintUsageLog;
+        _dashboard.SwitchToWidgetRequested += ShowWidget;
 
         _widget = new WidgetViewModel([.. _dashboard.Providers]);
         _widget.ExpandRequested += ShowDashboard;
         _widget.RefreshRequested += () => _ = _dashboard.RefreshAsync(manual: true);
         _widget.QuitRequested += Quit;
+        // With rotation off and nothing pinned, the widget follows the dashboard's tab.
+        _widget.ActiveProviderSource = () => _dashboard.SelectedProvider.ProviderId;
+        _dashboard.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DashboardViewModel.SelectedProvider)) _widget.OnActiveProviderChanged();
+        };
 
-        _window = new MainWindow { DataContext = _dashboard };
+        _window = new MainWindow { DataContext = _dashboard, Session = _settings };
         _window.Closing += OnDashboardClosing;
         desktop.MainWindow = _window;
 
@@ -104,6 +117,7 @@ public sealed partial class App : global::Avalonia.Application
         StartRefreshTimer();
         _ = _dashboard.RefreshAsync();
         CheckOpenCode();
+        _ = CheckForUpdatesQuietlyAsync();
 
         // The connections page is where a brand-new profile starts, because nothing can be shown
         // until at least one service is signed in.
@@ -120,6 +134,7 @@ public sealed partial class App : global::Avalonia.Application
 
     private void ApplySettings(AppSettings settings)
     {
+        ApplyTheme(settings.Theme);
         _widget?.ApplySettings(settings);
         ApplyMenuBar(TrayPolicy.ShouldShowTray(settings));
         ApplyRefreshInterval();
@@ -135,6 +150,7 @@ public sealed partial class App : global::Avalonia.Application
                 _menuBar.OpenDashboardRequested += ShowDashboard;
                 _menuBar.OpenWidgetRequested += ShowWidget;
                 _menuBar.RefreshRequested += () => _ = _dashboard?.RefreshAsync(manual: true);
+                _menuBar.OpenSettingsRequested += OpenSettings;
                 _menuBar.QuitRequested += Quit;
                 if (_dashboard is not null)
                 {
@@ -154,7 +170,6 @@ public sealed partial class App : global::Avalonia.Application
     {
         if (_dashboard is null) return;
         _menuBar?.UpdateReadings(_dashboard.Providers);
-        _widget?.Show(_dashboard.SelectedProvider.ProviderId);
         _connectionsPage?.Update(_dashboard.LatestSnapshots);
     }
 
@@ -164,26 +179,36 @@ public sealed partial class App : global::Avalonia.Application
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {
+        // Shortcuts: see AppShortcuts (PAR-032).
         var file = new NativeMenuItem("File") { Menu = new NativeMenu() };
-        file.Menu!.Add(Item("Refresh now", () => _ = _dashboard?.RefreshAsync(manual: true)));
-        file.Menu.Add(Item("Usage log", OpenUsageLog));
+        file.Menu!.Add(Item("Refresh now", () => _ = _dashboard?.RefreshAsync(manual: true), AppShortcuts.Refresh));
+        file.Menu.Add(Item("Sign-in / Connections…", OpenConnections, AppShortcuts.Connections));
         file.Menu.Add(new NativeMenuItemSeparator());
-        file.Menu.Add(Item("Settings…", OpenSettings));
-        file.Menu.Add(Item("Connections…", OpenConnections));
+        file.Menu.Add(Item("Usage log…", OpenUsageLog, AppShortcuts.UsageLog));
+        file.Menu.Add(Item("Print usage log…", PrintUsageLog, AppShortcuts.PrintUsageLog));
+        file.Menu.Add(new NativeMenuItemSeparator());
+        file.Menu.Add(Item("Settings…", OpenSettings, AppShortcuts.Settings));
 
         var window = new NativeMenuItem("Window") { Menu = new NativeMenu() };
-        window.Menu!.Add(Item("Dashboard", ShowDashboard));
-        window.Menu.Add(Item("Widget", ShowWidget));
+        window.Menu!.Add(Item("Dashboard", ShowDashboard, AppShortcuts.Dashboard));
+        window.Menu.Add(Item("Widget", ShowWidget, AppShortcuts.Widget));
 
         var help = new NativeMenuItem("Help") { Menu = new NativeMenu() };
-        help.Menu!.Add(Item("About AI Usage Monitor", OpenAbout));
+        help.Menu!.Add(Item("About AI Usage Monitor", OpenAbout, AppShortcuts.About));
+        help.Menu.Add(Item("Read me", () => OpenAbout(AboutPage.Readme)));
+        help.Menu.Add(Item("Licence", () => OpenAbout(AboutPage.License)));
+        help.Menu.Add(Item("Third-party notices", () => OpenAbout(AboutPage.Notices)));
+        help.Menu.Add(Item("Developer", () => OpenAbout(AboutPage.Developer)));
+        help.Menu.Add(new NativeMenuItemSeparator());
+        help.Menu.Add(Item("Check for updates…", () => OpenAbout(AboutPage.About, checkNow: true)));
 
         return [file, window, help];
     }
 
-    private static NativeMenuItem Item(string header, Action action)
+    private static NativeMenuItem Item(string header, Action action, string? gesture = null)
     {
         var item = new NativeMenuItem(header);
+        if (gesture is not null) item.Gesture = KeyGesture.Parse(gesture);
         item.Click += (_, _) => action();
         return item;
     }
@@ -191,7 +216,38 @@ public sealed partial class App : global::Avalonia.Application
     private void OpenSettings()
     {
         if (_settings is null) return;
-        Show(new SettingsWindow { DataContext = new SettingsViewModel(_settings, KnownAgentNames()) });
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            return;
+        }
+
+        // The live preview (PAR-027): theme, widget look, window size and budgets show at once and
+        // are put back by Cancel. Only the appearance is touched; nothing is saved.
+        var resizer = new DashboardPreviewResizer(() => _window);
+        var lastTheme = _settings.Current.Theme;
+        var lastSize = (_settings.Current.DashboardWidth, _settings.Current.DashboardHeight);
+        void Preview(AppSettings preview)
+        {
+            if (!string.Equals(preview.Theme, lastTheme, StringComparison.Ordinal))
+            {
+                lastTheme = preview.Theme;
+                ApplyTheme(preview.Theme);
+            }
+
+            _widget?.ApplySettings(preview);
+            if ((preview.DashboardWidth, preview.DashboardHeight) != lastSize)
+            {
+                lastSize = (preview.DashboardWidth, preview.DashboardHeight);
+                resizer.Resize(preview.DashboardWidth, preview.DashboardHeight);
+            }
+
+            _dashboard?.ApplyAgentBudgets(preview.AgentBudgets);
+        }
+
+        _settingsWindow = new SettingsWindow { DataContext = new SettingsViewModel(_settings, KnownAgentNames(), Preview) };
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        Show(_settingsWindow);
     }
 
     /// <summary>Every agent ccusage has reported, so Settings can offer each one a budget row.</summary>
@@ -209,6 +265,11 @@ public sealed partial class App : global::Avalonia.Application
     private void OpenConnections()
     {
         if (_settings is null || _connections is null || _dashboard is null) return;
+        if (_connectionsWindow is not null)
+        {
+            _connectionsWindow.Activate();
+            return;
+        }
 
         _connectionsPage = new ConnectionsViewModel(_settings, _connections);
         // "Check again" on the OpenCode card asks OpenCode only; the services are refreshed for the rest.
@@ -221,9 +282,13 @@ public sealed partial class App : global::Avalonia.Application
         _connectionsPage.UpdateOpenCode(_openCodeStatus);
         _connectionsPage.UpdateOtherAgents(_dashboard.LatestAgentUsage, null);
 
-        var window = new ConnectionsWindow { DataContext = _connectionsPage };
-        window.Closed += (_, _) => _connectionsPage = null;
-        Show(window);
+        _connectionsWindow = new ConnectionsWindow { DataContext = _connectionsPage };
+        _connectionsWindow.Closed += (_, _) =>
+        {
+            _connectionsPage = null;
+            _connectionsWindow = null;
+        };
+        Show(_connectionsWindow);
     }
 
     /// <summary>
@@ -255,14 +320,62 @@ public sealed partial class App : global::Avalonia.Application
         });
     }
 
-    private void OpenAbout()
+    private void OpenAbout() => OpenAbout(AboutPage.About);
+
+    /// <summary>Opens About on <paramref name="page"/>; one About window at a time.</summary>
+    private void OpenAbout(AboutPage page, bool checkNow = false, AboutViewModel? model = null)
     {
-        _updateHttpClient ??= new HttpClient();
-        var checker = new GitHubVersionChecker(_updateHttpClient, branch: AboutViewModel.ReleaseBranch);
-        Show(new AboutWindow { DataContext = new AboutViewModel(checker) });
+        if (_aboutWindow is { DataContext: AboutViewModel open })
+        {
+            open.SelectedPage = page;
+            if (checkNow) _ = open.CheckUpdatesAsync();
+            _aboutWindow.Activate();
+            return;
+        }
+
+        model ??= new AboutViewModel(CreateVersionChecker());
+        model.SelectedPage = page;
+        _aboutWindow = new AboutWindow { DataContext = model };
+        _aboutWindow.Closed += (_, _) => _aboutWindow = null;
+        Show(_aboutWindow);
+        if (checkNow) _ = model.CheckUpdatesAsync();
     }
 
-    private void OpenUsageLog()
+    private GitHubVersionChecker CreateVersionChecker()
+    {
+        _updateHttpClient ??= new HttpClient();
+        return new GitHubVersionChecker(_updateHttpClient, branch: AboutViewModel.ReleaseBranch);
+    }
+
+    /// <summary>
+    /// Asked on every launch, as on Windows, and quiet unless there is something newer: then About
+    /// opens on the news with the button that goes to the release. There is no installer to run on
+    /// the Mac (R-023), so this is where the Windows "install now?" question ends up.
+    /// </summary>
+    private async Task CheckForUpdatesQuietlyAsync()
+    {
+        var model = new AboutViewModel(CreateVersionChecker());
+        try
+        {
+            await model.CheckUpdatesAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            return;
+        }
+
+        if (model.IsUpdateAvailable && _aboutWindow is null)
+        {
+            OpenAbout(AboutPage.About, model: model);
+        }
+    }
+
+    private void OpenUsageLog() => OpenUsageLog(print: false);
+
+    /// <summary>⌘P: the log, with its print page on the way, as Ctrl+P opens the log to print on Windows.</summary>
+    private void PrintUsageLog() => OpenUsageLog(print: true);
+
+    private void OpenUsageLog(bool print)
     {
         if (_dashboard is null) return;
 
@@ -272,7 +385,9 @@ public sealed partial class App : global::Avalonia.Application
             _dashboard.ChartRangeDays,
             _dashboard.ChartMetric);
 
-        Show(new UsageLogWindow { DataContext = new UsageLogViewModel(report) });
+        var model = new UsageLogViewModel(report);
+        Show(new UsageLogWindow { DataContext = model });
+        if (print) model.PrintCommand.Execute(null);
     }
 
     /// <summary>
@@ -296,18 +411,32 @@ public sealed partial class App : global::Avalonia.Application
     private void OnSettingsChanged(AppSettings settings) =>
         Dispatcher.UIThread.Post(() => ApplySettings(settings));
 
+    /// <summary>Dashboard mode: the widget goes away and the dashboard comes back, as on Windows.</summary>
     private void ShowDashboard()
     {
         if (_window is null) return;
+        if (_widgetWindow?.IsVisible == true)
+        {
+            _widgetWindow.SavePlacement();
+            _widgetWindow.Hide();
+        }
+
         _window.Show();
         _window.WindowState = WindowState.Normal;
         _window.Activate();
     }
 
+    /// <summary>Widget mode: the dashboard is put away while the widget is up (PAR-019).</summary>
     private void ShowWidget()
     {
         if (_widget is null) return;
-        _widgetWindow ??= new WidgetWindow { DataContext = _widget };
+        _widgetWindow ??= new WidgetWindow { DataContext = _widget, Session = _settings };
+        if (_window?.IsVisible == true)
+        {
+            _window.SavePlacement();
+            _window.Hide();
+        }
+
         _widgetWindow.Show();
         _widgetWindow.Activate();
     }
@@ -322,10 +451,32 @@ public sealed partial class App : global::Avalonia.Application
 
         e.Cancel = true;
         _window?.Hide();
+        NotifyParkedInMenuBar();
+    }
+
+    /// <summary>
+    /// The window was just put away into the menu bar. The first time ever, say so, so closing the
+    /// window does not look like the app quit (the Windows tray balloon, 1.3.3 <c>mark_once("trayHint")</c>).
+    /// </summary>
+    private void NotifyParkedInMenuBar()
+    {
+        if (_settings is null || _settings.Current.TrayHintShown) return;
+
+        _ = _settings.UpdateAsync(s => s with { TrayHintShown = true });
+        var notice = new NoticeWindow(
+            "Still watching",
+            "AI Usage Monitor is still running in the menu bar. Click its icon to reopen the dashboard, or choose Quit AI Usage Monitor there to stop it.");
+        notice.Show();
+        notice.Activate();
     }
 
     private void Quit()
     {
+        // Shutting down does not ask the windows whether they may close, so their spots are
+        // recorded here, before the settings are flushed on the way out.
+        _window?.SavePlacement();
+        _widgetWindow?.SavePlacement();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.Shutdown();

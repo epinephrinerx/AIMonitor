@@ -92,4 +92,25 @@ public sealed class UsageLogViewModelTests
 
         Assert.Equal(1, asked);
     }
+
+    [Fact]
+    public void ThePrintPage_IsTheLightReport_ThatAsksToBePrinted()
+    {
+        var page = Log().RenderPrintPage();
+
+        Assert.StartsWith("<!doctype html>", page, StringComparison.Ordinal);
+        Assert.Contains("background:#ffffff", page, StringComparison.Ordinal);
+        Assert.Contains("window.print()", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Segoe UI", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailedPrint_IsReported()
+    {
+        var log = Log();
+
+        log.ReportPrintFailed("no browser");
+
+        Assert.Equal("Could not print the log: no browser", log.Message);
+    }
 }

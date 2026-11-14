@@ -4,6 +4,17 @@ using AIMonitor.Application.Version;
 
 namespace AIMonitor.Presentation.Avalonia.ViewModels;
 
+/// <summary>The About window's pages, in tab order; the Help menu opens each one directly, as the
+/// Windows About menu does.</summary>
+public enum AboutPage
+{
+    About,
+    Readme,
+    License,
+    Notices,
+    Developer,
+}
+
 /// <summary>About: who made this, what licence it carries, and whether there is a newer build.</summary>
 public sealed class AboutViewModel : ObservableObject
 {
@@ -50,6 +61,57 @@ public sealed class AboutViewModel : ObservableObject
     public string ProjectUrl => "https://github.com/epinephrinerx/AIMonitor";
 
     public string ReleasesUrl => ProjectUrl + "/releases";
+
+    private AboutPage _selectedPage;
+
+    /// <summary>The tab on show; the Help menu items open the window on their own page.</summary>
+    public AboutPage SelectedPage
+    {
+        get => _selectedPage;
+        set
+        {
+            if (Set(ref _selectedPage, value)) Raise(nameof(SelectedPageIndex));
+        }
+    }
+
+    public int SelectedPageIndex
+    {
+        get => (int)_selectedPage;
+        set
+        {
+            if (Enum.IsDefined(typeof(AboutPage), value)) SelectedPage = (AboutPage)value;
+        }
+    }
+
+    public string DeveloperBlurb =>
+        "AI Usage Monitor reads the AI sign-ins you already have on this machine and shows what each service says "
+        + "you have used. It never writes to another tool's credentials and never sends your usage anywhere.";
+
+    public string AssistantsBlurb =>
+        "Written and maintained by the author above, with help from two coding assistants: Claude Code (Anthropic) and "
+        + "Codex (OpenAI). They are tools, in the same sense as the compiler; the design decisions and the releases are "
+        + "the author's.";
+
+    public string LicenseFooter =>
+        $"Version {AppVersion}  ·  GPL-3.0-or-later. The full licence is on the Licence tab, and the notices "
+        + "for redistributed components sit beside it.";
+
+    public string ReadmeText =>
+        """
+        AI Usage Monitor 2.0 (macOS Edition) - AI quota and usage monitor for the Mac desktop
+
+        Watches the quotas and token use of the AI tools you already use:
+        - Claude (Claude Code login, session/weekly limits, CLI transcript history)
+        - OpenAI (Codex ChatGPT sign-in, Admin API spend/budget, usage history)
+        - AGY / Antigravity (shared Gemini and Claude/GPT model-pool quotas via the CLI)
+        - OpenCode and other coding agents, through ccusage (cost, tokens, monthly budgets)
+
+        Key features:
+        - Native dashboard and a compact floating widget
+        - A live menu bar item coloured by how close you are to a limit
+        - Saved keys kept in the macOS Keychain
+        - No invented data, and other tools' sign-ins are only ever read
+        """;
 
     public string LicenseSummary =>
         "Licensed under the GNU General Public License v3.0. The full licence and the third-party "
@@ -105,6 +167,8 @@ public sealed class AboutViewModel : ObservableObject
         }
     }
 
+    public bool IsUpdateAvailable => _latestRelease?.IsNewer == true;
+
     public string ReleaseButtonText =>
         _latestRelease?.IsNewer == true ? "Open the new release" : "Open the releases page";
 
@@ -125,6 +189,7 @@ public sealed class AboutViewModel : ObservableObject
             UpdateStatus = release.IsNewer
                 ? $"{release.Name} is available."
                 : "This is the newest release.";
+            Raise(nameof(IsUpdateAvailable));
         }
         catch (UpdateCheckException exception)
         {

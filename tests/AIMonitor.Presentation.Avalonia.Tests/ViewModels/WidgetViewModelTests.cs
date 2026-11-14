@@ -128,25 +128,89 @@ public sealed class WidgetViewModelTests
     }
 
     [Fact]
-    public void Show_JumpsToTheNamedService()
+    public void AShowMenuChoice_PinsThatService_AndStopsTheTurns()
     {
         var widget = Widget();
 
-        widget.Show("agy");
+        widget.ShowProvider("agy");
 
+        Assert.Equal("agy", widget.Current.ProviderId);
+        Assert.False(widget.IsRotatingAll);
+        Assert.False(widget.IsRotating);
+    }
+
+    [Fact]
+    public void AllServices_StartsTheTurnsAgain()
+    {
+        var widget = Widget();
+        widget.ShowProvider("agy");
+
+        widget.ShowAllProviders();
+
+        Assert.True(widget.IsRotatingAll);
+        Assert.True(widget.IsRotating);
+        Assert.Null(widget.PinnedProviderId);
+    }
+
+    [Fact]
+    public void WithRotationOff_AndNothingPinned_ItFollowsTheDashboardsTab()
+    {
+        var active = "openai";
+        var widget = Widget();
+        widget.ActiveProviderSource = () => active;
+        widget.ApplySettings(new AppSettings { WidgetRotationEnabled = false });
+
+        Assert.Equal("openai", widget.Current.ProviderId);
+        active = "agy";
+        widget.OnActiveProviderChanged();
         Assert.Equal("agy", widget.Current.ProviderId);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("nothing-of-ours")]
-    public void Show_WithAServiceItDoesNotHave_StaysPut(string? providerId)
+    [Fact]
+    public void TheTurns_SkipServicesThatAreNotConfigured()
+    {
+        var widget = new WidgetViewModel(
+        [
+            TestData.Provider("claude", "Claude"),
+            TestData.Provider("openai", "OpenAI", TestData.Snapshot("openai", configured: false, meters: [])),
+            TestData.Provider("agy", "AGY", TestData.Snapshot("agy")),
+        ]);
+
+        widget.Advance();
+        Assert.Equal("agy", widget.Current.ProviderId);
+        widget.Advance();
+        Assert.Equal("claude", widget.Current.ProviderId);
+    }
+
+    [Fact]
+    public void WithOnlyOneConfiguredService_ThereIsNothingToPageTo()
+    {
+        var widget = new WidgetViewModel(
+        [
+            TestData.Provider("claude", "Claude"),
+            TestData.Provider("openai", "OpenAI", TestData.Snapshot("openai", configured: false, meters: [])),
+        ]);
+
+        Assert.False(widget.CanPage);
+        Assert.False(widget.IsRotating);
+    }
+
+    [Fact]
+    public void TheTurnsTakeFourSeconds_AsOnWindows()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(4), WidgetViewModel.RotationInterval);
+    }
+
+    [Fact]
+    public void PagingByHand_AsksTheWindowToRestartTheInterval()
     {
         var widget = Widget();
+        var restarts = 0;
+        widget.RotationRestarted += () => restarts++;
 
-        widget.Show(providerId);
+        widget.NextCommand.Execute(null);
 
-        Assert.Equal("claude", widget.Current.ProviderId);
+        Assert.Equal(1, restarts);
     }
 
     [Fact]
@@ -161,8 +225,8 @@ public sealed class WidgetViewModelTests
     }
 
     [Theory]
-    [InlineData(0, 0.2)]
-    [InlineData(-1, 0.2)]
+    [InlineData(0, 0.25)]
+    [InlineData(-1, 0.25)]
     [InlineData(5, 1.0)]
     public void ApplySettings_KeepsOpacityWhereTheWidgetIsStillVisibleAndClickable(double stored, double expected)
     {
@@ -174,46 +238,97 @@ public sealed class WidgetViewModelTests
     }
 
     [Fact]
-    public void ShowsTheFiveHourWindowFirst_BecauseThatIsTheOnePeopleWatch()
+    public void TheLeadLine_ComesFromTheFiveHourWindow_AndNamesItsSeverity()
     {
         var provider = TestData.Provider(snapshot: TestData.Snapshot(meters:
         [
-            TestData.Meter(key: "weekly", kind: "weekly", title: "Weekly", subtitle: "7-day window", percent: 90),
-            TestData.Meter(key: "session", percent: 12),
+            TestData.Meter(key: "weekly", kind: "weekly", title: "Weekly", subtitle: "7-day window", percent: 20),
+            TestData.Meter(key: "session", percent: 95),
         ]));
         var widget = new WidgetViewModel([provider]);
+        widget.UpdateLayout(300, 300, 16, 13.5);
 
-        Assert.Equal("Session", widget.VisibleMeters[0].Title);
+        Assert.True(widget.ShowLeadHead);
+        Assert.Equal("⚠ Session Critical", widget.LeadHeadText);
+        Assert.True(widget.IsLeadCritical);
     }
 
-    [Fact]
-    public void ShowsAtMostThreeWindows_SoItStaysGlanceable()
+    [Theory]
+    [InlineData(300, 5)]
+    [InlineData(230, 4)]
+    [InlineData(150, 2)]
+    public void HowManyGaugesFit_IsDecidedByTheWidth(double width, int expected)
     {
         var meters = Enumerable.Range(0, 6)
             .Select(i => TestData.Meter(key: $"w{i}", kind: "weekly", title: $"Window {i}", subtitle: "", percent: i * 10))
             .ToList();
         var widget = new WidgetViewModel([TestData.Provider(snapshot: TestData.Snapshot(meters: meters))]);
 
-        Assert.Equal(3, widget.VisibleMeters.Count);
+        widget.UpdateLayout(width, 300, 16, 13.5);
+
+        Assert.Equal(expected, widget.VisibleMeters.Count);
     }
 
     [Fact]
-    public void WithNoWindowsAtAll_SaysWhyRatherThanShowingAnEmptyCard()
+    public void TheHeight_NeverTakesAGaugeAway()
+    {
+        var meters = Enumerable.Range(0, 3).Select(i => TestData.Meter(key: $"w{i}", percent: 10)).ToList();
+        var widget = new WidgetViewModel([TestData.Provider(snapshot: TestData.Snapshot(meters: meters))]);
+
+        widget.UpdateLayout(300, 300, 16, 13.5);
+        var tall = widget.VisibleMeters.Count;
+        widget.UpdateLayout(300, 140, 16, 13.5);
+
+        Assert.Equal(tall, widget.VisibleMeters.Count);
+    }
+
+    [Fact]
+    public void TooShortForAGauge_SaysSo()
+    {
+        var widget = new WidgetViewModel([TestData.Provider()]);
+
+        widget.UpdateLayout(200, 60, 16, 13.5);
+
+        Assert.True(widget.IsTooSmall);
+        Assert.False(widget.HasMeters);
+    }
+
+    [Fact]
+    public void BeforeTheFirstAnswer_ItSaysItIsWaiting()
     {
         var widget = new WidgetViewModel([new ProviderViewModel("claude", "Claude")]);
 
         Assert.False(widget.HasMeters);
-        Assert.Equal("No quota data yet", widget.EmptyMessage);
+        Assert.Equal("Waiting for data…", widget.EmptyMessage);
     }
 
     [Fact]
-    public void WhenTheServiceReportedAProblem_TheEmptyMessageSaysSo()
+    public void WhenTheServiceReportedAProblem_TheEmptyMessageIsThatProblem()
     {
         var provider = TestData.Provider(snapshot:
             TestData.Snapshot(configured: false, meters: [], error: "network unreachable"));
         var widget = new WidgetViewModel([provider]);
 
-        Assert.Equal("Last refresh failed", widget.EmptyMessage);
+        Assert.Equal("network unreachable", widget.EmptyMessage);
+    }
+
+    [Fact]
+    public void AServiceThatIsNotSetUp_SaysSo()
+    {
+        var provider = TestData.Provider(snapshot: TestData.Snapshot(configured: false, meters: []));
+        var widget = new WidgetViewModel([provider]);
+
+        Assert.Equal("Claude is not configured yet.", widget.EmptyMessage);
+    }
+
+    [Fact]
+    public void TheFooter_SaysHowOldTheReadingIs()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 9, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal("", WidgetViewModel.FormatStatus(null, now));
+        Assert.Equal("updated just now", WidgetViewModel.FormatStatus(now.AddSeconds(-3), now));
+        Assert.Equal("updated 5m ago", WidgetViewModel.FormatStatus(now.AddMinutes(-5), now));
     }
 
     [Fact]

@@ -127,4 +127,16 @@ public sealed class ChartControlTests
 
         Assert.Contains("$12.50", tooltip, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(5, -1)]
+    [InlineData(10, 0)]
+    [InlineData(29.9, 0)]
+    [InlineData(30, 1)]
+    [InlineData(209, 9)]
+    [InlineData(210, -1)]
+    public void ThePointer_FindsTheDayBandUnderIt(double x, int expected)
+    {
+        Assert.Equal(expected, StackedColumnChartControl.BandAt(x, plotLeft: 10, bandWidth: 20, count: 10));
+    }
 }

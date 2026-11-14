@@ -4,14 +4,18 @@ using AIMonitor.Application.Settings;
 
 namespace AIMonitor.Presentation.Avalonia.ViewModels;
 
-/// <summary>One service's "monitor this" switch on the settings page.</summary>
-public sealed class ProviderToggle(string providerId, string displayName, bool enabled) : ObservableObject
+/// <summary>One service's "monitor this" switch on the settings page, with what the service offers under it.</summary>
+public sealed class ProviderToggle(string providerId, string displayName, bool enabled, string hint = "") : ObservableObject
 {
     private bool _enabled = enabled;
 
     public string ProviderId { get; } = providerId;
 
     public string DisplayName { get; } = displayName;
+
+    public string Hint { get; } = hint;
+
+    public bool HasHint => Hint.Length > 0;
 
     public bool Enabled
     {
@@ -23,9 +27,11 @@ public sealed class ProviderToggle(string providerId, string displayName, bool e
 /// <summary>
 /// The settings page.
 ///
-/// Nothing is applied while the page is open: every field edits a copy, Save writes that copy, and
-/// Cancel throws it away. That is what makes "Cancel puts everything back" true by construction
-/// rather than by remembering to undo each field.
+/// Every field edits a copy, Save writes that copy, and Cancel throws it away. The appearance
+/// fields (theme, widget opacity and always-on-top, window size, budgets) are also previewed live
+/// through <c>applyPreview</c> while the page is open, as on Windows (PAR-027); Cancel previews the
+/// settings the page opened with, which puts the screen back. Nothing reaches the settings file
+/// before Save.
 /// </summary>
 public sealed class SettingsViewModel : ObservableObject
 {
@@ -40,30 +46,39 @@ public sealed class SettingsViewModel : ObservableObject
     private double _widgetOpacity;
     private bool _widgetAlwaysOnTop;
     private bool _widgetRotationEnabled;
-    private int _chartRangeDays;
+    private WindowSizeOption _selectedWindowSize;
     private bool _isSaving;
     private bool _hasBudgetError;
+    private string _saveError = string.Empty;
+    private readonly Action<AppSettings>? _applyPreview;
+    private bool _finished;
 
     /// <param name="knownAgents">Agents ccusage has reported, so each gets a budget row; OpenCode always does.</param>
-    public SettingsViewModel(SettingsSession session, IReadOnlyList<string>? knownAgents = null)
+    /// <param name="applyPreview">Shows appearance settings on screen without saving them.</param>
+    public SettingsViewModel(
+        SettingsSession session,
+        IReadOnlyList<string>? knownAgents = null,
+        Action<AppSettings>? applyPreview = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _original = session.Current;
+        _applyPreview = applyPreview;
 
         Providers = [.. ProviderCatalog.All.Select(provider => new ProviderToggle(
             provider.Id,
             provider.DisplayName,
-            _original.Providers.TryGetValue(provider.Id, out var preference) ? preference.Enabled : true))];
+            _original.Providers.TryGetValue(provider.Id, out var preference) ? preference.Enabled : true,
+            provider.Tagline.Length > 0 ? provider.Tagline : "Sign-in is managed on the Connections page."))];
 
         _theme = _original.Theme;
         _startAtLogin = _original.StartWithWindows;
         _minimizeToMenuBar = _original.MinimizeToTray;
         _showMenuBarExtra = _original.ShowTrayIcon;
         _refreshIntervalText = _original.RefreshIntervalSeconds.ToString(CultureInfo.InvariantCulture);
-        _widgetOpacity = _original.WidgetOpacity;
+        _widgetOpacity = Math.Clamp(_original.WidgetOpacity, MinimumOpacity, 1.0);
         _widgetAlwaysOnTop = _original.WidgetAlwaysOnTop;
         _widgetRotationEnabled = _original.WidgetRotationEnabled;
-        _chartRangeDays = _original.ChartRangeDays;
+        _selectedWindowSize = WindowSizeOption.FromSize(_original.DashboardWidth, _original.DashboardHeight);
 
         BudgetRows = CreateBudgetRows(knownAgents);
         _hasBudgetError = BudgetRows.Any(row => row.HasError);
@@ -94,15 +109,60 @@ public sealed class SettingsViewModel : ObservableObject
         }
     }
 
-    public IReadOnlyList<string> Themes { get; } = ["system", "light", "dark"];
+    /// <summary>The lowest widget opacity, the floor the settings file holds it to as well.</summary>
+    public const double MinimumOpacity = 0.25;
 
-    public IReadOnlyList<int> ChartRanges { get; } = [7, 14, 30, 90];
+    public IReadOnlyList<DashboardOption<string>> ThemeOptions { get; } =
+    [
+        new("Follow macOS · default", "system"),
+        new("Light", "light"),
+        new("Dark", "dark"),
+    ];
 
     public string Theme
     {
         get => _theme;
-        set => Set(ref _theme, value);
+        set
+        {
+            if (!Set(ref _theme, value)) return;
+            Raise(nameof(SelectedThemeOption));
+            ApplyPreview();
+        }
     }
+
+    public DashboardOption<string> SelectedThemeOption
+    {
+        get => DashboardOptions.Find(ThemeOptions, _theme, 0);
+        set
+        {
+            if (value is not null) Theme = value.Value;
+        }
+    }
+
+    public IReadOnlyList<WindowSizeOption> WindowSizeOptions => WindowSizeOption.All;
+
+    /// <summary>A size picked here is applied to the dashboard straight away; "Remember last size"
+    /// keeps whatever it was dragged to.</summary>
+    public WindowSizeOption SelectedWindowSize
+    {
+        get => _selectedWindowSize;
+        set
+        {
+            if (Set(ref _selectedWindowSize, value ?? WindowSizeOption.Standard)) ApplyPreview();
+        }
+    }
+
+    /// <summary>Why the last Save did not go through, shown on the page.</summary>
+    public string SaveError
+    {
+        get => _saveError;
+        private set
+        {
+            if (Set(ref _saveError, value)) Raise(nameof(HasSaveError));
+        }
+    }
+
+    public bool HasSaveError => _saveError.Length > 0;
 
     /// <summary>Named for what macOS calls it; the stored field is shared with the Windows build.</summary>
     public bool StartAtLogin
@@ -150,7 +210,9 @@ public sealed class SettingsViewModel : ObservableObject
         get => _widgetOpacity;
         set
         {
-            if (Set(ref _widgetOpacity, value)) Raise(nameof(OpacityPercent));
+            if (!Set(ref _widgetOpacity, Math.Clamp(value, MinimumOpacity, 1.0))) return;
+            Raise(nameof(OpacityPercent));
+            ApplyPreview();
         }
     }
 
@@ -159,19 +221,16 @@ public sealed class SettingsViewModel : ObservableObject
     public bool WidgetAlwaysOnTop
     {
         get => _widgetAlwaysOnTop;
-        set => Set(ref _widgetAlwaysOnTop, value);
+        set
+        {
+            if (Set(ref _widgetAlwaysOnTop, value)) ApplyPreview();
+        }
     }
 
     public bool WidgetRotationEnabled
     {
         get => _widgetRotationEnabled;
         set => Set(ref _widgetRotationEnabled, value);
-    }
-
-    public int ChartRangeDays
-    {
-        get => _chartRangeDays;
-        set => Set(ref _chartRangeDays, value);
     }
 
     public bool IsSaving
@@ -186,6 +245,7 @@ public sealed class SettingsViewModel : ObservableObject
         if (HasIntervalError || HasBudgetError) return;
 
         IsSaving = true;
+        SaveError = string.Empty;
         try
         {
             var interval = int.Parse(_refreshIntervalText.Trim(), CultureInfo.InvariantCulture);
@@ -207,17 +267,20 @@ public sealed class SettingsViewModel : ObservableObject
                 WidgetOpacity = _widgetOpacity,
                 WidgetAlwaysOnTop = _widgetAlwaysOnTop,
                 WidgetRotationEnabled = _widgetRotationEnabled,
-                ChartRangeDays = _chartRangeDays,
+                DashboardWidth = _selectedWindowSize.Width,
+                DashboardHeight = _selectedWindowSize.Height,
                 Providers = providers,
                 AgentBudgets = BuildBudgets(),
             }).ConfigureAwait(true);
 
             _original = _session.Current;
+            _finished = true;
             RequestClose?.Invoke(true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            SaveFailed?.Invoke($"Could not save your settings: {exception.Message}");
+            SaveError = $"Could not save your settings: {exception.Message}";
+            SaveFailed?.Invoke(SaveError);
         }
         finally
         {
@@ -228,6 +291,19 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>Puts every field back to what it was when the page opened, then closes it.</summary>
     public void Cancel()
     {
+        Discard();
+        RequestClose?.Invoke(false);
+    }
+
+    /// <summary>
+    /// Undoes the preview: also what closing the window any other way than Save does. Does nothing
+    /// after a Save, or while one is being written.
+    /// </summary>
+    public void Discard()
+    {
+        if (_finished || IsSaving) return;
+        _finished = true;
+
         Theme = _original.Theme;
         StartAtLogin = _original.StartWithWindows;
         MinimizeToMenuBar = _original.MinimizeToTray;
@@ -236,7 +312,7 @@ public sealed class SettingsViewModel : ObservableObject
         WidgetOpacity = _original.WidgetOpacity;
         WidgetAlwaysOnTop = _original.WidgetAlwaysOnTop;
         WidgetRotationEnabled = _original.WidgetRotationEnabled;
-        ChartRangeDays = _original.ChartRangeDays;
+        SelectedWindowSize = WindowSizeOption.FromSize(_original.DashboardWidth, _original.DashboardHeight);
 
         foreach (var toggle in Providers)
         {
@@ -249,7 +325,32 @@ public sealed class SettingsViewModel : ObservableObject
             row.Text = BudgetText(row.Agent);
         }
 
-        RequestClose?.Invoke(false);
+        _applyPreview?.Invoke(_session.Current with
+        {
+            Theme = _original.Theme,
+            WidgetOpacity = _original.WidgetOpacity,
+            WidgetAlwaysOnTop = _original.WidgetAlwaysOnTop,
+            DashboardWidth = _original.DashboardWidth,
+            DashboardHeight = _original.DashboardHeight,
+            AgentBudgets = _original.AgentBudgets,
+        });
+    }
+
+    private void ApplyPreview()
+    {
+        // Constructor assignments go straight to the fields, so this only runs for real edits;
+        // after Save or Cancel the screen already shows what it should.
+        if (_finished || _applyPreview is null || BudgetRows is null) return;
+
+        _applyPreview(_session.Current with
+        {
+            Theme = _theme,
+            WidgetOpacity = _widgetOpacity,
+            WidgetAlwaysOnTop = _widgetAlwaysOnTop,
+            DashboardWidth = _selectedWindowSize.Width,
+            DashboardHeight = _selectedWindowSize.Height,
+            AgentBudgets = BuildBudgets(),
+        });
     }
 
     private List<AgentBudgetRowViewModel> CreateBudgetRows(IReadOnlyList<string>? knownAgents)
@@ -266,7 +367,13 @@ public sealed class SettingsViewModel : ObservableObject
             .OrderBy(entry => string.Equals(entry.Agent, "opencode", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(entry => entry.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(entry => new AgentBudgetRowViewModel(
-                entry.Agent, entry.DisplayName, BudgetText(entry.Agent), () => HasBudgetError = BudgetRows.Any(row => row.HasError)))];
+                entry.Agent, entry.DisplayName, BudgetText(entry.Agent), OnBudgetEdited))];
+    }
+
+    private void OnBudgetEdited()
+    {
+        HasBudgetError = BudgetRows.Any(row => row.HasError);
+        if (!HasBudgetError) ApplyPreview();
     }
 
     private string BudgetText(string agent) =>

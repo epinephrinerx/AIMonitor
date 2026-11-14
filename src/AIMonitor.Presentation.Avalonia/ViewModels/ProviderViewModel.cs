@@ -176,6 +176,16 @@ public sealed class ProviderViewModel : ObservableObject
         private set => Set(ref _fetchedAt, value);
     }
 
+    private bool _hasSnapshot;
+
+    /// <summary>True once the service has answered at least once, configured or not; the widget only
+    /// leaves out unconfigured services after it knows which those are.</summary>
+    public bool HasSnapshot
+    {
+        get => _hasSnapshot;
+        private set => Set(ref _hasSnapshot, value);
+    }
+
     /// <summary>Day buckets for the stacked chart, oldest first.</summary>
     public IReadOnlyList<UsageHistoryBucket> ChartBuckets
     {
@@ -310,6 +320,7 @@ public sealed class ProviderViewModel : ObservableObject
         {
             Configured = false;
             ErrorMessage = string.Empty;
+            HasSnapshot = false;
             return;
         }
 
@@ -340,7 +351,8 @@ public sealed class ProviderViewModel : ObservableObject
         ApplyHistory(snapshot.History);
 
         var lead = Meters.FirstOrDefault(meter => meter.HasPercent);
-        TabTitle = lead is null ? Title : $"{Title} {lead.ValueText}";
+        // R-016 I14: the Overview's caption is always plain "Overview", never "Overview NN%".
+        TabTitle = lead is null || IsOverview ? Title : $"{Title} {lead.ValueText}";
 
         Account = snapshot.Account.Length > 0
             ? snapshot.Account
@@ -348,6 +360,9 @@ public sealed class ProviderViewModel : ObservableObject
 
         Raise(nameof(HasStats));
         Raise(nameof(ShowSetupHint));
+        // Last, so whoever is watching for it sees the meters already in place.
+        HasSnapshot = true;
+        Raise(nameof(Meters));
     }
 
     private void ApplyHistory(UsageHistory? history)
@@ -428,6 +443,20 @@ public sealed class MeterViewModel
         var described = SeverityLabels.Describe(Severity);
         SeverityText = $"{described.Glyph} {described.Label}";
         ResetText = FormatReset(meter, now, timeZone);
+        ResetCompact = FormatResetCompact(meter, now, timeZone);
+    }
+
+    /// <summary>The widget's reset line: "resets in 2h 5m  ·  17:50", or the lock reason.</summary>
+    public string ResetCompact { get; }
+
+    private static string FormatResetCompact(Meter meter, DateTimeOffset now, TimeZoneInfo timeZone)
+    {
+        if (!string.IsNullOrEmpty(meter.LockedReason)) return meter.LockedReason;
+
+        var display = ResetDisplayFormatter.Format(meter.ResetsAt, now, timeZone);
+        if (display is null) return "no reset scheduled";
+
+        return display.Countdown == "now" ? "resetting now" : $"resets in {display.Countdown}  ·  {display.LocalTime}";
     }
 
     public string Kind { get; }

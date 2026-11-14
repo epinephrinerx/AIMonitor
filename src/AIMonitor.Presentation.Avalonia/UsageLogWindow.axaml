@@ -13,6 +13,7 @@
       <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}"
                  VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
       <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button Content="Print…" Command="{Binding PrintCommand}" MinWidth="88" ToolTip.Tip="Opens the log as a page and asks to print it (⌘P)" />
         <Button Content="Save a copy…" Command="{Binding SaveAsCommand}" MinWidth="110" />
         <Button Content="Close" Command="{Binding CloseCommand}" IsCancel="True" MinWidth="88" />
       </StackPanel>

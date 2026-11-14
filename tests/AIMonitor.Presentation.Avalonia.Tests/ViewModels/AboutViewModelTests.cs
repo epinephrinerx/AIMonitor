@@ -134,4 +134,36 @@ public sealed class AboutViewModelTests
 
         Assert.Equal("https://github.com/epinephrinerx/AIMonitor/releases", asked);
     }
+
+    [Fact]
+    public void HasTheSamePagesAsTheWindowsAboutMenu()
+    {
+        Assert.Equal(
+            [AboutPage.About, AboutPage.Readme, AboutPage.License, AboutPage.Notices, AboutPage.Developer],
+            Enum.GetValues<AboutPage>());
+    }
+
+    [Fact]
+    public void OpeningOnAPage_SelectsItsTab()
+    {
+        var about = new AboutViewModel();
+
+        about.SelectedPage = AboutPage.Developer;
+
+        Assert.Equal(4, about.SelectedPageIndex);
+        about.SelectedPageIndex = 1;
+        Assert.Equal(AboutPage.Readme, about.SelectedPage);
+    }
+
+    [Fact]
+    public void TheReadmeAndDeveloperPages_SayWhatTheAppIsAndWhoMadeIt()
+    {
+        var about = new AboutViewModel();
+
+        Assert.Contains("macOS Edition", about.ReadmeText, StringComparison.Ordinal);
+        Assert.Contains("Keychain", about.ReadmeText, StringComparison.Ordinal);
+        Assert.Contains("never sends your usage anywhere", about.DeveloperBlurb, StringComparison.Ordinal);
+        Assert.Contains("Claude Code (Anthropic)", about.AssistantsBlurb, StringComparison.Ordinal);
+        Assert.Contains("GPL-3.0-or-later", about.LicenseFooter, StringComparison.Ordinal);
+    }
 }

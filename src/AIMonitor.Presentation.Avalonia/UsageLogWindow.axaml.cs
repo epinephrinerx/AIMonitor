@@ -15,7 +15,29 @@ public sealed partial class UsageLogWindow : Window
             if (DataContext is not UsageLogViewModel model) return;
             model.CloseRequested += Close;
             model.SaveRequested += () => _ = SaveAsync(model);
+            model.PrintRequested += () => Print(model);
         };
+    }
+
+    /// <summary>
+    /// Writes the print page to a private temporary folder and opens it, which brings up the print
+    /// dialog. The file holds only what is already on screen; it is replaced on the next print.
+    /// </summary>
+    internal static void Print(UsageLogViewModel model)
+    {
+        try
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "AIUsageMonitor");
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, "usage-log-print.html");
+            File.WriteAllText(path, model.RenderPrintPage());
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            model.ReportPrintFailed(exception.Message);
+        }
     }
 
     /// <summary>The file picker belongs to the window, so the view model stays testable without one.</summary>

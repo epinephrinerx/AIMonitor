@@ -39,7 +39,7 @@ public sealed class SettingsViewModelTests
         Assert.True(model.StartAtLogin);
         Assert.Equal("180", model.RefreshIntervalText);
         Assert.Equal(0.92, model.WidgetOpacity);
-        Assert.Equal(14, model.ChartRangeDays);
+        Assert.Same(WindowSizeOption.Standard, model.SelectedWindowSize);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class SettingsViewModelTests
         model.WidgetOpacity = 0.4;
         model.WidgetAlwaysOnTop = false;
         model.WidgetRotationEnabled = false;
-        model.ChartRangeDays = 90;
+        model.SelectedWindowSize = WindowSizeOption.Wide;
         foreach (var toggle in model.Providers)
         {
             toggle.Enabled = !toggle.Enabled;
@@ -80,7 +80,7 @@ public sealed class SettingsViewModelTests
         Assert.Equal(0.92, model.WidgetOpacity);
         Assert.True(model.WidgetAlwaysOnTop);
         Assert.True(model.WidgetRotationEnabled);
-        Assert.Equal(14, model.ChartRangeDays);
+        Assert.Same(WindowSizeOption.Standard, model.SelectedWindowSize);
         Assert.True(model.Providers.Single(p => p.ProviderId == "claude").Enabled);
         Assert.False(model.Providers.Single(p => p.ProviderId == "openai").Enabled);
 
@@ -127,7 +127,7 @@ public sealed class SettingsViewModelTests
         model.WidgetOpacity = 0.4;
         model.WidgetAlwaysOnTop = false;
         model.WidgetRotationEnabled = false;
-        model.ChartRangeDays = 30;
+        model.SelectedWindowSize = WindowSizeOption.Compact;
         await model.SaveAsync();
         await session.FlushAsync();
 
@@ -140,7 +140,7 @@ public sealed class SettingsViewModelTests
         Assert.Equal(0.4, saved.WidgetOpacity);
         Assert.False(saved.WidgetAlwaysOnTop);
         Assert.False(saved.WidgetRotationEnabled);
-        Assert.Equal(30, saved.ChartRangeDays);
+        Assert.Equal((960, 680), (saved.DashboardWidth, saved.DashboardHeight));
     }
 
     [Fact]
@@ -228,5 +228,114 @@ public sealed class SettingsViewModelTests
         model.WidgetOpacity = 0.455;
 
         Assert.Equal(46, model.OpacityPercent);
+    }
+
+    // ---- Parity with the Windows settings page (PAR-026/027) ----
+
+    private static async Task<(SettingsViewModel Model, SettingsSession Session, List<AppSettings> Previews)> BuildWithPreviewAsync()
+    {
+        var session = await SettingsSession.CreateAsync(new InMemorySettingsStore(Original));
+        var previews = new List<AppSettings>();
+        return (new SettingsViewModel(session, applyPreview: previews.Add), session, previews);
+    }
+
+    [Fact]
+    public async Task Opening_PreviewsNothing()
+    {
+        var (_, _, previews) = await BuildWithPreviewAsync();
+
+        Assert.Empty(previews);
+    }
+
+    [Fact]
+    public async Task AppearanceEdits_ArePreviewedAtOnce_WithoutSaving()
+    {
+        var (model, session, previews) = await BuildWithPreviewAsync();
+
+        model.Theme = "light";
+        model.WidgetOpacity = 0.5;
+        model.WidgetAlwaysOnTop = false;
+        model.SelectedWindowSize = WindowSizeOption.Wide;
+
+        var last = previews[^1];
+        Assert.Equal("light", last.Theme);
+        Assert.Equal(0.5, last.WidgetOpacity);
+        Assert.False(last.WidgetAlwaysOnTop);
+        Assert.Equal((1400, 900), (last.DashboardWidth, last.DashboardHeight));
+        Assert.Equal("dark", session.Current.Theme);
+    }
+
+    [Fact]
+    public async Task Cancel_PreviewsTheSettingsThePageOpenedWith()
+    {
+        var (model, _, previews) = await BuildWithPreviewAsync();
+        model.Theme = "light";
+        model.SelectedWindowSize = WindowSizeOption.Compact;
+
+        model.Cancel();
+
+        var last = previews[^1];
+        Assert.Equal("dark", last.Theme);
+        Assert.Equal((1120, 820), (last.DashboardWidth, last.DashboardHeight));
+    }
+
+    [Fact]
+    public async Task ClosingAfterSave_DoesNotUndoWhatWasSaved()
+    {
+        var (model, _, previews) = await BuildWithPreviewAsync();
+        model.Theme = "light";
+        await model.SaveAsync();
+        var count = previews.Count;
+
+        model.Discard();
+
+        Assert.Equal(count, previews.Count);
+    }
+
+    [Fact]
+    public async Task ThemeChoices_UseTheirMacNames()
+    {
+        var (model, _, _) = await BuildAsync();
+
+        Assert.Equal(["Follow macOS · default", "Light", "Dark"], model.ThemeOptions.Select(option => option.Label));
+        Assert.Equal("dark", model.SelectedThemeOption.Value);
+        model.SelectedThemeOption = model.ThemeOptions[0];
+        Assert.Equal("system", model.Theme);
+    }
+
+    [Fact]
+    public async Task Opacity_IsHeldAtTheSameFloorAsTheSettingsFile()
+    {
+        var (model, _, _) = await BuildAsync();
+
+        model.WidgetOpacity = 0.1;
+
+        Assert.Equal(SettingsViewModel.MinimumOpacity, model.WidgetOpacity);
+    }
+
+    [Fact]
+    public async Task EachServiceSwitch_SaysWhatTheServiceOffers()
+    {
+        var (model, _, _) = await BuildAsync();
+
+        Assert.Equal("Claude Code · full quota · optional API usage", model.Providers.Single(p => p.ProviderId == "claude").Hint);
+        Assert.All(model.Providers, toggle => Assert.True(toggle.HasHint));
+    }
+
+    [Fact]
+    public async Task AFailedSave_IsShownOnThePage_AndTheWindowStaysOpen()
+    {
+        var store = new InMemorySettingsStore(Original) { FailSaves = true };
+        var session = await SettingsSession.CreateAsync(store);
+        var model = new SettingsViewModel(session);
+        bool? closed = null;
+        model.RequestClose += result => closed = result;
+
+        model.Theme = "light";
+        await model.SaveAsync();
+
+        Assert.True(model.HasSaveError);
+        Assert.StartsWith("Could not save your settings", model.SaveError, StringComparison.Ordinal);
+        Assert.Null(closed);
     }
 }

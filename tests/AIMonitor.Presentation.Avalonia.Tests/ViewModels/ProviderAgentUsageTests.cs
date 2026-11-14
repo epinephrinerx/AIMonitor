@@ -104,4 +104,24 @@ public sealed class ProviderAgentUsageTests
 
         Assert.Equal([days[0], days[2]], claude.ChartCosts.Select(cost => cost.Day));
     }
+
+    [Fact]
+    public void TheOverviewTab_IsAlwaysCalledJustOverview()
+    {
+        var overview = new ProviderViewModel(OverviewSnapshotBuilder.ProviderId, "Overview");
+
+        overview.Apply(TestData.Snapshot(OverviewSnapshotBuilder.ProviderId, meters: [TestData.Meter(percent: 64)]));
+
+        Assert.Equal("Overview", overview.TabTitle);
+    }
+
+    [Fact]
+    public void AServiceTab_CarriesItsLeadReading()
+    {
+        var claude = new ProviderViewModel("claude", "Claude");
+
+        claude.Apply(TestData.Snapshot(meters: [TestData.Meter(percent: 64)]));
+
+        Assert.Equal("Claude 64%", claude.TabTitle);
+    }
 }

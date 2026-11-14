@@ -15,6 +15,46 @@ namespace AIMonitor.Presentation.Avalonia.Controls;
 /// </summary>
 public sealed class StackedColumnChartControl : Control
 {
+    private double _plotLeft;
+    private double _bandWidth;
+    private int _hoverIndex = -1;
+
+    /// <summary>The day under the pointer: its per-model split, total and cost, as on Windows (R-017).</summary>
+    protected override void OnPointerMoved(global::Avalonia.Input.PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var index = BandAt(e.GetPosition(this).X, _plotLeft, _bandWidth, Buckets?.Count ?? 0);
+        if (index == _hoverIndex) return;
+
+        _hoverIndex = index;
+        if (index >= 0 && Buckets is { } buckets)
+        {
+            ToolTip.SetTip(this, TooltipText(buckets[index], Series ?? [], Metric, Costs));
+            ToolTip.SetIsOpen(this, true);
+        }
+        else
+        {
+            ToolTip.SetIsOpen(this, false);
+            ToolTip.SetTip(this, null);
+        }
+    }
+
+    protected override void OnPointerExited(global::Avalonia.Input.PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        _hoverIndex = -1;
+        ToolTip.SetIsOpen(this, false);
+        ToolTip.SetTip(this, null);
+    }
+
+    /// <summary>The day band at <paramref name="x"/>, or -1 outside the plot.</summary>
+    internal static int BandAt(double x, double plotLeft, double bandWidth, int count)
+    {
+        if (count <= 0 || bandWidth <= 0 || x < plotLeft) return -1;
+        var index = (int)((x - plotLeft) / bandWidth);
+        return index < count ? index : -1;
+    }
+
     private const double BarMaxThickness = 24.0;
     private const double DataEndRadius = 4.0;
     private const double SurfaceGap = 2.0;
@@ -201,6 +241,9 @@ public sealed class StackedColumnChartControl : Control
         }
 
         var bandWidth = plot.Width / buckets.Count;
+        // Kept for the pointer: which day a horizontal position falls on.
+        _plotLeft = plot.Left;
+        _bandWidth = bandWidth;
         var thickness = Math.Max(3.0, Math.Min(BarMaxThickness, bandWidth - 4.0));
 
         for (var index = 0; index < buckets.Count; index++)

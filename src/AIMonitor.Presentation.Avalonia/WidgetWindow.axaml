@@ -12,90 +12,105 @@
         Opacity="{Binding Opacity}"
         Background="Transparent"
         TransparencyLevelHint="Transparent"
-        Width="240" Height="180"
-        MinWidth="180" MinHeight="110"
-        MaxWidth="360" MaxHeight="320">
+        Width="230" Height="175"
+        MinWidth="150" MinHeight="96"
+        MaxWidth="300" MaxHeight="300">
 
   <Window.Styles>
     <Style Selector="TextBlock.caption">
       <Setter Property="Opacity" Value="0.65" />
-      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontSize" Value="10" />
     </Style>
     <Style Selector="Button.page">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Padding" Value="5,0" />
       <Setter Property="FontSize" Value="15" />
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
+    <Style Selector="TextBlock.lead.sev-high">
+      <Setter Property="Foreground" Value="{StaticResource SeverityHighBrush}" />
+    </Style>
+    <Style Selector="TextBlock.lead.sev-veryhigh">
+      <Setter Property="Foreground" Value="{StaticResource SeverityVeryHighBrush}" />
+    </Style>
+    <Style Selector="TextBlock.lead.sev-critical">
+      <Setter Property="Foreground" Value="{StaticResource SeverityCriticalBrush}" />
+    </Style>
+    <Style Selector="TextBlock.lead.sev-normal">
+      <Setter Property="Opacity" Value="0.7" />
+    </Style>
   </Window.Styles>
 
-  <!-- The whole card is the drag handle: a frameless window has no title bar to grab. -->
+  <!-- The whole card is the drag handle: a frameless window has no title bar to grab. The menu is
+       built when it opens (code-behind), so its check marks always match what is on show. -->
   <Border Name="Root"
           Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
           BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
           BorderThickness="1"
           CornerRadius="10"
-          Padding="10"
+          Padding="11"
           PointerPressed="OnPointerPressed"
           DoubleTapped="OnDoubleTapped">
 
-    <Border.ContextMenu>
-      <ContextMenu>
-        <MenuItem Header="Open AI Usage Monitor" Command="{Binding ExpandCommand}" />
-        <MenuItem Header="Refresh now" Command="{Binding RefreshCommand}" />
-        <Separator />
-        <MenuItem Header="Keep this service in view" Click="OnTogglePin" Name="PinItem" />
-        <Separator />
-        <MenuItem Header="Quit AI Usage Monitor" Command="{Binding QuitCommand}" />
-      </ContextMenu>
-    </Border.ContextMenu>
-
     <DockPanel LastChildFill="True">
 
-      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
-        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12"
-                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-        <StackPanel Grid.Column="1" Orientation="Horizontal" IsVisible="{Binding CanPage}">
-          <Button Classes="page" Content="&#x2039;" Command="{Binding PreviousCommand}"
-                  ToolTip.Tip="Previous service" />
-          <Button Classes="page" Content="&#x203A;" Command="{Binding NextCommand}"
-                  ToolTip.Tip="Next service" />
-        </StackPanel>
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,5">
+        <Button Classes="page" Content="&#x2039;" Command="{Binding PreviousCommand}"
+                IsVisible="{Binding CanPage}" ToolTip.Tip="Previous service" />
+        <TextBlock Grid.Column="1" Name="HeaderText" Text="{Binding Title}" FontWeight="SemiBold" FontSize="12"
+                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Center" />
+        <Button Grid.Column="2" Classes="page" Content="&#x203A;" Command="{Binding NextCommand}"
+                IsVisible="{Binding CanPage}" ToolTip.Tip="Next service" />
       </Grid>
 
-      <TextBlock DockPanel.Dock="Bottom" Classes="caption" Margin="0,6,0,0"
-                 Text="Double-click to open · right-click for options" TextTrimming="CharacterEllipsis" />
+      <TextBlock DockPanel.Dock="Bottom" Classes="caption" Text="{Binding StatusText}"
+                 IsVisible="{Binding ShowFooter}" HorizontalAlignment="Center" Margin="0,4,0,0" />
 
       <Panel>
-        <TextBlock Classes="caption" Text="{Binding EmptyMessage}"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   TextWrapping="Wrap" TextAlignment="Center">
-          <TextBlock.IsVisible>
-            <Binding Path="HasMeters" Converter="{x:Static BoolConverters.Not}" />
-          </TextBlock.IsVisible>
-        </TextBlock>
+        <TextBlock Classes="caption" Text="Too small to show the meters."
+                   IsVisible="{Binding IsTooSmall}" FontSize="11"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
 
-        <!-- The same dials as the dashboard, shrunk: the widget is a glance, not a second page. -->
-        <ItemsControl ItemsSource="{Binding VisibleMeters}" IsVisible="{Binding HasMeters}"
-                      HorizontalAlignment="Center" VerticalAlignment="Center">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" Spacing="2" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:MeterViewModel">
-              <controls:GaugeControl Width="72" Height="86"
-                                     Value="{Binding PercentOrZero}"
-                                     ValueText="{Binding ValueText}"
-                                     HasValue="{Binding HasPercent}"
-                                     Title="{Binding Title}"
-                                     Severity="{Binding Severity}"
-                                     ToolTip.Tip="{Binding ResetText}" />
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <TextBlock Classes="caption" Text="{Binding EmptyMessage}" IsVisible="{Binding HasEmptyMessage}" FontSize="11"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+
+        <StackPanel IsVisible="{Binding HasMeters}" VerticalAlignment="Top">
+          <!-- The same dials as the dashboard, shrunk; how many fit is decided by the width. -->
+          <ItemsControl Name="Gauges" ItemsSource="{Binding VisibleMeters}" HorizontalAlignment="Center">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="6" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MeterViewModel">
+                <StackPanel Width="{Binding $parent[ItemsControl].((vm:WidgetViewModel)DataContext).Cell}"
+                            ToolTip.Tip="{Binding ResetText}">
+                  <controls:GaugeControl HorizontalAlignment="Center"
+                                         Width="{Binding $parent[ItemsControl].((vm:WidgetViewModel)DataContext).ArcSize}"
+                                         Height="{Binding $parent[ItemsControl].((vm:WidgetViewModel)DataContext).ArcSize}"
+                                         Value="{Binding PercentOrZero}"
+                                         ValueText="{Binding ValueText}"
+                                         HasValue="{Binding HasPercent}"
+                                         Severity="{Binding Severity}" />
+                  <TextBlock Text="{Binding GaugeTitle}" FontSize="10" FontWeight="SemiBold" Margin="0,2,0,0"
+                             HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="caption" Text="{Binding Subtitle}" HorizontalAlignment="Center"
+                             TextTrimming="CharacterEllipsis"
+                             IsVisible="{Binding $parent[ItemsControl].((vm:WidgetViewModel)DataContext).ShowSubtitle}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <TextBlock Classes="lead" Text="{Binding LeadHeadText}" IsVisible="{Binding ShowLeadHead}" FontSize="10"
+                     Margin="0,4,0,0" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"
+                     Classes.sev-normal="{Binding IsLeadNormal}" Classes.sev-high="{Binding IsLeadHigh}"
+                     Classes.sev-veryhigh="{Binding IsLeadVeryHigh}" Classes.sev-critical="{Binding IsLeadCritical}" />
+          <TextBlock Classes="caption" Text="{Binding ResetLineText}" IsVisible="{Binding ShowResetLine}"
+                     HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
       </Panel>
 
     </DockPanel>

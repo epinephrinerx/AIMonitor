@@ -35,6 +35,7 @@ internal sealed class PlatformHost : IAsyncDisposable
     private readonly ISingleInstanceCoordinator _singleInstance;
     private HttpClient? _httpClient;
     private LatestRefreshCoordinator? _refreshCoordinator;
+    private SettingsSession? _settings;
     private bool _ownsSingleInstance;
 
     private PlatformHost(ISingleInstanceCoordinator singleInstance) => _singleInstance = singleInstance;
@@ -102,6 +103,7 @@ internal sealed class PlatformHost : IAsyncDisposable
         }
 
         var settings = await SettingsSession.CreateAsync(settingsStore).ConfigureAwait(false);
+        _settings = settings;
 
         try
         {
@@ -171,6 +173,22 @@ internal sealed class PlatformHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Settings are written out before the single-instance lock is let go, so a copy launched
+        // right after this one never reads a file that is still being written (as on Windows). The
+        // wait is bounded: quitting must not hang on a slow disk.
+        if (_settings is not null)
+        {
+            try
+            {
+                await _settings.FlushAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A save that failed or timed out cannot be helped while quitting. The session is
+                // not disposed either way: an unfinished write may still be using it.
+            }
+        }
+
         if (_refreshCoordinator is not null)
         {
             await _refreshCoordinator.DisposeAsync().ConfigureAwait(false);

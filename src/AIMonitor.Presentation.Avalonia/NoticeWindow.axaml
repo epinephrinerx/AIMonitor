@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AIMonitor.Presentation.Avalonia.NoticeWindow"
+        Width="380" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Name="Heading" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+    <TextBlock Name="Body" TextWrapping="Wrap" Opacity="0.8" />
+    <Button Content="OK" IsDefault="True" IsCancel="True" MinWidth="88" HorizontalAlignment="Right"
+            Click="OnOk" Margin="0,6,0,0" />
+  </StackPanel>
+</Window>
