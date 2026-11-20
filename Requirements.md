@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-14
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-20
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -354,6 +354,42 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **ความคืบหน้า:**
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
+
+## R-024 · พอร์ต AIMonitor 2.0 ลง Linux ด้วย Avalonia
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว |
+| วันที่ | 2026-11-20 |
+| แตะส่วนไหน | `src/AIMonitor.Infrastructure/PlatformAdapters.cs` · adapter ใหม่ของ Linux ใน `src/AIMonitor.Infrastructure/` · `tests/AIMonitor.Infrastructure.Tests/PlatformAdaptersTests.cs` และเทสต์ของ adapter ใหม่ |
+| เกี่ยวกับ | [[R-022]] พอร์ต macOS · [[R-023]] update ของ Mac Edition |
+
+**คุณระบุ:**
+> สร้าง branch ใหม่ ชื่อ linux โดยใช้ /startproject ดึงเอา requirement และ agent roster จาก main และดึง code จาก mac มารวมกับ ส่วนที่พัฒนาบน windows edition ครับ
+
+คุณรับรองร่างนี้ 2026-11-20 (ตอบ "รับรอง" ต่อการทวนตารางและร่างของ R-024)
+
+**ผมเข้าใจว่า:**
+Linux edition คือแอป Avalonia ตัวเดียวกับ macOS ที่รันบน Linux ได้ branch `linux` แตกจาก main แล้ว merge `origin/Mac` (commit `46a1142`) build ผ่านด้วย `AIMonitor.CrossPlatform.slnf` แต่ `dotnet test` ล้ม 4 ข้อใน `PlatformAdaptersTests` เพราะ `PlatformAdapters` มีแค่สาขา Windows กับ macOS แล้ว `throw Unsupported(...)` บน Linux งานคือเติมสาขา Linux สามจุด:
+- single-instance: ใช้ `LocalSocketSingleInstance` (Unix domain socket) ร่วมกับ macOS
+- secret store: ตัวปิดผนึกความลับสำหรับ Linux ใช้กับ sealed file store เดิม
+- startup: autostart ผ่านไฟล์ `.desktop` ใน `~/.config/autostart`
+
+**ไม่รวม:**
+- ไม่แก้ฝั่ง WPF และไม่เปลี่ยนพฤติกรรม Windows/macOS
+- ไม่ทำ tray หรือ menu bar บน Linux (`MenuBarHost` เป็นของ macOS) รอบนี้ให้แอปเปิดเป็นหน้าต่างปกติ
+- ไม่ทำแพ็กเกจ (.deb/AppImage) และไม่เพิ่ม CI ของ Linux
+- ไม่ตัดสินเรื่องการ update ของ Linux edition (R-023 ผูกกับสาขา Mac อยู่)
+
+**ตรวจรับเมื่อ:**
+- [ ] `dotnet build AIMonitor.CrossPlatform.slnf` บน Linux ผ่านโดยไม่มี warning
+- [ ] `PlatformAdaptersTests` ทั้ง 4 ข้อที่ล้มอยู่ผ่านบน Linux โดยไม่ลดทอนเทสต์ของ Windows/macOS
+- [ ] มีเทสต์ใหม่ของ adapter แต่ละตัวบน Linux (เขียนไฟล์ autostart และลบเมื่อปิด · seal/unseal ความลับแล้วได้ค่าเดิม · เปิดแอปซ้ำแล้ว activate ตัวเดิม)
+- [ ] ความลับที่บันทึกไม่อยู่เป็นข้อความธรรมดาบนดิสก์ และไฟล์กุญแจ (ถ้ามี) สิทธิ์ 0600
+- [ ] `dotnet test AIMonitor.CrossPlatform.slnf` บน Linux ไม่มีข้อล้ม
+- [ ] คุณรันแอป Avalonia บนเครื่อง Linux จริงแล้วเปิดหน้าหลักและเห็นข้อมูลได้ (ผมตรวจข้อนี้เองไม่ได้)
+
+**ความเสี่ยงที่เหลือ:** ถ้าใช้ libsecret ต้องมี Secret Service (GNOME Keyring/KWallet) ที่รันอยู่ บน session ที่ไม่มี (เช่น SSH ล้วน) จะใช้ไม่ได้ ต้องตัดสินว่าจะมี fallback เป็นไฟล์หรือไม่ก่อนลงมือ
 
 ## R-023 · ฟังก์ชัน update ของ Mac Edition ดึงเฉพาะ release จากสาขา Mac
 
