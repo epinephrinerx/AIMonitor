@@ -5,12 +5,12 @@
 ## 1. ข้อมูลโครงการ
 
 - ชื่อโครงการ: `AIMonitor 2.0`
-- เป้าหมาย: ย้าย AIMonitor จาก Python เป็น C# สำหรับ Windows โดยรักษาความสามารถหลักของรุ่นเดิม และใช้ความสามารถของ Windows/.NET ได้อย่างเหมาะสมมากขึ้น
+- เป้าหมาย: AIMonitor Linux edition — รวม Windows edition (WPF) กับ macOS edition (Avalonia) แล้วพอร์ตส่วนที่ผูกกับ OS (secret store, startup, tray, single-instance) ให้รันบน Linux (branch `linux`)
 - เจ้าของโครงการ: `Penguin Studio`
 - ผู้เขียนและผู้ดูแล: `Apichart Chantanis`
 - Production URL: `N/A`
 - Repository: `https://github.com/epinephrinerx/AIMonitor`
-- Package/runtime หลัก: `.NET 10 LTS สำหรับ Windows Desktop`
+- Package/runtime หลัก: `.NET 10 LTS (Windows Desktop สำหรับ WPF · cross-platform สำหรับ Avalonia/Linux)`
 - Package manager: `NuGet ผ่าน dotnet CLI`
 
 ### Agent Roster
