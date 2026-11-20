@@ -1114,7 +1114,10 @@ public sealed class ClaudeTranscriptStore
             return fallbackProject;
         }
 
-        return Path.GetFileName(cwd.TrimEnd('\\', '/'));
+        // Both separators, on every OS: Path.GetFileName splits only on '/' outside Windows, so a
+        // transcript recorded on Windows (C:\work\app) would otherwise be labelled with its whole path.
+        var trimmed = cwd.TrimEnd('\\', '/');
+        return trimmed[(trimmed.LastIndexOfAny(['\\', '/']) + 1)..];
     }
 
     /// <summary>Best-effort project label when a record carries no <c>cwd</c>. The directory encoding

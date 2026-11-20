@@ -1,0 +1,29 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AIMonitor.Presentation.Avalonia.ViewModels"
+        x:Class="AIMonitor.Presentation.Avalonia.UsageLogWindow"
+        x:DataType="vm:UsageLogViewModel"
+        Title="Usage log"
+        Width="760" Height="640"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel LastChildFill="True" Margin="18">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,14,0,0">
+      <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}"
+                 VerticalAlignment="Center" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+      <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button Content="Save a copy…" Command="{Binding SaveAsCommand}" MinWidth="110" />
+        <Button Content="Close" Command="{Binding CloseCommand}" IsCancel="True" MinWidth="88" />
+      </StackPanel>
+    </StackPanel>
+
+    <!-- Read-only and selectable: the log is for reading and copying, not editing. -->
+    <TextBox Text="{Binding Content, Mode=OneWay}"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="NoWrap"
+             FontFamily="Menlo, Monaco, monospace"
+             FontSize="12" />
+  </DockPanel>
+</Window>

@@ -1,10 +1,14 @@
+using System.Runtime.Versioning;
 using AIMonitor.Infrastructure.Windows;
 
 namespace AIMonitor.Infrastructure.Tests.Windows;
 
+/// <summary>Drives a real Windows named mutex and named pipe, so the whole class is skipped
+/// elsewhere. macOS gets its own coverage from the single-instance adapter written for it.</summary>
+[SupportedOSPlatform("windows")]
 public sealed class NamedMutexSingleInstanceTests
 {
-    [Fact]
+    [WindowsOnlyFact("the adapter holds a Windows named mutex and listens on a named pipe")]
     public async Task TryAcquireAsync_FirstInstance_AcquiresOwnership()
     {
         var testId = Guid.NewGuid().ToString("N");
@@ -18,7 +22,7 @@ public sealed class NamedMutexSingleInstanceTests
         Assert.True(coordinator.HasOwnership);
     }
 
-    [Fact]
+    [WindowsOnlyFact("the adapter holds a Windows named mutex and listens on a named pipe")]
     public async Task TryAcquireAsync_SecondInstance_ReturnsFalse()
     {
         var testId = Guid.NewGuid().ToString("N");
@@ -72,7 +76,7 @@ public sealed class NamedMutexSingleInstanceTests
         secondThread.Join();
     }
 
-    [Fact]
+    [WindowsOnlyFact("the adapter holds a Windows named mutex and listens on a named pipe")]
     public async Task NotifyExistingInstanceAsync_DeliversArgumentsToPrimaryInstance()
     {
         var testId = Guid.NewGuid().ToString("N");
@@ -138,7 +142,7 @@ public sealed class NamedMutexSingleInstanceTests
         secondaryThread.Join();
     }
 
-    [Fact]
+    [WindowsOnlyFact("the adapter holds a Windows named mutex and listens on a named pipe")]
     public async Task DisposeAsync_ReleasesMutex_AllowingSubsequentInstanceToAcquire()
     {
         var testId = Guid.NewGuid().ToString("N");
@@ -170,7 +174,7 @@ public sealed class NamedMutexSingleInstanceTests
         secondThread.Join();
     }
 
-    [Fact]
+    [WindowsOnlyFact("the adapter holds a Windows named mutex and listens on a named pipe")]
     public void TryAcquire_WhenAbandonedMutex_RecoversOwnershipSafely()
     {
         var testId = Guid.NewGuid().ToString("N");

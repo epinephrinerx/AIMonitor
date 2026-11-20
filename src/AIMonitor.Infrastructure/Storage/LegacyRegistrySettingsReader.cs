@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using AIMonitor.Application.Settings;
 using Microsoft.Win32;
 
@@ -8,6 +9,9 @@ public sealed class LegacyRegistrySettingsReader : ILegacySettingsReader
     public const string LegacyPath = @"Software\AIUsageMonitor\AIUsageMonitor";
     private readonly Func<IReadOnlyRegistryKey?> _openRoot;
 
+    /// <summary>Reads the real <c>HKCU</c> key, so it is Windows-only. Non-Windows callers use the
+    /// injecting constructor instead.</summary>
+    [SupportedOSPlatform("windows")]
     public LegacyRegistrySettingsReader()
         : this(OpenWindowsRoot)
     {
@@ -24,6 +28,7 @@ public sealed class LegacyRegistrySettingsReader : ILegacySettingsReader
         return values;
     }
 
+    [SupportedOSPlatform("windows")]
     private static IReadOnlyRegistryKey? OpenWindowsRoot()
     {
         var key = Registry.CurrentUser.OpenSubKey(LegacyPath, writable: false);
@@ -57,6 +62,7 @@ public sealed class LegacyRegistrySettingsReader : ILegacySettingsReader
         IReadOnlyRegistryKey? OpenSubKey(string name);
     }
 
+    [SupportedOSPlatform("windows")]
     private sealed class WindowsReadOnlyRegistryKey(RegistryKey key) : IReadOnlyRegistryKey
     {
         public IEnumerable<string> ValueNames => key.GetValueNames();

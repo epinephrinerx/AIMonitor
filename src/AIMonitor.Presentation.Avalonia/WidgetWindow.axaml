@@ -1,0 +1,103 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AIMonitor.Presentation.Avalonia.ViewModels"
+        xmlns:controls="using:AIMonitor.Presentation.Avalonia.Controls"
+        x:Class="AIMonitor.Presentation.Avalonia.WidgetWindow"
+        x:DataType="vm:WidgetViewModel"
+        Title="AI Usage Monitor widget"
+        WindowDecorations="None"
+        ShowInTaskbar="False"
+        CanResize="True"
+        Topmost="{Binding AlwaysOnTop}"
+        Opacity="{Binding Opacity}"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        Width="240" Height="180"
+        MinWidth="180" MinHeight="110"
+        MaxWidth="360" MaxHeight="320">
+
+  <Window.Styles>
+    <Style Selector="TextBlock.caption">
+      <Setter Property="Opacity" Value="0.65" />
+      <Setter Property="FontSize" Value="11" />
+    </Style>
+    <Style Selector="Button.page">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+  </Window.Styles>
+
+  <!-- The whole card is the drag handle: a frameless window has no title bar to grab. -->
+  <Border Name="Root"
+          Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+          BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+          BorderThickness="1"
+          CornerRadius="10"
+          Padding="10"
+          PointerPressed="OnPointerPressed"
+          DoubleTapped="OnDoubleTapped">
+
+    <Border.ContextMenu>
+      <ContextMenu>
+        <MenuItem Header="Open AI Usage Monitor" Command="{Binding ExpandCommand}" />
+        <MenuItem Header="Refresh now" Command="{Binding RefreshCommand}" />
+        <Separator />
+        <MenuItem Header="Keep this service in view" Click="OnTogglePin" Name="PinItem" />
+        <Separator />
+        <MenuItem Header="Quit AI Usage Monitor" Command="{Binding QuitCommand}" />
+      </ContextMenu>
+    </Border.ContextMenu>
+
+    <DockPanel LastChildFill="True">
+
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12"
+                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" IsVisible="{Binding CanPage}">
+          <Button Classes="page" Content="&#x2039;" Command="{Binding PreviousCommand}"
+                  ToolTip.Tip="Previous service" />
+          <Button Classes="page" Content="&#x203A;" Command="{Binding NextCommand}"
+                  ToolTip.Tip="Next service" />
+        </StackPanel>
+      </Grid>
+
+      <TextBlock DockPanel.Dock="Bottom" Classes="caption" Margin="0,6,0,0"
+                 Text="Double-click to open · right-click for options" TextTrimming="CharacterEllipsis" />
+
+      <Panel>
+        <TextBlock Classes="caption" Text="{Binding EmptyMessage}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   TextWrapping="Wrap" TextAlignment="Center">
+          <TextBlock.IsVisible>
+            <Binding Path="HasMeters" Converter="{x:Static BoolConverters.Not}" />
+          </TextBlock.IsVisible>
+        </TextBlock>
+
+        <!-- The same dials as the dashboard, shrunk: the widget is a glance, not a second page. -->
+        <ItemsControl ItemsSource="{Binding VisibleMeters}" IsVisible="{Binding HasMeters}"
+                      HorizontalAlignment="Center" VerticalAlignment="Center">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="2" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:MeterViewModel">
+              <controls:GaugeControl Width="72" Height="86"
+                                     Value="{Binding PercentOrZero}"
+                                     ValueText="{Binding ValueText}"
+                                     HasValue="{Binding HasPercent}"
+                                     Title="{Binding Title}"
+                                     Severity="{Binding Severity}"
+                                     ToolTip.Tip="{Binding ResetText}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Panel>
+
+    </DockPanel>
+  </Border>
+</Window>

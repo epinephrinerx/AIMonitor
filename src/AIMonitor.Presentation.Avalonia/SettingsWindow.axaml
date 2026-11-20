@@ -1,0 +1,105 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AIMonitor.Presentation.Avalonia.ViewModels"
+        x:Class="AIMonitor.Presentation.Avalonia.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="Settings"
+        Width="520" Height="620"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel LastChildFill="True" Margin="18">
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="8" Margin="0,16,0,0">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" MinWidth="88" />
+      <Button Content="Save" Command="{Binding SaveCommand}" IsDefault="True" MinWidth="88"
+              Classes="accent" />
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel Spacing="18">
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Appearance" FontWeight="SemiBold" />
+          <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}" MinWidth="180"
+                    HorizontalAlignment="Left" />
+          <TextBlock Text="&quot;system&quot; follows the macOS appearance setting as it changes."
+                     Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Starting and staying open" FontWeight="SemiBold" />
+          <CheckBox Content="Open at login" IsChecked="{Binding StartAtLogin}" />
+          <CheckBox Content="Show an item in the menu bar" IsChecked="{Binding ShowMenuBarExtra}" />
+          <CheckBox Content="Closing the window leaves the app in the menu bar"
+                    IsChecked="{Binding MinimizeToMenuBar}"
+                    IsEnabled="{Binding ShowMenuBarExtra}" />
+          <TextBlock Text="Without a menu bar item there would be no way to bring the app back, so that option needs this one."
+                     Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Refreshing" FontWeight="SemiBold" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBox Text="{Binding RefreshIntervalText}" Width="100" />
+            <TextBlock Text="seconds · 0 means only when asked" VerticalAlignment="Center"
+                       Opacity="0.65" FontSize="12" />
+          </StackPanel>
+          <TextBlock Text="{Binding RefreshIntervalError}" IsVisible="{Binding HasIntervalError}"
+                     Foreground="{StaticResource SeverityCriticalBrush}" TextWrapping="Wrap" FontSize="12" />
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Services to monitor" FontWeight="SemiBold" />
+          <ItemsControl ItemsSource="{Binding Providers}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProviderToggle">
+                <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding Enabled}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Monthly budgets" FontWeight="SemiBold" />
+          <TextBlock Text="In US dollars. The OpenCode and Overview gauges measure this month's ccusage cost against these. Leave a box empty for no budget."
+                     Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding BudgetRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AgentBudgetRowViewModel">
+                <StackPanel Margin="0,2">
+                  <Grid ColumnDefinitions="160,140">
+                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" Text="{Binding Text}" PlaceholderText="No budget" />
+                  </Grid>
+                  <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}"
+                             Foreground="{StaticResource SeverityCriticalBrush}" FontSize="12" Margin="160,2,0,0" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="Widget" FontWeight="SemiBold" />
+          <CheckBox Content="Keep the widget above other windows" IsChecked="{Binding WidgetAlwaysOnTop}" />
+          <CheckBox Content="Let the widget take turns between services" IsChecked="{Binding WidgetRotationEnabled}" />
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="Opacity" VerticalAlignment="Center" />
+            <Slider Minimum="0.2" Maximum="1" Value="{Binding WidgetOpacity}" Width="200" />
+            <TextBlock Text="{Binding OpacityPercent, StringFormat={}{0}%}" VerticalAlignment="Center"
+                       MinWidth="44" />
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel Spacing="8">
+          <TextBlock Text="History" FontWeight="SemiBold" />
+          <ComboBox ItemsSource="{Binding ChartRanges}" SelectedItem="{Binding ChartRangeDays}"
+                    MinWidth="120" HorizontalAlignment="Left" />
+          <TextBlock Text="Days of history the usage log covers." Opacity="0.65" FontSize="12" />
+        </StackPanel>
+
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

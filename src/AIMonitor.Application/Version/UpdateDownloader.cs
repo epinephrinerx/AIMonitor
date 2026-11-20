@@ -39,8 +39,11 @@ public sealed class UpdateDownloader : IUpdateDownloader
             throw new UpdateCheckException("The installer is not hosted on GitHub, so it will not be downloaded.");
         }
 
-        // Path.GetFileName drops any directory part a hostile asset name might carry.
-        var fileName = Path.GetFileName(release.AssetName);
+        // The asset name is remote input, and Path.GetFileName only strips the separators the host
+        // itself recognises, so on Linux/macOS a @"..\..\evil\" prefix would survive whole. Strip
+        // every separator either platform uses; the Windows result is unchanged.
+        var assetName = release.AssetName;
+        var fileName = assetName[(assetName.LastIndexOfAny(['/', '\\', ':']) + 1)..];
         if (fileName.Length == 0 || !fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             throw new UpdateCheckException("The release's installer has an unexpected name.");

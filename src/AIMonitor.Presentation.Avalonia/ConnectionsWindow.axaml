@@ -1,0 +1,96 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AIMonitor.Presentation.Avalonia.ViewModels"
+        x:Class="AIMonitor.Presentation.Avalonia.ConnectionsWindow"
+        x:DataType="vm:ConnectionsViewModel"
+        Title="Connections"
+        Width="620" Height="680"
+        WindowStartupLocation="CenterOwner">
+
+  <Window.Styles>
+    <Style Selector="Border.card">
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundListLowBrush}" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel LastChildFill="True" Margin="18">
+
+    <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,14,0,0">
+      <TextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}"
+                 Opacity="0.75" TextWrapping="Wrap" FontSize="12" />
+      <Grid ColumnDefinitions="*,Auto">
+        <CheckBox Content="Show this page when the app starts" IsChecked="{Binding ShowAtStartup}" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Content="Check all again" Command="{Binding RedetectAllCommand}" />
+          <Button Content="Close" Command="{Binding CloseCommand}" IsCancel="True" MinWidth="88" />
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel>
+      <ItemsControl ItemsSource="{Binding Cards}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ConnectionCardViewModel">
+            <Border Classes="card" Margin="0,0,0,12">
+              <StackPanel Spacing="8">
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14" />
+                    <TextBlock Text="{Binding Tagline}" Opacity="0.65" FontSize="12" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding Status}" VerticalAlignment="Center"
+                             TextWrapping="Wrap" MaxWidth="260" TextAlignment="Right" FontSize="12" />
+                </Grid>
+
+                <TextBlock Text="{Binding Account}" IsVisible="{Binding HasAccount}"
+                           Opacity="0.75" FontSize="12" />
+
+                <TextBlock Text="{Binding SetupHint}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+
+                <StackPanel Spacing="6" IsVisible="{Binding NeedsKey}">
+                  <TextBlock Text="{Binding KeyLabel}" FontSize="12" />
+                  <!-- PasswordChar: the key is a secret, and this page is often open on a shared screen. -->
+                  <TextBox Text="{Binding Key}" PlaceholderText="{Binding KeyPlaceholder}" PasswordChar="•" />
+                  <TextBlock Text="{Binding KeyHint}" IsVisible="{Binding HasKeyHint}"
+                             TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+                  <StackPanel Spacing="6" IsVisible="{Binding HasExtra}">
+                    <TextBlock Text="{Binding ExtraLabel}" FontSize="12" />
+                    <TextBox Text="{Binding Extra}" PlaceholderText="{Binding ExtraPlaceholder}" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Save key" Click="OnSaveKey" />
+                    <Button Content="Clear saved key" Click="OnClearKey" />
+                  </StackPanel>
+                </StackPanel>
+
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!-- Agents ccusage found that have no tab of their own, and how each one signs in (R-021). -->
+      <Border Classes="card" Margin="0,0,0,12">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Other agents" FontWeight="SemiBold" FontSize="14" />
+          <TextBlock Text="{Binding OtherAgentsStatus}" Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding OtherAgents}" IsVisible="{Binding HasOtherAgents}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:OtherAgentRow">
+                <StackPanel Spacing="2" Margin="0,4">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Guidance}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

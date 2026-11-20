@@ -4,6 +4,8 @@ obj/
 *.user
 __pycache__/
 *.pyc
+# Python venv of the 1.x branches, if one is checked out beside this tree
+.venv/
 
 ## Visual Studio / Rider
 .vs/

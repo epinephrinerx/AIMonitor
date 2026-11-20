@@ -6,13 +6,16 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Lets tests inject a controlled/growing stream opener to exercise the credential file
          reader's cumulative size cap deterministically, without changing production behavior. -->
     <InternalsVisibleTo Include="AIMonitor.Infrastructure.Tests" />
+    <!-- tools/AIMonitor.MacOSSmoke drives the real macOS adapters against isolated Keychain
+         services, LaunchAgent labels and socket paths, which the public factory cannot name. -->
+    <InternalsVisibleTo Include="AIMonitor.MacOSSmoke" />
   </ItemGroup>
 
 </Project>

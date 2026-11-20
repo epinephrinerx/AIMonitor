@@ -47,10 +47,9 @@ public sealed class DpapiSecretStoreTests : IDisposable
         Assert.Null(await store.GetAsync("key"));
     }
 
-    [Fact]
+    [WindowsOnlyFact("DPAPI is a crypt32.dll service")]
     public async Task WindowsDpapi_SetAndGetAsync_RoundTripsSyntheticSecret()
     {
-        if (!OperatingSystem.IsWindows()) return;
         var path = Path.Combine(_directory, "secrets.dat");
         var store = new DpapiSecretStore(path);
 
@@ -60,10 +59,9 @@ public sealed class DpapiSecretStoreTests : IDisposable
         Assert.DoesNotContain("not-a-real-credential", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
     }
 
-    [Fact]
+    [WindowsOnlyFact("DPAPI is a crypt32.dll service")]
     public void LegacyDpapiSecretUnsealer_CurrentAndRenamedEntropy_ReadSyntheticBlobs()
     {
-        if (!OperatingSystem.IsWindows()) return;
         var unsealer = new LegacyDpapiSecretUnsealer();
         foreach (var entropy in new[] { "AIUsageMonitor.providerKeys.v1", "ClaudeUsageMonitor.providerKeys.v1" })
         {

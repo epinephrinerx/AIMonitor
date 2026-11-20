@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>AIMonitor.MacOSSmoke</AssemblyName>
+    <RootNamespace>AIMonitor.MacOSSmoke</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AIMonitor.Infrastructure/AIMonitor.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

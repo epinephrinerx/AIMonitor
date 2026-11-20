@@ -1,4 +1,5 @@
 using System.Text;
+using AIMonitor.Infrastructure.OpenCode;
 
 namespace AIMonitor.Infrastructure.Tests.OpenCode;
 
@@ -43,7 +44,7 @@ public sealed class OpenCodeAuthReaderLaunchTests
         Assert.Empty(h.Starts);
     }
 
-    [Fact]
+    [WindowsOnlyFact("opencode.exe and the npm opencode.cmd shim exist only on Windows; macOS looks for a plain opencode")]
     public async Task ExeIsPreferredOverCmdInTheSameDirectory_F2()
     {
         var h = new ReaderHarness();
@@ -55,7 +56,7 @@ public sealed class OpenCodeAuthReaderLaunchTests
         Assert.All(h.Starts, s => Assert.Equal(@"C:\tools\bin\opencode.exe", s.FileName, ignoreCase: true));
     }
 
-    [Fact]
+    [WindowsOnlyFact("opencode.exe and the npm opencode.cmd shim exist only on Windows; macOS looks for a plain opencode")]
     public async Task PathOrderBeatsExtension_ACmdInAnEarlierDirectoryWinsOverALaterExe_F2()
     {
         // "rooted, non-drive-relative PATH entries in order; opencode.exe before opencode.cmd in EACH directory".
@@ -70,7 +71,7 @@ public sealed class OpenCodeAuthReaderLaunchTests
         Assert.All(h.Starts, s => Assert.Equal(@"C:\first\opencode.cmd", s.FileName, ignoreCase: true));
     }
 
-    [Fact]
+    [WindowsOnlyFact("drive-relative paths such as C:dir exist only on Windows; the macOS rule is covered by RelativePathEntriesAreSkipped_OnMacOS")]
     public async Task RelativeAndDriveRelativePathEntriesAreSkipped_F2()
     {
         // Same rule as CcUsageRunner: only rooted, non-drive-relative entries are considered, even when the
@@ -107,16 +108,18 @@ public sealed class OpenCodeAuthReaderLaunchTests
     {
         var h = new ReaderHarness();
         h.RemoveFile(ReaderHarness.DefaultExe);
-        h.Env["PATH"] = "\"C:\\Program Files\\Open Code\"";
-        h.AddFile(@"C:\Program Files\Open Code\opencode.exe", "");
+        var directory = OperatingSystem.IsWindows() ? @"C:\Program Files\Open Code" : "/Applications/Open Code/bin";
+        var executable = Path.Combine(directory, OpenCodeAuthReader.ExecutableFileNames[0]);
+        h.Env["PATH"] = $"\"{directory}\"";
+        h.AddFile(executable, "");
 
         await h.ReadAsync();
 
         Assert.NotEmpty(h.Starts);
-        Assert.All(h.Starts, s => Assert.Equal(@"C:\Program Files\Open Code\opencode.exe", s.FileName, ignoreCase: true));
+        Assert.All(h.Starts, s => Assert.Equal(executable, s.FileName, ignoreCase: true));
     }
 
-    [Fact]
+    [WindowsOnlyFact("the npm .cmd shim and cmd.exe exist only on Windows")]
     public async Task CmdShimAtAPathWithSpaces_IsLaunchedDirectlyByFullPath_NoCmdExe_NoQuotesInArguments_F2()
     {
         // F2 + the ".cmd launch check": new ProcessStartInfo(fullPath), UseShellExecute=false, ArgumentList only.
@@ -218,5 +221,66 @@ public sealed class OpenCodeAuthReaderLaunchTests
 
         Assert.Empty(h.AccessedPaths);
         Assert.Equal(new[] { "Anthropic|OAuth" }, ReaderHarness.Pairs(status));
+    }
+
+    [MacOSOnlyFact("the plain opencode name and POSIX PATH entries are what macOS uses")]
+    public async Task APlainOpencodeOnPath_IsFound_OnMacOS()
+    {
+        var h = new ReaderHarness();
+        h.RemoveFile(ReaderHarness.DefaultExe);
+        h.Env["PATH"] = "/usr/bin:/opt/homebrew/bin";
+        h.AddFile("/opt/homebrew/bin/opencode", "");
+
+        var status = await h.ReadAsync();
+
+        Assert.True(status.Installed);
+        Assert.NotEmpty(h.Starts);
+        Assert.All(h.Starts, s => Assert.Equal("/opt/homebrew/bin/opencode", s.FileName));
+    }
+
+    [MacOSOnlyFact("macOS has no .exe or .cmd; a Windows-named file must not count as OpenCode")]
+    public async Task WindowsNamedFiles_AreNotOpenCode_OnMacOS()
+    {
+        var h = new ReaderHarness();
+        h.RemoveFile(ReaderHarness.DefaultExe);
+        h.Env["PATH"] = "/opt/homebrew/bin";
+        h.AddFile("/opt/homebrew/bin/opencode.exe", "");
+        h.AddFile("/opt/homebrew/bin/opencode.cmd", "");
+
+        var status = await h.ReadAsync();
+
+        Assert.False(status.Installed);
+        Assert.Empty(h.Starts);
+    }
+
+    [MacOSOnlyFact("POSIX PATH entries are what macOS uses")]
+    public async Task RelativePathEntriesAreSkipped_OnMacOS()
+    {
+        var h = new ReaderHarness();
+        h.RemoveFile(ReaderHarness.DefaultExe);
+        h.Env["PATH"] = "relative/dir:./bin:/real/bin";
+        h.AddFile("relative/dir/opencode", "");
+        h.AddFile("./bin/opencode", "");
+        h.AddFile("/real/bin/opencode", "");
+
+        await h.ReadAsync();
+
+        Assert.NotEmpty(h.Starts);
+        Assert.All(h.Starts, s => Assert.Equal("/real/bin/opencode", s.FileName));
+    }
+
+    [MacOSOnlyFact("macOS names the home directory HOME, not USERPROFILE")]
+    public async Task AuthJsonIsReadFromHome_OnMacOS()
+    {
+        var h = new ReaderHarness();
+        h.SetVersion("1.19.5");
+        h.Env.Remove("USERPROFILE");
+        h.Env["HOME"] = "/Users/someone";
+        h.AddFile("/Users/someone/.local/share/opencode/auth.json", """{"anthropic":{"type":"oauth"}}""");
+
+        var status = await h.ReadAsync();
+
+        Assert.True(string.IsNullOrEmpty(status.Error));
+        Assert.Equal(new[] { "/Users/someone/.local/share/opencode/auth.json" }, h.AccessedPaths);
     }
 }
