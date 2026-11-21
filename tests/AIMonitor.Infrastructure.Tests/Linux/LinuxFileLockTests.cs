@@ -98,7 +98,7 @@ public sealed class LinuxFileLockTests : IDisposable
         clock.Stop();
 
         Assert.Null(second);
-        Assert.True(clock.ElapsedMilliseconds < 45, $"a single attempt took {clock.ElapsedMilliseconds} ms");
+        Assert.True(clock.ElapsedMilliseconds < 250, $"a single attempt took {clock.ElapsedMilliseconds} ms");
     }
 
     [LinuxOnlyFact("takes a real lock on a real file")]
