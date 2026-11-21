@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Settings;
 using AIMonitor.Domain;
@@ -196,6 +197,21 @@ public sealed class ConnectionsViewModelTests
         await page.SaveAsync(card);
 
         Assert.Contains("the keychain is locked", page.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WhenTheSecretStoreCannotSealTheKey_TheReasonIsShownInsteadOfThrowing()
+    {
+        const string reason = "The Secret Service could not be asked for the secret store key. (Failed: details withheld)";
+        var (page, _, secrets) = await BuildAsync();
+        secrets.FailOnSet = new CryptographicException(reason);
+        var card = Card(page, "openai");
+        card.Key = "sk-admin-typed";
+
+        await page.SaveAsync(card);
+
+        Assert.Equal($"Could not save the key for {card.DisplayName}: {reason}", page.Message);
+        Assert.Equal("sk-admin-typed", card.Key);
     }
 
     [Fact]
