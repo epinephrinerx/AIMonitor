@@ -7,10 +7,10 @@ namespace AIMonitor.Infrastructure.Linux;
 /// The Linux counterpart of <c>LaunchAgentStartupRegistrar</c>: a <c>.desktop</c> file in the
 /// per-user <c>$XDG_CONFIG_HOME/autostart</c> (or <c>~/.config/autostart</c>) directory is what
 /// desktop environments list under "Autostart" / "Login Items". Like the macOS side, it is per
-/// user and needs no admin rights (PAR-024).
+/// user and needs no admin rights.
 ///
 /// Path composition uses <c>/</c> directly rather than <see cref="Path.Combine"/>, so the same
-/// test vectors produce the same result on every host (Inspector §2 ข้อ 3).
+/// test vectors produce the same result on every host.
 /// </summary>
 internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
 {
@@ -22,7 +22,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
 
     public XdgAutostartStartupRegistrar(string autostartDirectory, string fileId)
     {
-        // A10 / G-ARG: null → ArgumentNullException (exact ParamName); empty/whitespace → ArgumentException.
+        // null → ArgumentNullException (exact ParamName); empty/whitespace → ArgumentException.
         if (autostartDirectory is null)
         {
             throw new ArgumentNullException(nameof(autostartDirectory));
@@ -84,7 +84,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
     /// </summary>
     public static string ResolveAutostartDirectory(string? xdgConfigHome, string homeDirectory)
     {
-        // A11 / G-ARG: null → ArgumentNullException (exact ParamName); empty/whitespace/relative/NUL → ArgumentException.
+        // null → ArgumentNullException (exact ParamName); empty/whitespace/relative/NUL → ArgumentException.
         if (homeDirectory is null)
         {
             throw new ArgumentNullException(nameof(homeDirectory));
@@ -104,7 +104,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
                 nameof(homeDirectory));
         }
 
-        // A11: xdgConfigHome is used verbatim when it already looks absolute; the spec rule is
+        // xdgConfigHome is used verbatim when it already looks absolute; the rule is
         // "starts with / and no \0" without trimming, so a relative or NUL-bearing value falls
         // through to the home-based fallback.
         if (xdgConfigHome is not null
@@ -141,6 +141,11 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
         {
             contents = File.ReadAllText(path);
         }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Dangling symlink: File.Exists was true but the read target is gone.
+            return false;
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             // Same rule as the macOS registrar: a file we cannot read is not proof the user
@@ -154,7 +159,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
     /// <summary>
     /// Writes the autostart entry atomically: a temp file in the same directory is filled first,
     /// then renamed over the target so the previous contents survive intact until the instant of
-    /// replacement (A13). A symlink at the target path is replaced by a regular file — its
+    /// replacement. A symlink at the target path is replaced by a regular file — its
     /// destination is never touched.
     /// </summary>
     public void Register(string executablePath, string arguments = "")
@@ -168,7 +173,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
                     nameof(executablePath));
         }
 
-        // A13(2): build before touching disk so a validation failure leaves nothing behind.
+        // Build before touching disk so a validation failure leaves nothing behind.
         var content = XdgDesktopEntry.Build(executablePath, arguments);
 
         var dir = _autostartDirectory;
@@ -202,7 +207,7 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
     /// <summary>
     /// Deletes the <c>.desktop</c> file and nothing else. A missing file or missing directory is
     /// a quiet success; any other IO failure wraps into <see cref="InvalidOperationException"/>
-    /// so the original entry on disk is preserved (A14).
+    /// so the original entry on disk is preserved.
     /// </summary>
     public void Unregister()
     {

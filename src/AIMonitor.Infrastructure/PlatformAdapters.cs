@@ -86,7 +86,7 @@ public static class PlatformAdapters
             return new Linux.XdgAutostartStartupRegistrar(
                 Linux.XdgAutostartStartupRegistrar.ResolveAutostartDirectory(
                     Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify)),
                 Scoped(Linux.XdgAutostartStartupRegistrar.DefaultFileId));
         }
 
