@@ -90,8 +90,10 @@ internal static class LinuxRuntimeDirectory
             }
 
             // Listing proves this user can actually reach the contents, which stands in for an
-            // ownership check: with owner-only mode the directory is this user's.
-            _ = Directory.EnumerateFileSystemEntries(directory).GetEnumerator().MoveNext();
+            // ownership check: with owner-only mode the directory is this user's. The enumerator
+            // is disposed so the listing does not outlive the check.
+            using var entries = Directory.EnumerateFileSystemEntries(directory).GetEnumerator();
+            _ = entries.MoveNext();
 
             var scopedPath = Path.Combine(directory, scopedAppId);
             var socketPathBytes = Encoding.UTF8.GetByteCount(scopedPath) + 1 + SocketFileNameBytes;
