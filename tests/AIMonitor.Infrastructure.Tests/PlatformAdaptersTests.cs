@@ -316,6 +316,8 @@ public sealed class PlatformAdaptersTests
     [LinuxOnlyFact("the scope becomes part of a file name on Linux")]
     public void CreateStartupRegistrar_OnLinux_RefusesAScopeThatCannotBePartOfAFileName()
     {
+        // A NUL cannot be tested here: the operating system truncates an environment value at the NUL.
+        // The NUL case is covered where the file id is passed in directly.
         foreach (var bad in new[] { "a/b", "../x", "/abs" })
         {
             using var scope = new ScopedEnvironment(bad);
@@ -325,21 +327,6 @@ public sealed class PlatformAdaptersTests
             Assert.True(
                 thrown is not null && thrown.GetType() == typeof(ArgumentException),
                 $"scope '{bad}' must make the factory throw ArgumentException, got {thrown?.GetType().Name ?? "nothing"}");
-        }
-    }
-
-    [LinuxOnlyFact("the scope becomes part of a file name on Linux")]
-    public void CreateStartupRegistrar_OnLinux_RefusesAScopeWithANulCharacter()
-    {
-        try
-        {
-            using var scope = new ScopedEnvironment("a\0b");
-
-            Assert.IsType<ArgumentException>(Record.Exception(() => PlatformAdapters.CreateStartupRegistrar()));
-        }
-        catch (ArgumentException)
-        {
-            // The operating system cannot even hold a variable with a NUL in it; nothing to refuse.
         }
     }
 
