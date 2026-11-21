@@ -51,7 +51,10 @@ public static class PlatformAdapters
 
     /// <summary>Where settings, secrets and logs live for this user.</summary>
     public static string AppDataDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
+            OperatingSystem.IsLinux()
+                ? Environment.SpecialFolderOption.DoNotVerify
+                : Environment.SpecialFolderOption.None),
         Scoped(AppId));
 
     /// <summary>
@@ -98,6 +101,16 @@ public static class PlatformAdapters
         if (OperatingSystem.IsMacOS())
         {
             return new LocalSocketSingleInstance(AppDataDirectory, Scoped(AppId));
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return new Linux.LinuxSingleInstance(
+                Linux.LinuxRuntimeDirectory.ResolveSocketDirectory(
+                    Environment.GetEnvironmentVariable(Linux.LinuxRuntimeDirectory.EnvironmentVariable),
+                    AppDataDirectory,
+                    Scoped(AppId)),
+                Scoped(AppId));
         }
 
         throw Unsupported(nameof(ISingleInstanceCoordinator));
