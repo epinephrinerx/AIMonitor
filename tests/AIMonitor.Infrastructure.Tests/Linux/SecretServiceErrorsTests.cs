@@ -82,6 +82,9 @@ public sealed class SecretServiceErrorsTests
 
     [Theory]
     [InlineData("secret-error", 2)]
+    [InlineData("secret-error", 1)]
+    [InlineData("secret-error", 24)]
+    [InlineData("secret-error", 9)]
     [InlineData(null, 1)]
     [InlineData("G-IO-ERROR-QUARK", 1)]
     [InlineData("g-io-error-quark ", 1)]
