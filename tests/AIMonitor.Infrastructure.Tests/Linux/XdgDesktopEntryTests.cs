@@ -58,21 +58,31 @@ public sealed class XdgDesktopEntryTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void FormatExec_WithABlankExecutable_IsAnArgumentException(string executablePath)
+    [InlineData("\t")]
+    [InlineData(" \t ")]
+    [InlineData("\n")]
+    public void FormatExec_WithABlankExecutable_IsAnArgumentException_NotAControlCharacterError(string executablePath)
     {
-        Assert.Throws<ArgumentException>(() => XdgDesktopEntry.FormatExec(executablePath, ""));
+        // Whitespace-only input is rejected as blank before any control-character check can see it.
+        var thrown = Assert.Throws<ArgumentException>(() => XdgDesktopEntry.FormatExec(executablePath, ""));
+
+        Assert.Equal("executablePath", thrown.ParamName);
     }
 
     [Fact]
     public void FormatExec_WithANullExecutable_IsAnArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.FormatExec(null!, ""));
+        var thrown = Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.FormatExec(null!, ""));
+
+        Assert.Equal("executablePath", thrown.ParamName);
     }
 
     // ---- FormatExec: rules the examples only imply ---------------------------------
 
     [Theory]
     [InlineData("/opt/x/aim\u007F", "")]
+    [InlineData("/opt/x/aim\u001F", "")]
+    [InlineData("/opt/x/aim", "--a\u001F")]
     [InlineData("/opt/x/aim\0", "")]
     [InlineData("\n/opt/x/aim", "")]
     [InlineData("/opt/x/aim", "--a\u007F")]
@@ -178,6 +188,12 @@ public sealed class XdgDesktopEntryTests
     [InlineData("[Desktop Entry]\nExec=\nExec=/x\n", true)]
     [InlineData("[Desktop Entry]\nExec=/x\n[Broken\nHidden=true\n", false)]
     [InlineData("[Desktop Entry]\nExec=/x\njunk line\n", true)]
+    [InlineData("\t[Desktop Entry]\t\n\tExec\t=\t/x\t\n", true)] // tabs around a header and around a key and value are trimmed like spaces
+    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled=false\nX-GNOME-Autostart-enabled=maybe\n", true)] // the last raw value wins even when it is not a boolean
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=false\nHidden=true\n", false)]
+    [InlineData("[Desktop Entry]\nExec=/x\nhidden=true\n", true)] // key names are case-sensitive
+    [InlineData("[Desktop Entry]\nEXEC=/x\n", null)]
+    [InlineData("[Desktop Entry]\nExec=/x\nx-gnome-autostart-enabled=false\n", true)]
     public void ReadEnabledState_FollowsTheSpecTable(string contents, bool? expected)
     {
         Assert.Equal(expected, XdgDesktopEntry.ReadEnabledState(contents));
@@ -192,7 +208,7 @@ public sealed class XdgDesktopEntryTests
     [Fact]
     public void ReadEnabledState_D21_NullContentsIsRefused()
     {
-        Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.ReadEnabledState(null!));
+        Assert.Equal("contents", Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.ReadEnabledState(null!)).ParamName);
     }
 
     // ---- ReadEnabledState: rules the examples only imply --------------------------------
