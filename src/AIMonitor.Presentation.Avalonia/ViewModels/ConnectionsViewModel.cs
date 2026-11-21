@@ -324,7 +324,7 @@ public sealed class ConnectionsViewModel : ObservableObject
             RedetectRequested?.Invoke(card.ProviderId);
         }
         catch (Exception exception) when (exception
-            is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.Security.Cryptography.CryptographicException)
         {
             Message = $"Could not save the key for {card.DisplayName}: {exception.Message}";
         }
