@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using AIMonitor.Infrastructure;
 using AIMonitor.Infrastructure.Linux;
 using AIMonitor.Infrastructure.MacOS;
@@ -62,7 +63,7 @@ public sealed class PlatformAdaptersTests
             Assert.Equal(
                 XdgAutostartStartupRegistrar.ResolveAutostartDirectory(
                     Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify))
                 + "/" + registrar.FileId + ".desktop",
                 registrar.DesktopFilePath);
         }
@@ -73,19 +74,40 @@ public sealed class PlatformAdaptersTests
     }
 
     [Fact]
-    public async Task CreateSingleInstanceCoordinator_PicksTheMutexOnWindowsAndASocketOnMacOS()
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_PicksTheMutexOnWindowsAndASocketOnMacOSAndLinux()
     {
-        await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
-
         if (OperatingSystem.IsWindows())
         {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
             Assert.IsType<NamedMutexSingleInstance>(coordinator);
         }
-        else
+        else if (OperatingSystem.IsMacOS())
         {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
+
             // Constructing it also proves the real socket path fits inside the length a Unix domain
             // socket allows, which depends on how long this user's home directory is.
             Assert.IsType<LocalSocketSingleInstance>(coordinator);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
+
+            var linux = Assert.IsType<LinuxSingleInstance>(coordinator);
+            var scopedAppId = PlatformAdapters.Scoped("AIUsageMonitor");
+            Assert.Equal(
+                LocalSocketSingleInstance.ResolveSocketPath(
+                    LinuxRuntimeDirectory.ResolveSocketDirectory(
+                        Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR"),
+                        PlatformAdapters.AppDataDirectory,
+                        scopedAppId),
+                    scopedAppId),
+                linux.SocketPath);
+        }
+        else
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => PlatformAdapters.CreateSingleInstanceCoordinator());
         }
     }
 
@@ -175,6 +197,178 @@ public sealed class PlatformAdaptersTests
         Assert.EndsWith("/autostart/net.apichart.aiusagemonitor.smoke.desktop", registrar.DesktopFilePath, StringComparison.Ordinal);
     }
 
+    [LinuxOnlyFact("the socket coordinator is the Linux adapter")]
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_OnLinux_UnderAScope_UsesItsOwnSocket()
+    {
+        string unscopedPath;
+        await using (var unscoped = PlatformAdapters.CreateSingleInstanceCoordinator())
+        {
+            unscopedPath = Assert.IsType<LinuxSingleInstance>(unscoped).SocketPath;
+        }
+
+        using var scope = new ScopedEnvironment("smoke");
+        await using var scoped = PlatformAdapters.CreateSingleInstanceCoordinator();
+        var scopedPath = Assert.IsType<LinuxSingleInstance>(scoped).SocketPath;
+
+        Assert.NotEqual(unscopedPath, scopedPath);
+        var xdg = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+        var resolved = LinuxRuntimeDirectory.ResolveSocketDirectory(xdg, PlatformAdapters.AppDataDirectory, "AIUsageMonitor.smoke");
+        Assert.Equal(LocalSocketSingleInstance.ResolveSocketPath(resolved, "AIUsageMonitor.smoke"), scopedPath);
+        if (resolved != PlatformAdapters.AppDataDirectory)
+        {
+            Assert.StartsWith(Path.Combine(xdg!, "AIUsageMonitor.smoke") + "/", scopedPath, StringComparison.Ordinal);
+        }
+    }
+
+    [LinuxOnlyFact("activation goes through a real Unix socket")]
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_OnLinux_ASecondLaunchActivatesTheFirst()
+    {
+        // A scope of its own, so the run never touches the folder of an installed copy.
+        using var scope = new ScopedEnvironment("t" + Guid.NewGuid().ToString("N")[..8]);
+        var first = Assert.IsType<LinuxSingleInstance>(PlatformAdapters.CreateSingleInstanceCoordinator());
+        var second = Assert.IsType<LinuxSingleInstance>(PlatformAdapters.CreateSingleInstanceCoordinator());
+        var socketFolder = Path.GetDirectoryName(first.SocketPath)!;
+        try
+        {
+            var activated = new TaskCompletionSource<string[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            first.Activated += arguments => activated.TrySetResult(arguments);
+
+            Assert.True(await first.TryAcquireAsync());
+            Assert.True(first.HasOwnership);
+            Assert.False(await second.TryAcquireAsync());
+            Assert.True(await second.NotifyExistingInstanceAsync(["--show"]));
+
+            Assert.Equal(["--show"], await activated.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            await second.DisposeAsync();
+            await first.DisposeAsync();
+            if (Directory.Exists(socketFolder))
+            {
+                Directory.Delete(socketFolder, recursive: true);
+            }
+        }
+    }
+
+    [LinuxOnlyFact("the data folder rule is Linux-only")]
+    public void AppDataDirectory_OnLinux_IsFullyQualifiedEvenWhenTheDataFolderDoesNotExistYet()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "aim-nodata-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        using var scope = new ScopedEnvironment(null);
+        try
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", missing);
+
+            Assert.Equal(Path.Combine(missing, "AIUsageMonitor"), PlatformAdapters.AppDataDirectory);
+            Assert.False(Directory.Exists(missing));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previous);
+        }
+    }
+
+    [LinuxOnlyFact("the autostart folder is resolved from the Linux environment")]
+    public void CreateStartupRegistrar_OnLinux_UsesTheAbsoluteXdgConfigHomeWhenThereIsOne()
+    {
+        var config = Path.Combine(Path.GetTempPath(), "aim-cfg-" + Guid.NewGuid().ToString("N"));
+        using var scope = new ScopedEnvironment(null);
+        using var env = new EnvironmentVariables(("XDG_CONFIG_HOME", config), ("HOME", "/aim/home"));
+
+        var registrar = Assert.IsType<XdgAutostartStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+
+        Assert.Equal(config + "/autostart/net.apichart.aiusagemonitor.desktop", registrar.DesktopFilePath);
+        Assert.False(Directory.Exists(config), "creating the registrar must not touch the disk");
+    }
+
+    [LinuxOnlyFact("the autostart folder is resolved from the Linux environment")]
+    public void CreateStartupRegistrar_OnLinux_FallsBackToTheHomeFolderWhenXdgConfigHomeIsUnsetOrRelative()
+    {
+        using var scope = new ScopedEnvironment(null);
+
+        foreach (var xdg in new string?[] { null, "", "relative/cfg" })
+        {
+            using var env = new EnvironmentVariables(("XDG_CONFIG_HOME", xdg), ("HOME", "/aim/home"));
+
+            var registrar = Assert.IsType<XdgAutostartStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+
+            Assert.True(
+                "/aim/home/.config/autostart/net.apichart.aiusagemonitor.desktop" == registrar.DesktopFilePath,
+                $"XDG_CONFIG_HOME={xdg ?? "(unset)"} gave {registrar.DesktopFilePath}");
+        }
+    }
+
+    [LinuxOnlyFact("the autostart folder is resolved from the Linux environment")]
+    public void CreateStartupRegistrar_OnLinux_DoesNotNeedTheHomeFolderToExist()
+    {
+        using var scope = new ScopedEnvironment(null);
+        using var env = new EnvironmentVariables(("XDG_CONFIG_HOME", null), ("HOME", "/aim/no/such/home"));
+
+        var registrar = Assert.IsType<XdgAutostartStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+
+        Assert.Equal("/aim/no/such/home/.config/autostart/net.apichart.aiusagemonitor.desktop", registrar.DesktopFilePath);
+    }
+
+    [LinuxOnlyFact("the scope becomes part of a file name on Linux")]
+    public void CreateStartupRegistrar_OnLinux_RefusesAScopeThatCannotBePartOfAFileName()
+    {
+        // A NUL cannot be tested here: the operating system truncates an environment value at the NUL.
+        // The NUL case is covered where the file id is passed in directly.
+        foreach (var bad in new[] { "a/b", "../x", "/abs" })
+        {
+            using var scope = new ScopedEnvironment(bad);
+
+            var thrown = Record.Exception(() => PlatformAdapters.CreateStartupRegistrar());
+
+            Assert.True(
+                thrown is not null && thrown.GetType() == typeof(ArgumentException),
+                $"scope '{bad}' must make the factory throw ArgumentException, got {thrown?.GetType().Name ?? "nothing"}");
+        }
+    }
+
+    [LinuxOnlyFact("the autostart folder is resolved from the Linux environment")]
+    public void CreateStartupRegistrar_OnLinux_NeverReadsOrWritesTheSystemWideAutostartFolders()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aim-sys-" + Guid.NewGuid().ToString("N"));
+        var system = Path.Combine(root, "system");
+        var user = Path.Combine(root, "user");
+        var scopeName = "t" + Guid.NewGuid().ToString("N")[..8];
+        var fileId = "net.apichart.aiusagemonitor." + scopeName;
+        var systemEntry = Path.Combine(system, "autostart", fileId + ".desktop");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(systemEntry)!);
+            const string systemContents = "[Desktop Entry]\nType=Application\nName=System\nExec=/usr/bin/system-app\n";
+            File.WriteAllText(systemEntry, systemContents);
+            using var scope = new ScopedEnvironment(scopeName);
+            using var env = new EnvironmentVariables(("XDG_CONFIG_HOME", user), ("XDG_CONFIG_DIRS", system), ("HOME", "/aim/home"));
+            var registrar = PlatformAdapters.CreateStartupRegistrar();
+
+            Assert.False(registrar.IsRegistered(), "an entry in a system folder must not count");
+
+            registrar.Register("/opt/x/aim");
+            Assert.True(registrar.IsRegistered());
+            registrar.Unregister();
+
+            Assert.False(registrar.IsRegistered());
+            Assert.Equal(systemContents, File.ReadAllText(systemEntry));
+            Assert.Equal([systemEntry], Directory.GetFiles(system, "*", SearchOption.AllDirectories));
+            Assert.Equal([Path.Combine(user, "autostart")], Directory.GetDirectories(user));
+            Assert.Empty(Directory.GetFiles(user, "*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     [MacOSOnlyFact("the socket coordinator is the macOS adapter")]
     public async Task CreateSingleInstanceCoordinator_UnderAScope_UsesItsOwnSocket()
     {
@@ -188,6 +382,29 @@ public sealed class PlatformAdaptersTests
         await using var scoped = PlatformAdapters.CreateSingleInstanceCoordinator();
 
         Assert.NotEqual(unscopedPath, Assert.IsType<LocalSocketSingleInstance>(scoped).SocketPath);
+    }
+
+    /// <summary>Sets environment variables for one test and puts back whatever was there.</summary>
+    private sealed class EnvironmentVariables : IDisposable
+    {
+        private readonly (string Name, string? Previous)[] _previous;
+
+        public EnvironmentVariables(params (string Name, string? Value)[] variables)
+        {
+            _previous = [.. variables.Select(v => (v.Name, Environment.GetEnvironmentVariable(v.Name)))];
+            foreach (var (name, value) in variables)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var (name, previous) in _previous)
+            {
+                Environment.SetEnvironmentVariable(name, previous);
+            }
+        }
     }
 
     /// <summary>Sets the scope variable for one test and puts back whatever was there.</summary>

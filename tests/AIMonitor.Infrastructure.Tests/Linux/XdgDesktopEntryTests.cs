@@ -3,8 +3,8 @@ using AIMonitor.Infrastructure.Linux;
 namespace AIMonitor.Infrastructure.Tests.Linux;
 
 /// <summary>
-/// The pure Desktop Entry rules (SPEC_R024 section 2, A1-A8). Every expected value is the raw text
-/// the spec's tables give, written as a verbatim string so the backslashes and quotes read as they
+/// The pure Desktop Entry rules (R-024). Every expected value is the raw text the file must
+/// contain, written as a verbatim string so the backslashes and quotes read as they
 /// appear in the file. Nothing here touches the disk, so it runs on every operating system.
 /// </summary>
 public sealed class XdgDesktopEntryTests
@@ -18,38 +18,38 @@ public sealed class XdgDesktopEntryTests
         Assert.Equal("AI Usage Monitor", XdgDesktopEntry.ApplicationName);
     }
 
-    // ---- FormatExec: table A5 (P2-1..24) -------------------------------------------------------
+    // ---- FormatExec: the worked examples -------------------------------------------------------
 
     [Theory]
-    [InlineData(@"/home/u/apps/aim/AIMonitor.Presentation.Avalonia", "", @"/home/u/apps/aim/AIMonitor.Presentation.Avalonia")] // E1
-    [InlineData(@"/opt/AI Monitor/aim", "--minimized", @"""/opt/AI Monitor/aim"" --minimized")] // E2
-    [InlineData(@" ""/opt/AI Monitor/aim"" ", null, @"""/opt/AI Monitor/aim""")] // E3
-    [InlineData(@"/opt/a$b/aim", "", @"""/opt/a\\$b/aim""")] // E4
-    [InlineData(@"/opt/back\slash/aim", "", @"""/opt/back\\\\slash/aim""")] // E5: one backslash in, four out
-    [InlineData(@"/opt/q""uote/aim", "", @"""/opt/q\\""uote/aim""")] // E6
-    [InlineData(@"/opt/100%/aim", "", @"/opt/100%%/aim")] // E7
-    [InlineData(@"/opt/it's/aim", "", @"""/opt/it's/aim""")] // E8
-    [InlineData(@"/opt/50% off/aim", "", @"""/opt/50%% off/aim""")] // E9
-    [InlineData(@"/opt/x/aim", "  --tray   --minimized ", @"/opt/x/aim --tray --minimized")] // E10
-    [InlineData(@"/opt/x~y/aim", "", @"""/opt/x~y/aim""")] // E11
-    [InlineData(@"/opt/x/aim", "--open=a=b", @"/opt/x/aim --open=a=b")] // E12
-    [InlineData(@"/opt/x/aim", "--name=$HOME", @"/opt/x/aim ""--name=\\$HOME""")] // E13
-    [InlineData("/opt/back`tick/aim", "", @"""/opt/back\\`tick/aim""")] // E14
-    [InlineData(@"/opt/a=b/aim", "", @"/opt/a=b/aim")] // E18
-    [InlineData(@"/opt/x/aim", @"--x ""a b""", @"/opt/x/aim --x ""\\""a"" ""b\\""""")] // E21: no quoting dialect, split at the space
-    [InlineData(@"/opt/x/aim", @"""""", @"/opt/x/aim ""\\""\\""""")] // E22
-    [InlineData(@"/opt/x/aim""", "", @"/opt/x/aim")] // E23: a trailing literal quote is trimmed away
+    [InlineData(@"/home/u/apps/aim/AIMonitor.Presentation.Avalonia", "", @"/home/u/apps/aim/AIMonitor.Presentation.Avalonia")]
+    [InlineData(@"/opt/AI Monitor/aim", "--minimized", @"""/opt/AI Monitor/aim"" --minimized")]
+    [InlineData(@" ""/opt/AI Monitor/aim"" ", null, @"""/opt/AI Monitor/aim""")]
+    [InlineData(@"/opt/a$b/aim", "", @"""/opt/a\\$b/aim""")]
+    [InlineData(@"/opt/back\slash/aim", "", @"""/opt/back\\\\slash/aim""")] // one backslash in, four out
+    [InlineData(@"/opt/q""uote/aim", "", @"""/opt/q\\""uote/aim""")]
+    [InlineData(@"/opt/100%/aim", "", @"/opt/100%%/aim")]
+    [InlineData(@"/opt/it's/aim", "", @"""/opt/it's/aim""")]
+    [InlineData(@"/opt/50% off/aim", "", @"""/opt/50%% off/aim""")]
+    [InlineData(@"/opt/x/aim", "  --tray   --minimized ", @"/opt/x/aim --tray --minimized")]
+    [InlineData(@"/opt/x~y/aim", "", @"""/opt/x~y/aim""")]
+    [InlineData(@"/opt/x/aim", "--open=a=b", @"/opt/x/aim --open=a=b")]
+    [InlineData(@"/opt/x/aim", "--name=$HOME", @"/opt/x/aim ""--name=\\$HOME""")]
+    [InlineData("/opt/back`tick/aim", "", @"""/opt/back\\`tick/aim""")]
+    [InlineData(@"/opt/a=b/aim", "", @"/opt/a=b/aim")]
+    [InlineData(@"/opt/x/aim", @"--x ""a b""", @"/opt/x/aim --x ""\\""a"" ""b\\""""")] // no quoting dialect, split at the space
+    [InlineData(@"/opt/x/aim", @"""""", @"/opt/x/aim ""\\""\\""""")]
+    [InlineData(@"/opt/x/aim""", "", @"/opt/x/aim")] // a trailing literal quote is trimmed away
     public void FormatExec_QuotesAndEscapesAsTheSpecTableSays(string executablePath, string? arguments, string expected)
     {
         Assert.Equal(expected, XdgDesktopEntry.FormatExec(executablePath, arguments));
     }
 
     [Theory]
-    [InlineData("relative/aim", "")] // E15
-    [InlineData("/opt/a\tb/aim", "")] // E16
-    [InlineData("/opt/x/aim\n", "")] // E19: a trailing newline is caught before the trim
-    [InlineData("/opt/x/aim", "--tray\t--minimized")] // E20
-    [InlineData(@"C:\aim.exe", "")] // E24: not a path on any operating system
+    [InlineData("relative/aim", "")]
+    [InlineData("/opt/a\tb/aim", "")]
+    [InlineData("/opt/x/aim\n", "")] // a trailing newline is caught before the trim
+    [InlineData("/opt/x/aim", "--tray\t--minimized")]
+    [InlineData(@"C:\aim.exe", "")] // not a path on any operating system
     public void FormatExec_RefusesWhatCannotBeAnAbsoluteSingleLineCommand(string executablePath, string? arguments)
     {
         Assert.Throws<InvalidOperationException>(() => XdgDesktopEntry.FormatExec(executablePath, arguments));
@@ -58,21 +58,31 @@ public sealed class XdgDesktopEntryTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void FormatExec_WithABlankExecutable_IsAnArgumentException(string executablePath)
+    [InlineData("\t")]
+    [InlineData(" \t ")]
+    [InlineData("\n")]
+    public void FormatExec_WithABlankExecutable_IsAnArgumentException_NotAControlCharacterError(string executablePath)
     {
-        Assert.Throws<ArgumentException>(() => XdgDesktopEntry.FormatExec(executablePath, ""));
+        // Whitespace-only input is rejected as blank before any control-character check can see it.
+        var thrown = Assert.Throws<ArgumentException>(() => XdgDesktopEntry.FormatExec(executablePath, ""));
+
+        Assert.Equal("executablePath", thrown.ParamName);
     }
 
     [Fact]
     public void FormatExec_WithANullExecutable_IsAnArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.FormatExec(null!, ""));
+        var thrown = Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.FormatExec(null!, ""));
+
+        Assert.Equal("executablePath", thrown.ParamName);
     }
 
-    // ---- FormatExec: rules the table only implies (A2, A3, A4) ---------------------------------
+    // ---- FormatExec: rules the examples only imply ---------------------------------
 
     [Theory]
     [InlineData("/opt/x/aim\u007F", "")]
+    [InlineData("/opt/x/aim\u001F", "")]
+    [InlineData("/opt/x/aim", "--a\u001F")]
     [InlineData("/opt/x/aim\0", "")]
     [InlineData("\n/opt/x/aim", "")]
     [InlineData("/opt/x/aim", "--a\u007F")]
@@ -110,7 +120,7 @@ public sealed class XdgDesktopEntryTests
         Assert.Equal("/opt/x/aim --a=b --c%%d", XdgDesktopEntry.FormatExec("/opt/x/aim", "--a=b --c%d"));
     }
 
-    // ---- Build (P2-25..27) ----------------------------------------------------------------------
+    // ---- Build ----------------------------------------------------------------------
 
     [Fact]
     public void Build_WritesTheWholeFileExactlyAsTheSpecSaysItEndsInOneLineFeed()
@@ -135,7 +145,7 @@ public sealed class XdgDesktopEntryTests
         Assert.Throws<InvalidOperationException>(() => XdgDesktopEntry.Build("relative"));
     }
 
-    // ---- ReadEnabledState: table D (P2-28..49) --------------------------------------------------
+    // ---- ReadEnabledState: the worked examples --------------------------------------------------
 
     [Fact]
     public void ReadEnabledState_D1_AFileBuiltHereIsEnabled()
@@ -161,23 +171,29 @@ public sealed class XdgDesktopEntryTests
     }
 
     [Theory]
-    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled = false\n", false)] // D4
-    [InlineData("[Desktop Entry]\nExec=/x\nHidden=True\n", true)] // D5: case-sensitive, so not a boolean
-    [InlineData("[Desktop Entry]\nExec=/x\nHidden=1\n", false)] // D6
-    [InlineData("", null)] // D7
-    [InlineData("[Other]\nExec=/x\n", null)] // D8
-    [InlineData("[Desktop Entry]\nType=Application\n", null)] // D9
-    [InlineData("[Desktop Entry]\nExec=\n", null)] // D10
-    [InlineData("# c\n[Desktop Entry]\nExec=/x\n[Desktop Action new]\nHidden=true\n", true)] // D12
-    [InlineData("Hidden=true\n[Desktop Entry]\nExec=/x\n", true)] // D13
-    [InlineData("[Desktop Entry]\nExec=/x\nHidden=true\nHidden=false\n", true)] // D14
-    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled=0\n", false)] // D15
-    [InlineData("  [Desktop Entry]  \n  Exec = /x  \n", true)] // D16
-    [InlineData("[Desktop Entry]\nExec=/x\nHidden=true\nHidden=maybe\n", true)] // D17: the last raw value is not a boolean
-    [InlineData("[Desktop Entry]\nExec=/x\nExec=\n", null)] // D18
-    [InlineData("[Desktop Entry]\nExec=\nExec=/x\n", true)] // D19
-    [InlineData("[Desktop Entry]\nExec=/x\n[Broken\nHidden=true\n", false)] // D20
-    [InlineData("[Desktop Entry]\nExec=/x\njunk line\n", true)] // D22
+    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled = false\n", false)]
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=True\n", true)] // case-sensitive, so not a boolean
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=1\n", false)]
+    [InlineData("", null)]
+    [InlineData("[Other]\nExec=/x\n", null)]
+    [InlineData("[Desktop Entry]\nType=Application\n", null)]
+    [InlineData("[Desktop Entry]\nExec=\n", null)]
+    [InlineData("# c\n[Desktop Entry]\nExec=/x\n[Desktop Action new]\nHidden=true\n", true)]
+    [InlineData("Hidden=true\n[Desktop Entry]\nExec=/x\n", true)]
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=true\nHidden=false\n", true)]
+    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled=0\n", false)]
+    [InlineData("  [Desktop Entry]  \n  Exec = /x  \n", true)]
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=true\nHidden=maybe\n", true)] // the last raw value is not a boolean
+    [InlineData("[Desktop Entry]\nExec=/x\nExec=\n", null)]
+    [InlineData("[Desktop Entry]\nExec=\nExec=/x\n", true)]
+    [InlineData("[Desktop Entry]\nExec=/x\n[Broken\nHidden=true\n", false)]
+    [InlineData("[Desktop Entry]\nExec=/x\njunk line\n", true)]
+    [InlineData("\t[Desktop Entry]\t\n\tExec\t=\t/x\t\n", true)] // tabs around a header and around a key and value are trimmed like spaces
+    [InlineData("[Desktop Entry]\nExec=/x\nX-GNOME-Autostart-enabled=false\nX-GNOME-Autostart-enabled=maybe\n", true)] // the last raw value wins even when it is not a boolean
+    [InlineData("[Desktop Entry]\nExec=/x\nHidden=false\nHidden=true\n", false)]
+    [InlineData("[Desktop Entry]\nExec=/x\nhidden=true\n", true)] // key names are case-sensitive
+    [InlineData("[Desktop Entry]\nEXEC=/x\n", null)]
+    [InlineData("[Desktop Entry]\nExec=/x\nx-gnome-autostart-enabled=false\n", true)]
     public void ReadEnabledState_FollowsTheSpecTable(string contents, bool? expected)
     {
         Assert.Equal(expected, XdgDesktopEntry.ReadEnabledState(contents));
@@ -192,10 +208,10 @@ public sealed class XdgDesktopEntryTests
     [Fact]
     public void ReadEnabledState_D21_NullContentsIsRefused()
     {
-        Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.ReadEnabledState(null!));
+        Assert.Equal("contents", Assert.Throws<ArgumentNullException>(() => XdgDesktopEntry.ReadEnabledState(null!)).ParamName);
     }
 
-    // ---- ReadEnabledState: rules the table only implies (A7, A8) --------------------------------
+    // ---- ReadEnabledState: rules the examples only imply --------------------------------
 
     [Fact]
     public void ReadEnabledState_GroupNamesAreCaseSensitive()
@@ -206,7 +222,7 @@ public sealed class XdgDesktopEntryTests
     [Fact]
     public void ReadEnabledState_EntriesOfEveryDesktopEntryGroupCount_WhenTheGroupAppearsTwice()
     {
-        // A7: "นับเฉพาะ entry ใน group Desktop Entry (ทุกครั้งที่ปรากฏ)".
+        // Entries of a group count every time that group appears.
         const string contents = "[Desktop Entry]\nExec=/x\n[Other]\nHidden=false\n[Desktop Entry]\nHidden=true\n";
 
         Assert.False(XdgDesktopEntry.ReadEnabledState(contents));
