@@ -856,6 +856,35 @@ public sealed class LinuxSecretProtectorTests : IDisposable
         }
     }
 
+    [LinuxOnlyFact("works on real files and modes")]
+    public void ANewKeyIsRandom_DifferentForEveryStore()
+    {
+        var first = new FakeKeyring { LookupResult = new(SecretServiceStatus.NotFound), StoreResult = new(SecretServiceStatus.Done) };
+        var second = new FakeKeyring { LookupResult = new(SecretServiceStatus.NotFound), StoreResult = new(SecretServiceStatus.Done) };
+
+        New(first, "a").Protect(Plaintext);
+        New(second, "b").Protect(Plaintext);
+
+        var one = Convert.FromBase64String(first.Calls.Single(call => call.Method == "Store").Secret!);
+        var two = Convert.FromBase64String(second.Calls.Single(call => call.Method == "Store").Secret!);
+        Assert.NotEqual(one, two);
+        Assert.Contains(one, b => b != 0);
+    }
+
+    [LinuxOnlyFact("works on real files and modes")]
+    public void AnExistingKeyFolderOpenToOthersIsMadePrivateBeforeAnythingIsAsked()
+    {
+        Directory.CreateDirectory(Folder());
+        File.SetUnixFileMode(Folder(), Mode("0755"));
+        var key = NewKey();
+        var fake = new FakeKeyring { LookupResult = SecretServiceResultOf.Found(Base64(key)) };
+
+        var blob = New(fake).Protect(Plaintext);
+
+        AssertSealedWith(key, 0x01, blob);
+        Assert.Equal(Mode("0700"), ModeOf(Folder()));
+    }
+
     // ---- with the real secret store on top ------------------------------------------------------
 
     private DpapiSecretStore NewStore(FakeKeyring fake) =>
