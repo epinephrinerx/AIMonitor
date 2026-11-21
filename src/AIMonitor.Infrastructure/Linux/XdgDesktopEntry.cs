@@ -14,10 +14,10 @@ internal static class XdgDesktopEntry
     public const string ApplicationName = "AI Usage Monitor";
 
     /// <summary>
-    /// The 17 characters that force quoting around a single token in the <c>Exec=</c> value.
-    /// <c>=</c> and <c>%</c> are deliberately absent: they survive unquoted in the Desktop Entry
-    /// grammar, and <c>%</c> is instead doubled (A3(3)) so the parser does not treat it as a
-    /// field-code introducer.
+    /// Returns whether the character must be wrapped in a quoted token in the <c>Exec=</c>
+    /// value. <c>=</c> and <c>%</c> do not trigger quoting: they survive unquoted in the
+    /// Desktop Entry grammar, and <c>%</c> is instead doubled so the parser does not read it
+    /// as a field-code introducer.
     /// </summary>
     private static bool NeedsQuoting(char c) => c is
         ' ' or '"' or '\'' or '\\' or '>' or '<' or '~' or '|'
@@ -40,13 +40,13 @@ internal static class XdgDesktopEntry
     }
 
     /// <summary>
-    /// Serialises the value that follows <c>Exec=</c> in a desktop entry. The rules (A2–A4) are
-    /// a deliberate simplification: the spec guarantees only that the round-trip through this
-    /// serialiser is what the test suite verifies, not that the resulting path runs.
+    /// Serialises the value that follows <c>Exec=</c> in a desktop entry. The rules are a
+    /// deliberate simplification: R-024 guarantees only serialisation by these rules, not
+    /// that the resulting path runs.
     /// </summary>
     public static string FormatExec(string executablePath, string? arguments = null)
     {
-        // A2(1): executablePath null/empty/whitespace → ArgumentException (null → ArgumentNullException).
+        // null → ArgumentNullException; empty/whitespace → ArgumentException.
         if (executablePath is null)
         {
             throw new ArgumentNullException(nameof(executablePath));
@@ -57,24 +57,24 @@ internal static class XdgDesktopEntry
             throw new ArgumentException("Executable path must not be empty or whitespace.", nameof(executablePath));
         }
 
-        // A2(2): control characters in either input are rejected before any trim or split, so a
-        // path that merely *contains* a tab or newline cannot be sanitised into something valid.
+        // Control characters in either input are rejected before any trim or split, so a
+        // path that merely contains a tab or newline cannot be sanitised into something valid.
         RejectControlCharacters(executablePath);
         if (arguments is not null)
         {
             RejectControlCharacters(arguments);
         }
 
-        // A2(3): same trim-and-strip rule as LaunchAgentPlist.Build(:56).
+        // Same trim-and-strip rule as the macOS plist builder.
         var executable = executablePath.Trim().Trim('"');
 
-        // A2(4): the app is Linux-only at runtime; a relative path here is a caller bug (F13).
+        // The app is Linux-only at runtime; a relative path here is a caller bug.
         if (executable.Length == 0 || executable[0] != '/')
         {
             throw new InvalidOperationException("Executable path must be absolute.");
         }
 
-        // A2(5): reuse the same whitespace split the macOS side uses; there is no quoting dialect.
+        // Reuse the same whitespace split the macOS side uses; there is no quoting dialect.
         var tokens = new List<string>(1 + 4);
         tokens.Add(executable);
         foreach (var argument in LaunchAgentPlist.SplitArguments(arguments))
@@ -82,13 +82,13 @@ internal static class XdgDesktopEntry
             tokens.Add(argument);
         }
 
-        // A3: per-token quoting and %-doubling.
+        // Per-token quoting and %-doubling.
         for (var i = 0; i < tokens.Count; i++)
         {
             tokens[i] = FormatToken(tokens[i]);
         }
 
-        // A4: join with one space, then escape backslashes at the Desktop Entry string level.
+        // Join with one space, then escape backslashes at the Desktop Entry string level.
         return string.Join(' ', tokens).Replace("\\", "\\\\");
     }
 
@@ -122,8 +122,8 @@ internal static class XdgDesktopEntry
 
             if (line[0] == '[')
             {
-                // A7: a well-formed group header both opens and closes with brackets; a line
-                // that only opens one is "broken" and leaves the current group unchanged.
+                // A well-formed group header both opens and closes with brackets; a line that
+                // only opens one is "broken" and leaves the current group unchanged.
                 if (line.Length >= 2 && line[^1] == ']')
                 {
                     currentGroup = line.Substring(1, line.Length - 2);
@@ -136,7 +136,7 @@ internal static class XdgDesktopEntry
                 continue;
             }
 
-            // A7: only entries inside [Desktop Entry] count, every time it appears.
+            // Only entries inside [Desktop Entry] count, every time it appears.
             if (!string.Equals(currentGroup, "Desktop Entry", StringComparison.Ordinal))
             {
                 continue;
@@ -171,20 +171,20 @@ internal static class XdgDesktopEntry
             return null;
         }
 
-        // A8: a missing or empty final Exec means the entry cannot launch anything we could
+        // A missing or empty final Exec means the entry cannot launch anything we could
         // claim is registered.
         if (!hasExec || string.IsNullOrEmpty(lastExec))
         {
             return null;
         }
 
-        // A8: Hidden true (last raw value wins, then interpreted) → off.
+        // Hidden true (last raw value wins, then interpreted) → off.
         if (ParseDesktopBoolean(lastHidden) == true)
         {
             return false;
         }
 
-        // A8: X-GNOME-Autostart-enabled false → off.
+        // X-GNOME-Autostart-enabled false → off.
         if (ParseDesktopBoolean(lastGnomeEnabled) == false)
         {
             return false;
@@ -195,7 +195,7 @@ internal static class XdgDesktopEntry
 
     /// <summary>
     /// Desktop-entry booleans are case-sensitive <c>true</c>/<c>1</c> or <c>false</c>/<c>0</c>;
-    /// anything else is treated as if the key were absent (A8 "ค่าอื่น = ถือว่าไม่มี key").
+    /// anything else is treated as if the key were absent.
     /// </summary>
     private static bool? ParseDesktopBoolean(string? value) => value switch
     {
@@ -216,7 +216,7 @@ internal static class XdgDesktopEntry
         }
     }
 
-    /// <summary>Applies A3 to a single token: quote if needed, then double any <c>%</c>.</summary>
+    /// <summary>Quotes the token when needed, then doubles any <c>%</c>.</summary>
     private static string FormatToken(string token)
     {
         var needsQuote = false;
@@ -232,7 +232,7 @@ internal static class XdgDesktopEntry
         string result;
         if (needsQuote)
         {
-            // A3(2): escape " ` $ \ with a backslash, then wrap in double quotes.
+            // Escape " ` $ \ with a backslash, then wrap in double quotes.
             var sb = new StringBuilder(token.Length + 4);
             sb.Append('"');
             foreach (var c in token)
@@ -253,7 +253,7 @@ internal static class XdgDesktopEntry
             result = token;
         }
 
-        // A3(3): double every % so the parser does not read it as a field code.
+        // Double every % so the parser does not read it as a field code.
         if (result.Contains('%'))
         {
             result = result.Replace("%", "%%");
