@@ -18,8 +18,11 @@ internal static class LinuxRuntimeDirectory
     public const string EnvironmentVariable = "XDG_RUNTIME_DIR";
 
     /// <summary>
-    /// <c>sockaddr_un.sun_path</c> holds 104 bytes on Linux, including the terminator; the macOS
-    /// adapter enforces the same limit.
+    /// <para>
+    /// On Linux <c>sockaddr_un.sun_path</c> holds 108 bytes (<c>UNIX_PATH_MAX</c>, terminator
+    /// included); the 103-byte limit enforced here is the stricter one that
+    /// <c>LocalSocketSingleInstance</c> applies at bind time.
+    /// </para>
     /// </summary>
     public const int MaxSocketPathBytes = 103;
 

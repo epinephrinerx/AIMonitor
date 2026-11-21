@@ -31,7 +31,8 @@ internal sealed class LinuxSingleInstance : ISingleInstanceCoordinator
 
     /// <summary>
     /// How long disposal waits for the lock file before leaving the listener untouched. Longer
-    /// than the most an acquiring copy can hold the lock (its lock wait plus two probes).
+    /// than the most an acquiring copy can hold the lock: its own probe plus the inner adapter's
+    /// probe, two connect timeouts of 3 s each, so the 10 s default leaves margin.
     /// </summary>
     public static readonly TimeSpan DefaultDisposeLockTimeout = TimeSpan.FromSeconds(10);
 
