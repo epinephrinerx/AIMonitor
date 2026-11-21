@@ -22,11 +22,16 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
 
     public XdgAutostartStartupRegistrar(string autostartDirectory, string fileId)
     {
-        // A10: null/whitespace → ArgumentException; must be absolute and \0-free.
+        // A10 / G-ARG: null → ArgumentNullException (exact ParamName); empty/whitespace → ArgumentException.
+        if (autostartDirectory is null)
+        {
+            throw new ArgumentNullException(nameof(autostartDirectory));
+        }
+
         if (string.IsNullOrWhiteSpace(autostartDirectory))
         {
             throw new ArgumentException(
-                "Autostart directory must not be null, empty or whitespace.",
+                "Autostart directory must not be empty or whitespace.",
                 nameof(autostartDirectory));
         }
 
@@ -37,10 +42,15 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
                 nameof(autostartDirectory));
         }
 
+        if (fileId is null)
+        {
+            throw new ArgumentNullException(nameof(fileId));
+        }
+
         if (string.IsNullOrWhiteSpace(fileId))
         {
             throw new ArgumentException(
-                "File ID must not be null, empty or whitespace.",
+                "File ID must not be empty or whitespace.",
                 nameof(fileId));
         }
 
@@ -74,11 +84,16 @@ internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar
     /// </summary>
     public static string ResolveAutostartDirectory(string? xdgConfigHome, string homeDirectory)
     {
-        // A11: homeDirectory has the same absolute-and-no-null rule as the ctor's autostartDirectory.
+        // A11 / G-ARG: null → ArgumentNullException (exact ParamName); empty/whitespace/relative/NUL → ArgumentException.
+        if (homeDirectory is null)
+        {
+            throw new ArgumentNullException(nameof(homeDirectory));
+        }
+
         if (string.IsNullOrWhiteSpace(homeDirectory))
         {
             throw new ArgumentException(
-                "Home directory must not be null, empty or whitespace.",
+                "Home directory must not be empty or whitespace.",
                 nameof(homeDirectory));
         }
 
