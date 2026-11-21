@@ -81,6 +81,15 @@ public static class PlatformAdapters
                 LaunchAgentStartupRegistrar.CurrentGuiSessionTarget);
         }
 
+        if (OperatingSystem.IsLinux())
+        {
+            return new Linux.XdgAutostartStartupRegistrar(
+                Linux.XdgAutostartStartupRegistrar.ResolveAutostartDirectory(
+                    Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+                Scoped(Linux.XdgAutostartStartupRegistrar.DefaultFileId));
+        }
+
         throw Unsupported(nameof(IStartupRegistrar));
     }
 
