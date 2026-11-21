@@ -216,12 +216,20 @@ internal sealed class LinuxSingleInstance : ISingleInstanceCoordinator
 
     private bool IsSocketDirectorySymlinkOrFile()
     {
-        if (File.Exists(_socketDirectory))
+        // Same trailing-slash trim as the runtime-directory check (R-024): a trailing slash makes
+        // DirectoryInfo report a null LinkTarget in .NET 10, so it is stripped before the check.
+        var directory = _socketDirectory.TrimEnd('/');
+        if (directory.Length == 0)
+        {
+            directory = "/";
+        }
+
+        if (File.Exists(directory))
         {
             return true;
         }
 
-        return Directory.Exists(_socketDirectory) && new DirectoryInfo(_socketDirectory).LinkTarget is not null;
+        return Directory.Exists(directory) && new DirectoryInfo(directory).LinkTarget is not null;
     }
 
     private async ValueTask<bool> ProbeWithoutLockAsync(CancellationToken cancellationToken)
