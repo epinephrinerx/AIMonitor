@@ -108,7 +108,7 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
     [Fact]
     public void ResolveAutostartDirectory_P2_53_RefusesANullHomeFolder()
     {
-        Assert.Throws<ArgumentNullException>(() => XdgAutostartStartupRegistrar.ResolveAutostartDirectory(null, null!));
+        Assert.Equal("homeDirectory", Assert.Throws<ArgumentNullException>(() => XdgAutostartStartupRegistrar.ResolveAutostartDirectory(null, null!)).ParamName);
     }
 
     [Theory]
@@ -128,8 +128,8 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
     [Fact]
     public void Constructor_RefusesNullArguments()
     {
-        Assert.Throws<ArgumentNullException>(() => new XdgAutostartStartupRegistrar(null!, "id"));
-        Assert.Throws<ArgumentNullException>(() => new XdgAutostartStartupRegistrar("/a", null!));
+        Assert.Equal("autostartDirectory", Assert.Throws<ArgumentNullException>(() => new XdgAutostartStartupRegistrar(null!, "id")).ParamName);
+        Assert.Equal("fileId", Assert.Throws<ArgumentNullException>(() => new XdgAutostartStartupRegistrar("/a", null!)).ParamName);
     }
 
     [Theory]
@@ -261,6 +261,16 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
     }
 
     [LinuxOnlyFact("checks that nothing is created on disk")]
+    public void Register_P2_63_WithANullExecutable_IsRefusedBeforeTheDiskIsTouched()
+    {
+        var registrar = NewRegistrar();
+
+        Assert.Throws<ArgumentNullException>(() => registrar.Register(null!));
+
+        Assert.False(Directory.Exists(Path.Combine(_root, "cfg")));
+    }
+
+    [LinuxOnlyFact("checks that nothing is created on disk")]
     public void Register_P2_63_WithARelativeExecutable_IsRefusedBeforeTheDiskIsTouched()
     {
         var registrar = NewRegistrar();
@@ -317,6 +327,25 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
         Assert.Null(new FileInfo(registrar.DesktopFilePath).LinkTarget);
         Assert.False(File.Exists(registrar.DesktopFilePath));
         Assert.Equal(BuiltForOptX, File.ReadAllText(target));
+    }
+
+    [LinuxOnlyFact("symbolic links are a Linux filesystem feature")]
+    public void P2_69_ASymbolicLinkToAMissingFileIsNotRegistered_AndRegisterReplacesItWithARegularFile()
+    {
+        var registrar = NewRegistrar();
+        Directory.CreateDirectory(registrar.AutostartDirectory);
+        var missing = Path.Combine(registrar.AutostartDirectory, "missing.desktop");
+        File.CreateSymbolicLink(registrar.DesktopFilePath, missing);
+
+        Assert.False(registrar.GetRegistrationState());
+        Assert.False(registrar.IsRegistered());
+
+        registrar.Register("/opt/x/aim");
+
+        Assert.Null(new FileInfo(registrar.DesktopFilePath).LinkTarget);
+        Assert.Equal(BuiltForOptX, File.ReadAllText(registrar.DesktopFilePath));
+        Assert.True(registrar.GetRegistrationState());
+        Assert.False(File.Exists(missing));
     }
 
     private string LinkTo(XdgAutostartStartupRegistrar registrar, string contents)
