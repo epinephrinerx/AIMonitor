@@ -392,7 +392,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 |---|---|
 | สถานะ | ✅ ตกลงแล้ว |
 | วันที่ | 2026-11-20 |
-| แตะส่วนไหน | `src/AIMonitor.Infrastructure/PlatformAdapters.cs` · adapter ใหม่ของ Linux ใน `src/AIMonitor.Infrastructure/` · `tests/AIMonitor.Infrastructure.Tests/PlatformAdaptersTests.cs` และเทสต์ของ adapter ใหม่ |
+| แตะส่วนไหน | `src/AIMonitor.Infrastructure/PlatformAdapters.cs` · adapter ใหม่ของ Linux ใน `src/AIMonitor.Infrastructure/` · `tests/AIMonitor.Infrastructure.Tests/PlatformAdaptersTests.cs` และเทสต์ของ adapter ใหม่ · ข้อความ "runs on Windows and macOS" ที่ `src/AIMonitor.Presentation.Avalonia/PlatformHost.cs:47` (เพิ่ม 2026-11-21 ตามผู้ใช้: "A แก้สำหรับ Branch นี้") |
 | เกี่ยวกับ | [[R-022]] พอร์ต macOS · [[R-023]] update ของ Mac Edition |
 
 **คุณระบุ:**
