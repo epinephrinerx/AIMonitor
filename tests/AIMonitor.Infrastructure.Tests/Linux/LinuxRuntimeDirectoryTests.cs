@@ -152,6 +152,28 @@ public sealed class LinuxRuntimeDirectoryTests : IDisposable
         Assert.Equal(Fallback, Resolve(link));
     }
 
+    [LinuxOnlyFact("symbolic links are a Linux filesystem feature")]
+    public void P1_5a_ASymbolicLinkIsStillRefusedWhenTheNameEndsInSlashes()
+    {
+        var target = MakeDirectory("target5a", "0700");
+        var link = Path.Combine(_root, "link5a");
+        Directory.CreateSymbolicLink(link, target);
+
+        Assert.Equal(Fallback, Resolve(link + "/"));
+        Assert.Equal(Fallback, Resolve(link + "//"));
+    }
+
+    [LinuxOnlyFact("reads the real modes of real folders")]
+    public void P1_5b_ARealFolderGivenWithATrailingSlashIsUsedWithoutADoubledSlash()
+    {
+        var dir = MakeDirectory("d5b", "0700");
+
+        var result = Resolve(dir + "/");
+
+        Assert.Equal(Path.Combine(dir, AppId), result);
+        Assert.DoesNotContain("//", result, StringComparison.Ordinal);
+    }
+
     [LinuxOnlyFact("reads the real modes of real folders")]
     public void P1_6_AScopedAppIdIsAppendedAsItIs()
     {
