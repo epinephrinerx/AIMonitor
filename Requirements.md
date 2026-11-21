@@ -1,6 +1,6 @@
 # Requirements — AIMonitor 2.0
 
-บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-20
+บันทึกสิ่งที่ตกลงกันไว้ · อัปเดตล่าสุด 2026-11-21
 บริบทของโปรเจกต์อยู่ที่ `AGENTS.md` และ `CLAUDE.md` — ไฟล์นี้ไม่เล่าซ้ำ
 
 | สถานะ | หมายถึง |
@@ -354,6 +354,37 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **ความคืบหน้า:**
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
+
+## R-025 · พฤติกรรม tray/menu bar ของ Linux edition
+
+| | |
+|---|---|
+| สถานะ | ✅ ตกลงแล้ว (รับรอง 2026-11-21 · ยังไม่เข้า pipeline จนกว่า [[R-024]] เสร็จ) |
+| วันที่ | 2026-11-21 |
+| แตะส่วนไหน | `src/AIMonitor.Presentation.Avalonia/App.axaml.cs` (`ApplyMenuBar`) · `src/AIMonitor.Presentation.Avalonia/MenuBar/MenuBarHost.cs` · `src/AIMonitor.Presentation.Avalonia/ViewModels/SettingsViewModel.cs` · `tests/AIMonitor.Presentation.Avalonia.Tests/` |
+| เกี่ยวกับ | [[R-024]] พอร์ต Linux · [[R-022]] พอร์ต macOS |
+
+**คุณระบุ:** (คำตอบต่อ Q3 ของ R-024)
+> เปิด requirement ใหม่ R-025
+
+คุณรับรองร่างนี้ 2026-11-21 (ตอบ "รับรอง" ต่อการทวนตารางและร่างของ R-025)
+
+**ผมเข้าใจว่า:**
+`ApplyMenuBar` สร้าง `MenuBarHost` ทุก OS เมื่อ `TrayPolicy.ShouldShowTray` เป็นจริง และตัวเลือก `MinimizeToTray` ใช้ร่วมกัน แต่ `MenuBarHost` ออกแบบสำหรับ macOS ยังไม่มีใครตรวจว่าบน Linux ไอคอนปรากฏจริงหรือไม่ ซึ่งขึ้นกับ desktop environment (GNOME ต้องมี AppIndicator extension, KDE รองรับ StatusNotifier) R-025 คือการตรวจและกำหนดพฤติกรรมบน Linux ให้ชัด โดยเลือกอย่างใดอย่างหนึ่ง: (ก) ทำให้ tray ใช้ได้จริงบน Linux หรือ (ข) ซ่อนตัวเลือก minimise-to-tray บน Linux แล้วให้ปิดหน้าต่างเป็นการออกจากแอปตามปกติ ผมเสนอแนว (ข) เป็นค่าเริ่มต้นหาก spike พบว่า tray ไม่เสถียร
+
+**ไม่รวม:**
+- ไม่แก้ฝั่ง WPF และไม่เปลี่ยนพฤติกรรม macOS/Windows
+- ไม่แตะ adapter ของ R-024 (secret store, startup, single-instance)
+- ไม่ทำแพ็กเกจ (.deb/AppImage) และ CI
+- ไม่ทำ widget แบบ always-on-top ถ้า window manager ไม่รองรับ
+
+**ตรวจรับเมื่อ:**
+- [ ] ผมทำ spike ตรวจแล้วรายงานว่า `MenuBarHost` บน Linux แสดงไอคอนได้หรือไม่ (ผมตรวจได้เฉพาะระดับโค้ดและเทสต์ ไม่เห็นหน้าจอจริง)
+- [ ] บน Linux เมื่อเปิด minimise-to-tray หน้าต่างต้องไม่หายไปโดยไม่มีทางเรียกกลับ (หรือตัวเลือกถูกซ่อน)
+- [ ] เทสต์ใน `AIMonitor.Presentation.Avalonia.Tests` ครอบคลุมพฤติกรรมที่เลือก และ `dotnet test AIMonitor.CrossPlatform.slnf` ไม่มีข้อล้ม
+- [ ] คุณทดสอบบน desktop Linux จริง (ระบุ DE ที่ใช้) แล้วหน้าต่างเรียกกลับได้
+
+**ความเสี่ยงที่เหลือ:** ผลต่างกันตาม desktop environment จึงเสนอให้เลือกแนว (ข) เป็นค่าเริ่มต้นหาก spike พบว่า tray ไม่เสถียร
 
 ## R-024 · พอร์ต AIMonitor 2.0 ลง Linux ด้วย Avalonia
 
