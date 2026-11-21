@@ -15,6 +15,7 @@ namespace AIMonitor.Infrastructure.Tests;
 /// entry to the user's account. The smoke tool under <c>tools/</c> is where that happens, on purpose
 /// and in isolation.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PlatformAdaptersTests
 {
     [Fact]
