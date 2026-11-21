@@ -37,8 +37,8 @@
 - Test Author Model : `opencode-go/qwen3.8-flash` (ชั่วคราวตั้งแต่ 2026-11-12: `Claude Sonnet 5.5` ตามคำตัดสินของผู้ใช้ เพราะ OpenCode Go ใช้ครบโควตารายสัปดาห์ — กลับเป็น qwen3.8-flash เมื่อโควตารีเซ็ต)
 - Test Author Effort : `ค่าเริ่มต้น` (ไม่รองรับ high)
 - Inspector : `Codex` ผู้ตรวจ spec และตรวจเทสต์ — หน้าที่และข้อห้ามอยู่ที่ §5.7
-- Inspector Model : `GPT-6-Sol` (เปลี่ยนจาก opencode qwen3.7-plus เมื่อ 2026-11-10)
-- Inspector Effort : `High`
+- Inspector Model : `gpt-6.1-sol` (เปลี่ยนจาก GPT-6-Sol เมื่อ 2026-11-21 เพราะ Codex บนบัญชี ChatGPT ปฏิเสธ id นั้น · ก่อนหน้านั้นเปลี่ยนจาก opencode qwen3.7-plus เมื่อ 2026-11-10; ซ้ำกับ Reviewer2 ซึ่งกฎ §1 อนุญาตแต่ต้องคนละ session)
+- Inspector Effort : `Medium` (เปลี่ยนจาก High เมื่อ 2026-11-21 ตามผู้ใช้)
 - Reviewer1 : `Claude Code`
 - Reviewer1 Model : `Claude Fable 5.1`
 - Reviewer1 Effort : `High`
