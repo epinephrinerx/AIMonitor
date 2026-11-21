@@ -99,6 +99,35 @@ public sealed class SecretKeyFileTests : IDisposable
         Assert.Equal(["secrets.key"], NamesIn(Path.GetDirectoryName(path)!));
     }
 
+    [LinuxOnlyFact("races real threads on one file; a statistical check, not a proof")]
+    public void ReadOrCreate_P3_20a_EightThreadsAtOnceAllGetTheSameKey_AndLeaveNoTemporaryFile()
+    {
+        for (var round = 0; round < 30; round++)
+        {
+            var path = Path.Combine(_root, "r" + round, "d", "secrets.key");
+            using var barrier = new Barrier(8);
+            var tasks = Enumerable.Range(0, 8)
+                .Select(_ => Task.Factory.StartNew(
+                    () =>
+                    {
+                        barrier.SignalAndWait();
+                        return SecretKeyFile.ReadOrCreate(path);
+                    },
+                    TaskCreationOptions.LongRunning))
+                .ToArray();
+
+            var keys = Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+
+            var onDisk = File.ReadAllBytes(path);
+            Assert.True(32 == onDisk.Length, $"round {round}: the key on disk is {onDisk.Length} bytes");
+            Assert.True(keys.All(key => key.AsSpan().SequenceEqual(onDisk)), $"round {round}: the threads did not all get the key on disk");
+            Assert.True(
+                NamesIn(Path.GetDirectoryName(path)!).SequenceEqual(["secrets.key"]),
+                $"round {round}: the folder holds {string.Join(",", NamesIn(Path.GetDirectoryName(path)!))}");
+            Assert.True((UnixFileMode.UserRead | UnixFileMode.UserWrite) == ModeOf(path), $"round {round}: the key file is not 0600");
+        }
+    }
+
     [LinuxOnlyFact("works on real files and modes")]
     public void ReadOrCreate_MakesADifferentKeyForADifferentFile()
     {
