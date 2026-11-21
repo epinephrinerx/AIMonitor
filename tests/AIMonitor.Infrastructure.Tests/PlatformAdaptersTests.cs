@@ -21,10 +21,10 @@ namespace AIMonitor.Infrastructure.Tests;
 public sealed class PlatformAdaptersTests
 {
     [Fact]
-    public void IsSupportedPlatform_IsTrueOnTheTwoPlatformsWithAFullSetOfAdapters()
+    public void IsSupportedPlatform_IsTrueOnThePlatformsWithAFullSetOfAdapters()
     {
         Assert.Equal(
-            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS(),
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux(),
             PlatformAdapters.IsSupportedPlatform);
     }
 
@@ -112,17 +112,28 @@ public sealed class PlatformAdaptersTests
     }
 
     [Fact]
-    public void CreateSecretProtector_PicksDpapiOnWindowsAndTheKeychainOnMacOS()
+    [SupportedOSPlatform("linux")]
+    public void CreateSecretProtector_PicksDpapiOnWindowsTheKeychainOnMacOSAndTheSecretServiceOnLinux()
     {
-        var protector = PlatformAdapters.CreateSecretProtector();
-
         if (OperatingSystem.IsWindows())
         {
-            Assert.Equal("WindowsDpapiProtector", protector.GetType().Name);
+            Assert.Equal("WindowsDpapiProtector", PlatformAdapters.CreateSecretProtector().GetType().Name);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Assert.IsType<KeychainSecretProtector>(PlatformAdapters.CreateSecretProtector());
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            var protector = Assert.IsType<LinuxSecretProtector>(PlatformAdapters.CreateSecretProtector());
+
+            Assert.Equal(PlatformAdapters.Scoped("AIMonitor2.secrets.v1"), protector.Service);
+            Assert.Equal("secret-store-key", protector.Account);
+            Assert.Equal(Path.Combine(PlatformAdapters.AppDataDirectory, "secrets.key"), protector.KeyFilePath);
         }
         else
         {
-            Assert.IsType<KeychainSecretProtector>(protector);
+            Assert.Throws<PlatformNotSupportedException>(() => PlatformAdapters.CreateSecretProtector());
         }
     }
 
@@ -367,6 +378,19 @@ public sealed class PlatformAdaptersTests
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    [LinuxOnlyFact("the secret protector is the Linux adapter")]
+    [SupportedOSPlatform("linux")]
+    public void CreateSecretProtector_OnLinux_UnderAScope_UsesItsOwnKeyringItemAndKeyFile()
+    {
+        using var scope = new ScopedEnvironment("smoke");
+
+        var protector = Assert.IsType<LinuxSecretProtector>(PlatformAdapters.CreateSecretProtector());
+
+        // A scope that misses the keyring item or the key file means a test run reads the installed app's key.
+        Assert.Equal("AIMonitor2.secrets.v1.smoke", protector.Service);
+        Assert.Equal("AIUsageMonitor.smoke", Path.GetFileName(Path.GetDirectoryName(protector.KeyFilePath)));
     }
 
     [MacOSOnlyFact("the socket coordinator is the macOS adapter")]

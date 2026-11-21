@@ -543,6 +543,22 @@ public sealed class LinuxSingleInstanceTests : IAsyncLifetime
         Assert.Empty(Directory.GetFileSystemEntries(target));
     }
 
+    [LinuxOnlyFact("symbolic links are a Linux filesystem feature")]
+    public async Task P1_24a_ASymbolicLinkGivenWithATrailingSlashIsStillOnlyProbed()
+    {
+        var target = MakeDirectory("target", "0755");
+        var link = Dir("link");
+        Directory.CreateSymbolicLink(link, target);
+        var instance = New(link + "/");
+
+        var result = await instance.TryAcquireAsync();
+
+        Assert.True(result);
+        Assert.False(instance.HasOwnership);
+        Assert.Equal(Mode("0755"), ModeOf(target));
+        Assert.Empty(Directory.GetFileSystemEntries(target));
+    }
+
     [LinuxOnlyFact("a plain file is a Linux-visible obstacle")]
     public async Task ASocketFolderThatIsAPlainFileIsOnlyProbed()
     {

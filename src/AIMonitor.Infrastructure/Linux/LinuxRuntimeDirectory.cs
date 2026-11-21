@@ -18,8 +18,11 @@ internal static class LinuxRuntimeDirectory
     public const string EnvironmentVariable = "XDG_RUNTIME_DIR";
 
     /// <summary>
-    /// <c>sockaddr_un.sun_path</c> holds 104 bytes on Linux, including the terminator; the macOS
-    /// adapter enforces the same limit.
+    /// <para>
+    /// On Linux <c>sockaddr_un.sun_path</c> holds 108 bytes (<c>UNIX_PATH_MAX</c>, terminator
+    /// included); the 103-byte limit enforced here is the stricter one that
+    /// <c>LocalSocketSingleInstance</c> applies at bind time.
+    /// </para>
     /// </summary>
     public const int MaxSocketPathBytes = 103;
 
@@ -37,7 +40,9 @@ internal static class LinuxRuntimeDirectory
     /// Returns the directory to build a scoped socket under, without creating or changing anything.
     ///
     /// A usable <paramref name="xdgRuntimeDir"/> yields the scope inside it; otherwise the caller's
-    /// <paramref name="fallbackDirectory"/> is returned unchanged. The runtime directory is only
+    /// <paramref name="fallbackDirectory"/> is returned unchanged. Every trailing slash is stripped
+    /// from <paramref name="xdgRuntimeDir"/> first (a value of only slashes keeps the root) and the
+    /// trimmed value drives both the checks and the returned path. The runtime directory is only
     /// taken as given: it must be absolute, exist, not be a symlink, be owner-only (0700, sticky
     /// permitted), listable by this user, and leave room for the socket file name.
     /// </summary>
@@ -47,14 +52,15 @@ internal static class LinuxRuntimeDirectory
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(scopedAppId);
 
-        return IsUsable(xdgRuntimeDir, scopedAppId)
-            ? Path.Combine(xdgRuntimeDir!, scopedAppId)
+        return IsUsable(xdgRuntimeDir, out var directory, scopedAppId)
+            ? Path.Combine(directory, scopedAppId)
             : fallbackDirectory;
     }
 
     [UnsupportedOSPlatform("windows")]
-    private static bool IsUsable(string? xdgRuntimeDir, string scopedAppId)
+    private static bool IsUsable(string? xdgRuntimeDir, out string directory, string scopedAppId)
     {
+        directory = string.Empty;
         try
         {
             if (string.IsNullOrWhiteSpace(xdgRuntimeDir) || xdgRuntimeDir.Contains('\0'))
@@ -62,27 +68,37 @@ internal static class LinuxRuntimeDirectory
                 return false;
             }
 
-            if (!Path.IsPathFullyQualified(xdgRuntimeDir) || !Directory.Exists(xdgRuntimeDir))
+            // A trailing slash makes DirectoryInfo report a null LinkTarget in .NET 10, so every
+            // trailing slash is stripped before any check; only slashes keep the root.
+            directory = xdgRuntimeDir.TrimEnd('/');
+            if (directory.Length == 0)
+            {
+                directory = "/";
+            }
+
+            if (!Path.IsPathFullyQualified(directory) || !Directory.Exists(directory))
             {
                 return false;
             }
 
-            if (new DirectoryInfo(xdgRuntimeDir).LinkTarget is not null)
+            if (new DirectoryInfo(directory).LinkTarget is not null)
             {
                 return false;
             }
 
-            var mode = File.GetUnixFileMode(xdgRuntimeDir);
+            var mode = File.GetUnixFileMode(directory);
             if ((mode & OwnerBits) != OwnerBits || (mode & GroupAndOtherBits) != 0)
             {
                 return false;
             }
 
             // Listing proves this user can actually reach the contents, which stands in for an
-            // ownership check: with owner-only mode the directory is this user's.
-            _ = Directory.EnumerateFileSystemEntries(xdgRuntimeDir).GetEnumerator().MoveNext();
+            // ownership check: with owner-only mode the directory is this user's. The enumerator
+            // is disposed so the listing does not outlive the check.
+            using var entries = Directory.EnumerateFileSystemEntries(directory).GetEnumerator();
+            _ = entries.MoveNext();
 
-            var scopedPath = Path.Combine(xdgRuntimeDir, scopedAppId);
+            var scopedPath = Path.Combine(directory, scopedAppId);
             var socketPathBytes = Encoding.UTF8.GetByteCount(scopedPath) + 1 + SocketFileNameBytes;
             return socketPathBytes <= MaxSocketPathBytes;
         }
