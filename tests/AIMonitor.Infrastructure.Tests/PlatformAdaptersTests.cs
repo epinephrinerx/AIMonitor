@@ -1,4 +1,5 @@
 using AIMonitor.Infrastructure;
+using AIMonitor.Infrastructure.Linux;
 using AIMonitor.Infrastructure.MacOS;
 using AIMonitor.Infrastructure.Storage;
 using AIMonitor.Infrastructure.Windows;
@@ -15,6 +16,7 @@ namespace AIMonitor.Infrastructure.Tests;
 /// entry to the user's account. The smoke tool under <c>tools/</c> is where that happens, on purpose
 /// and in isolation.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PlatformAdaptersTests
 {
     [Fact]
@@ -42,17 +44,31 @@ public sealed class PlatformAdaptersTests
     }
 
     [Fact]
-    public void CreateStartupRegistrar_PicksTheRunKeyOnWindowsAndALaunchAgentOnMacOS()
+    public void CreateStartupRegistrar_PicksTheRunKeyOnWindowsALaunchAgentOnMacOSAndAnAutostartEntryOnLinux()
     {
-        var registrar = PlatformAdapters.CreateStartupRegistrar();
-
         if (OperatingSystem.IsWindows())
         {
-            Assert.IsType<WindowsStartupRegistrar>(registrar);
+            Assert.IsType<WindowsStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Assert.IsType<LaunchAgentStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            var registrar = Assert.IsType<XdgAutostartStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+
+            Assert.Equal(PlatformAdapters.Scoped("net.apichart.aiusagemonitor"), registrar.FileId);
+            Assert.Equal(
+                XdgAutostartStartupRegistrar.ResolveAutostartDirectory(
+                    Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"),
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                + "/" + registrar.FileId + ".desktop",
+                registrar.DesktopFilePath);
         }
         else
         {
-            Assert.IsType<LaunchAgentStartupRegistrar>(registrar);
+            Assert.Throws<PlatformNotSupportedException>(() => PlatformAdapters.CreateStartupRegistrar());
         }
     }
 
@@ -145,6 +161,18 @@ public sealed class PlatformAdaptersTests
         // deletes the real one.
         Assert.Equal($"{LaunchAgentPlist.DefaultLabel}.smoke", registrar.Label);
         Assert.EndsWith($"{LaunchAgentPlist.DefaultLabel}.smoke.plist", registrar.PlistPath, StringComparison.Ordinal);
+    }
+
+    [LinuxOnlyFact("the autostart registrar is the Linux adapter")]
+    public void CreateStartupRegistrar_OnLinux_UnderAScope_TargetsItsOwnEntry_NotTheInstalledOne()
+    {
+        using var scope = new ScopedEnvironment("smoke");
+
+        var registrar = Assert.IsType<XdgAutostartStartupRegistrar>(PlatformAdapters.CreateStartupRegistrar());
+
+        // A scope that misses the autostart entry means a test run deletes the real one.
+        Assert.Equal("net.apichart.aiusagemonitor.smoke", registrar.FileId);
+        Assert.EndsWith("/autostart/net.apichart.aiusagemonitor.smoke.desktop", registrar.DesktopFilePath, StringComparison.Ordinal);
     }
 
     [MacOSOnlyFact("the socket coordinator is the macOS adapter")]
