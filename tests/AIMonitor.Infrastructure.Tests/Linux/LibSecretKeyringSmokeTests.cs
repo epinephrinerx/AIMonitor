@@ -100,4 +100,109 @@ public sealed class LibSecretKeyringSmokeTests
             result.Status is SecretServiceStatus.Done or SecretServiceStatus.NotFound,
             $"unexpected outcome: {result.Status}");
     }
+
+    // ---- argument checks: these are refused before the session bus or the library is ever touched,
+    // so they never reach the keyring and need no opt-in.
+
+    private sealed class PairList(params (string Key, string Value)[] pairs) : IReadOnlyDictionary<string, string>
+    {
+        public IEnumerable<string> Keys => pairs.Select(p => p.Key);
+
+        public IEnumerable<string> Values => pairs.Select(p => p.Value);
+
+        public int Count => pairs.Length;
+
+        public string this[string key] => pairs.First(p => p.Key == key).Value;
+
+        public bool ContainsKey(string key) => pairs.Any(p => p.Key == key);
+
+        public bool TryGetValue(string key, out string value)
+        {
+            value = pairs.FirstOrDefault(p => p.Key == key).Value;
+            return ContainsKey(key);
+        }
+
+        public IEnumerator<KeyValuePair<string, string>> GetEnumerator() =>
+            pairs.Select(p => new KeyValuePair<string, string>(p.Key, p.Value)).GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private static IReadOnlyDictionary<string, string> Fine() => Attributes("AIMonitor2.secrets.argument-test-" + Guid.NewGuid().ToString("N")[..8]);
+
+    [LinuxOnlyFact("argument checks never reach the keyring")]
+    public void Arguments_ANullSchemaNameIsRefusedWithItsParameterNamed()
+    {
+        var keyring = new LibSecretKeyring();
+
+        Assert.Equal("schemaName", Assert.Throws<ArgumentNullException>(() => keyring.Lookup(null!, Fine())).ParamName);
+        Assert.Equal("schemaName", Assert.Throws<ArgumentNullException>(() => keyring.Store(null!, Fine(), "label", "secret")).ParamName);
+        Assert.Equal("schemaName", Assert.Throws<ArgumentNullException>(() => keyring.Clear(null!, Fine())).ParamName);
+    }
+
+    [LinuxOnlyFact("argument checks never reach the keyring")]
+    public void Arguments_ABlankOrNulSchemaNameIsRefused()
+    {
+        var keyring = new LibSecretKeyring();
+
+        foreach (var bad in new[] { "", "  ", "a\0b" })
+        {
+            Assert.Equal("schemaName", Assert.Throws<ArgumentException>(() => keyring.Lookup(bad, Fine())).ParamName);
+            Assert.Equal("schemaName", Assert.Throws<ArgumentException>(() => keyring.Store(bad, Fine(), "label", "secret")).ParamName);
+            Assert.Equal("schemaName", Assert.Throws<ArgumentException>(() => keyring.Clear(bad, Fine())).ParamName);
+        }
+    }
+
+    [LinuxOnlyFact("argument checks never reach the keyring")]
+    public void Arguments_BadAttributesAreRefusedWithTheParameterNamed()
+    {
+        var keyring = new LibSecretKeyring();
+        var tooMany = Enumerable.Range(0, 33).ToDictionary(i => "k" + i, _ => "v");
+
+        Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Lookup(Schema, null!)).ParamName);
+        Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Clear(Schema, null!)).ParamName);
+        Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Store(Schema, null!, "label", "secret")).ParamName);
+        foreach (var bad in new IReadOnlyDictionary<string, string>[]
+        {
+            new Dictionary<string, string>(),
+            tooMany,
+            new Dictionary<string, string> { [""] = "v" },
+            new Dictionary<string, string> { ["a\0b"] = "v" },
+            new Dictionary<string, string> { ["k"] = "a\0b" },
+        })
+        {
+            Assert.Equal("attributes", Assert.Throws<ArgumentException>(() => keyring.Lookup(Schema, bad)).ParamName);
+            Assert.Equal("attributes", Assert.Throws<ArgumentException>(() => keyring.Clear(Schema, bad)).ParamName);
+            Assert.Equal("attributes", Assert.Throws<ArgumentException>(() => keyring.Store(Schema, bad, "label", "secret")).ParamName);
+        }
+
+        foreach (var bad in new IReadOnlyDictionary<string, string>[]
+        {
+            new PairList((null!, "v")),
+            new PairList(("k", null!)),
+        })
+        {
+            Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Lookup(Schema, bad)).ParamName);
+            Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Clear(Schema, bad)).ParamName);
+            Assert.Equal("attributes", Assert.Throws<ArgumentNullException>(() => keyring.Store(Schema, bad, "label", "secret")).ParamName);
+        }
+    }
+
+    [LinuxOnlyFact("argument checks never reach the keyring")]
+    public void Arguments_ABadLabelOrSecretIsRefusedWithTheParameterNamed()
+    {
+        var keyring = new LibSecretKeyring();
+
+        Assert.Equal("label", Assert.Throws<ArgumentNullException>(() => keyring.Store(Schema, Fine(), null!, "secret")).ParamName);
+        Assert.Equal("secret", Assert.Throws<ArgumentNullException>(() => keyring.Store(Schema, Fine(), "label", null!)).ParamName);
+        foreach (var bad in new[] { "  ", "a\0b" })
+        {
+            Assert.Equal("label", Assert.Throws<ArgumentException>(() => keyring.Store(Schema, Fine(), bad, "secret")).ParamName);
+        }
+
+        foreach (var bad in new[] { "", "a\0b" })
+        {
+            Assert.Equal("secret", Assert.Throws<ArgumentException>(() => keyring.Store(Schema, Fine(), "label", bad)).ParamName);
+        }
+    }
 }
