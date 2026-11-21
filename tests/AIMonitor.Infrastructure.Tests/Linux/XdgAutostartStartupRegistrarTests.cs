@@ -5,14 +5,14 @@ using AIMonitor.Infrastructure.Linux;
 namespace AIMonitor.Infrastructure.Tests.Linux;
 
 /// <summary>
-/// The XDG autostart registrar (SPEC_R024 section 2, A9-A15; plan rows P2-50..68). The path rules
+/// The XDG autostart registrar (R-024). The path rules
 /// and constructor checks are pure and run everywhere; the tests that touch the disk are
 /// Linux-only and work inside a temp folder of their own, never the real <c>~/.config/autostart</c>.
 /// Every value is passed in as a parameter: nothing here reads or sets an environment variable.
 /// </summary>
 public sealed class XdgAutostartStartupRegistrarTests : IDisposable
 {
-    // The bytes P2-25 expects Build("/opt/x/aim") to be, spelled out so no test reads them back from the code under test.
+    // The exact bytes the entry for /opt/x/aim must have, spelled out so no test reads them back from the code under test.
     private const string BuiltForOptX =
         "[Desktop Entry]\nType=Application\nName=AI Usage Monitor\nComment=Start AI Usage Monitor when you log in\nExec=/opt/x/aim\nTerminal=false\nX-GNOME-Autostart-enabled=true\n";
 
@@ -60,7 +60,7 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
     private static string[] EntriesOf(string directory) =>
         [.. Directory.GetFileSystemEntries(directory).Select(Path.GetFileName)!];
 
-    // ---- Pure: constants and path rules (A9, A10, A11) -------------------------------------------
+    // ---- Pure: constants and path rules ----------------------------------------------------------
 
     [Fact]
     public void DefaultFileId_IsTheLoginItemNameTheOtherPlatformsUse()
@@ -144,7 +144,7 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
         Assert.Equal("net.x", registrar.FileId);
     }
 
-    // ---- Linux: the disk (P2-56..68) --------------------------------------------------------------
+    // ---- Linux: the disk ---------------------------------------------------------------------------
 
     [LinuxOnlyFact("the registrar writes real files under a per-user folder")]
     public void Constructor_P2_56_DoesNotTouchTheDisk()
