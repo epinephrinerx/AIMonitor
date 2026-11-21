@@ -372,7 +372,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 **ผมเข้าใจว่า:**
 Linux edition คือแอป Avalonia ตัวเดียวกับ macOS ที่รันบน Linux ได้ branch `linux` แตกจาก main แล้ว merge `origin/Mac` (commit `46a1142`) build ผ่านด้วย `AIMonitor.CrossPlatform.slnf` แต่ `dotnet test` ล้ม 4 ข้อใน `PlatformAdaptersTests` เพราะ `PlatformAdapters` มีแค่สาขา Windows กับ macOS แล้ว `throw Unsupported(...)` บน Linux งานคือเติมสาขา Linux สามจุด:
 - single-instance: ใช้ `LocalSocketSingleInstance` (Unix domain socket) ร่วมกับ macOS
-- secret store: ตัวปิดผนึกความลับสำหรับ Linux ใช้กับ sealed file store เดิม
+- secret store: ตัวปิดผนึกความลับสำหรับ Linux ใช้ libsecret (Secret Service) เป็นหลัก และมี fallback เป็นไฟล์กุญแจสิทธิ์ 0600 เมื่อไม่มี Secret Service (คุณตัดสิน 2026-11-21: "ใช้ libsecret พร้อม fallback ไฟล์") ใช้กับ sealed file store เดิม
 - startup: autostart ผ่านไฟล์ `.desktop` ใน `~/.config/autostart`
 
 **ไม่รวม:**
@@ -389,7 +389,7 @@ Linux edition คือแอป Avalonia ตัวเดียวกับ macO
 - [ ] `dotnet test AIMonitor.CrossPlatform.slnf` บน Linux ไม่มีข้อล้ม
 - [ ] คุณรันแอป Avalonia บนเครื่อง Linux จริงแล้วเปิดหน้าหลักและเห็นข้อมูลได้ (ผมตรวจข้อนี้เองไม่ได้)
 
-**ความเสี่ยงที่เหลือ:** ถ้าใช้ libsecret ต้องมี Secret Service (GNOME Keyring/KWallet) ที่รันอยู่ บน session ที่ไม่มี (เช่น SSH ล้วน) จะใช้ไม่ได้ ต้องตัดสินว่าจะมี fallback เป็นไฟล์หรือไม่ก่อนลงมือ
+**ความเสี่ยงที่เหลือ:** ถ้าใช้ libsecret ต้องมี Secret Service (GNOME Keyring/KWallet) ที่รันอยู่ บน session ที่ไม่มี (เช่น SSH ล้วน) จะใช้ไม่ได้ ตัดสินแล้ว 2026-11-21 ให้มี fallback เป็นไฟล์ — เกณฑ์ตรวจรับต้องทดสอบทั้งสองทาง (มี/ไม่มี Secret Service)
 
 ## R-023 · ฟังก์ชัน update ของ Mac Edition ดึงเฉพาะ release จากสาขา Mac
 
