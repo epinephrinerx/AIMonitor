@@ -2,7 +2,7 @@
 
 Requirement: `Requirements.md` R-024 (✅ ตกลงแล้ว 2026-11-20, คำตัดสิน secret store 2026-11-21 "ใช้ libsecret พร้อม fallback ไฟล์")
 · เกี่ยวกับ R-022 · Base: branch `linux` ที่ `a0f40ea` · ผู้เขียน spec: Coding Owner (Claude Opus 5.5, High)
-· สถานะ: **ร่าง รอบ 8** — Inspector ขั้น A รอบ 1–6 ตัดสินครบแล้ว (§11, §11b, §11c, §11d, §11f, §11g)
+· สถานะ: **ร่าง รอบ 9** — Inspector ขั้น A รอบ 1–6 ตัดสินครบแล้ว (§11, §11b, §11c, §11d, §11f, §11g)
 · Q-6, Q-7 ผู้ใช้ตอบแล้ว (U7, U8)
 
 spec นี้เขียนให้ Writing Owner และ Test Author ทำงานขนานกันได้จาก spec อย่างเดียว ทุกชื่อ type, signature, path,
@@ -82,12 +82,12 @@ spec นี้เขียนให้ Writing Owner และ Test Author ท�
 | A4 | ขั้นสุดท้าย | ต่อ token ด้วยช่องว่างหนึ่งตัว แล้วแทน `\` ทุกตัวด้วย `\\` (escape ระดับ string ของ Desktop Entry) · ผลคือค่าหลัง `Exec=` · spec รับประกัน **การ serialize ตามกฎนี้เท่านั้น** ไม่ตรวจว่าไฟล์ที่ชี้ไปรันได้ (Inspector ข้อ 13) |
 | A5 | ตัวอย่าง | ตาราง A5 |
 | A6 | `Build` | คืนทุกตัวอักษร (LF, LF ปิดท้าย): `"[Desktop Entry]\nType=Application\nName=AI Usage Monitor\nComment=Start AI Usage Monitor when you log in\nExec=" + FormatExec(executablePath, arguments) + "\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"` |
-| A7 | `ReadEnabledState(contents)` — การแยก (Inspector ข้อ 14) | `contents` null → `ArgumentNullException` · แยกบรรทัดด้วย `\n`, ตัด `\r` ท้าย, trim · ข้ามบรรทัดว่างและขึ้นต้น `#` · บรรทัดที่ขึ้นต้น `[` **และ** ลงท้าย `]` = หัว group ชื่อ = ข้อความข้างใน (case-sensitive) · บรรทัดขึ้นต้น `[` ที่ไม่ลงท้าย `]` = บรรทัดเสีย ข้ามไป (group ปัจจุบันไม่เปลี่ยน) · บรรทัดอื่นที่มี `=`: key = ก่อน `=` ตัวแรก trim, value = หลัง trim; ไม่มี `=` → ข้าม · นับเฉพาะ entry ใน group `Desktop Entry` (ทุกครั้งที่ปรากฏ) · บรรทัด `key=value` ก่อนหัว group แรก ไม่อยู่ใน group ใด → ไม่นับ (D13) |
+| A7 | `ReadEnabledState(contents)` — การแยก (Inspector ข้อ 14) | `contents` null → `ArgumentNullException` · แยกบรรทัดด้วย `\n`, ตัด `\r` ท้าย, trim · ข้ามบรรทัดว่างและขึ้นต้น `#` · บรรทัดที่ขึ้นต้น `[` **และ** ลงท้าย `]` = หัว group ชื่อ = ข้อความข้างใน (case-sensitive) · บรรทัดขึ้นต้น `[` ที่ไม่ลงท้าย `]` = บรรทัดเสีย ข้ามไป (group ปัจจุบันไม่เปลี่ยน) · บรรทัดอื่นที่มี `=`: key = ก่อน `=` ตัวแรก trim, value = หลัง trim; **ชื่อ key เทียบแบบ ordinal case-sensitive** (`Exec`, `Hidden`, `X-GNOME-Autostart-enabled` เท่านั้น — `hidden`, `EXEC` ฯลฯ เป็น key อื่นที่ไม่นับ; ตาม Desktop Entry spec และเหมือนชื่อ group, รอบ 9); ไม่มี `=` → ข้าม · นับเฉพาะ entry ใน group `Desktop Entry` (ทุกครั้งที่ปรากฏ) · บรรทัด `key=value` ก่อนหัว group แรก ไม่อยู่ใน group ใด → ไม่นับ (D13) |
 | A8 | `ReadEnabledState` — ค่า | key ซ้ำ: **ค่าดิบตัวสุดท้ายชนะก่อน แล้วค่อยตีความ** (ค่าก่อนหน้าไม่ "รอด") · boolean: `true`/`1` = จริง, `false`/`0` = เท็จ (case-sensitive) ค่าอื่น = ถือว่าไม่มี key · ไม่มี group `Desktop Entry` → `null` · `Exec` (ตัวสุดท้าย) ไม่มีหรือว่าง → `null` · `Hidden` จริง → `false` · `X-GNOME-Autostart-enabled` เท็จ → `false` · นอกนั้น → `true` · ไม่ตรวจว่า `Exec` ชี้มาที่แอปนี้ |
 | A9 | ใหม่ `src/AIMonitor.Infrastructure/Linux/XdgAutostartStartupRegistrar.cs` | `internal sealed class XdgAutostartStartupRegistrar : IStartupRegistrar` (ไม่มี platform attribute) · `public const string DefaultFileId = "net.apichart.aiusagemonitor";` · ctor `public XdgAutostartStartupRegistrar(string autostartDirectory, string fileId)` · `public static string ResolveAutostartDirectory(string? xdgConfigHome, string homeDirectory)` · properties `AutostartDirectory` (ตามที่รับ), `FileId`, `DesktopFilePath` = `autostartDirectory.TrimEnd('/') + "/" + fileId + ".desktop"` |
 | A10 | ctor | (กฎ G-ARG) `autostartDirectory` null → `ArgumentNullException`, ว่าง/whitespace → `ArgumentException`; ไม่ขึ้นต้น `/` หรือมี `\0` → `ArgumentException` · `fileId` null → `ArgumentNullException`, ว่าง/whitespace → `ArgumentException`; มี `/` หรือ `\0` → `ArgumentException` · ไม่แตะดิสก์ |
 | A11 | `ResolveAutostartDirectory` | (กฎ G-ARG) `homeDirectory` null → `ArgumentNullException`, ว่าง/whitespace → `ArgumentException`; ไม่ขึ้นต้น `/` หรือมี `\0` → `ArgumentException` (Inspector ข้อ 11) · `xdgConfigHome` ขึ้นต้น `/` และไม่มี `\0` (ไม่ trim) → `xdgConfigHome.TrimEnd('/') + "/autostart"` · นอกนั้น (null, ว่าง, whitespace, สัมพัทธ์, มี `\0`) → `homeDirectory.TrimEnd('/') + "/.config/autostart"` · ไม่แตะดิสก์ |
-| A12 | `GetRegistrationState()` | `!File.Exists(DesktopFilePath)` → `false` (รวม: โฟลเดอร์ไม่มี, มี **โฟลเดอร์** อยู่ที่ path นั้น, ตรวจการมีอยู่ไม่ได้ — `File.Exists` คืน false ในทุกกรณีนี้ ยอมรับ) · อ่าน `File.ReadAllText` (UTF-8; symlink ถูกตามไป) · `FileNotFoundException`/`DirectoryNotFoundException` (เช่น symlink ที่ปลายทางไม่มี — `File.Exists` เป็นจริงแต่อ่านไม่ได้, รอบ 8) → **`false`** (จับก่อน `IOException`) · `IOException` อื่น/`UnauthorizedAccessException` → `null` · นอกนั้น → `ReadEnabledState` · `IsRegistered()` = `GetRegistrationState() ?? false` |
+| A12 | `GetRegistrationState()` | `!File.Exists(DesktopFilePath)` → `false` (รวม: โฟลเดอร์ไม่มี, มี **โฟลเดอร์** อยู่ที่ path นั้น, ตรวจการมีอยู่ไม่ได้ — `File.Exists` คืน false ในทุกกรณีนี้ ยอมรับ) · อ่าน `File.ReadAllText` (UTF-8; symlink ถูกตามไป) · ถอดแบบ **ไม่ strict** (`File.ReadAllText` ค่าเริ่มต้น): byte UTF-8 ที่เสียกลายเป็น U+FFFD แล้วแยกตาม A7/A8 ตามปกติ — ไม่ใช่ `null` (ไฟล์ที่แอปเขียนเป็น UTF-8 ถูกต้องเสมอ; ไฟล์ที่ถูกแก้จากภายนอกอ่านแบบ best effort และ `Register` เขียนทับเป็นเนื้อหา P2-25 ตาม A13 เหมือนไฟล์อื่น, รอบ 9) · `FileNotFoundException`/`DirectoryNotFoundException` (เช่น symlink ที่ปลายทางไม่มี — `File.Exists` เป็นจริงแต่อ่านไม่ได้, รอบ 8) → **`false`** (จับก่อน `IOException`) · `IOException` อื่น/`UnauthorizedAccessException` → `null` · นอกนั้น → `ReadEnabledState` · `IsRegistered()` = `GetRegistrationState() ?? false` |
 | A13 | `Register(executablePath, arguments = "")` (Inspector ข้อ 15) | (1) `executablePath` null → `ArgumentNullException`, ว่าง/whitespace → `ArgumentException` (G-ARG) (2) `content = XdgDesktopEntry.Build(...)` ก่อนแตะดิสก์ (throw → ไม่มีอะไรถูกสร้าง/แก้) (3) `Directory.CreateDirectory(AutostartDirectory)` (4) เขียนลง temp `AutostartDirectory.TrimEnd('/') + "/." + FileId + ".desktop." + Guid.NewGuid().ToString("N") + ".tmp"` (UTF-8 ไม่มี BOM; ชื่อ temp เป็นข้อกำหนดของ implementation ให้ Reviewer ตรวจ — **เทสต์ไม่ต้อง assert ชื่อ** assert แค่ว่าไม่เหลือไฟล์ `*.tmp` และมีไฟล์เดียวตาม P2-58/59/66) (5) `File.Move(tmp, DesktopFilePath, overwrite: true)` — atomic: ไฟล์เดิมคงอยู่ครบจนวินาทีที่ถูกแทน · symlink ที่ `DesktopFilePath` ถูกแทนด้วยไฟล์ธรรมดา (ปลายทางของ link ไม่ถูกแตะ) (6) ข้อ 3–5 ล้มด้วย `IOException`/`UnauthorizedAccessException` → ลบ tmp (best effort) แล้ว `InvalidOperationException($"Cannot write the autostart entry at '{DesktopFilePath}'.", inner)`; ไฟล์/โฟลเดอร์เดิมที่ `DesktopFilePath` ไม่เปลี่ยน · idempotent: input เดิม → ไบต์เดิม ไฟล์เดียว (ไม่เหลือ tmp เมื่อทำงานปกติ) · ไม่กำหนดโหมดไฟล์ (umask) |
 | A14 | `Unregister()` | `File.Delete(DesktopFilePath)` อย่างเดียว (symlink → ลบตัว link ไม่ใช่ปลายทาง) · ไม่มีไฟล์ หรือ `DirectoryNotFoundException` → ไม่ทำอะไร · มีโฟลเดอร์ที่ path นั้น หรือ `IOException`/`UnauthorizedAccessException` อื่น → `InvalidOperationException($"Cannot remove the autostart entry at '{DesktopFilePath}'.", inner)` และของเดิมไม่เปลี่ยน · ห้ามเขียน `Hidden=true` แทนการลบ ห้ามแตะไฟล์อื่น ห้ามลบโฟลเดอร์ |
 | A15 | per-user | เขียนเฉพาะโฟลเดอร์ของผู้ใช้ (A11) ไม่แตะ `$XDG_CONFIG_DIRS`/`/etc/xdg/autostart` |
@@ -149,6 +149,9 @@ spec นี้เขียนให้ Writing Owner และ Test Author ท�
 | D20 | `"[Desktop Entry]\nExec=/x\n[Broken\nHidden=true\n"` | `false` (`[Broken` ข้าม, ยังอยู่ใน group เดิม) |
 | D21 | `null` | `ArgumentNullException` |
 | D22 | `"[Desktop Entry]\nExec=/x\njunk line\n"` | `true` |
+| D23 | `"[Desktop Entry]\nExec=/x\nhidden=true\n"` | `true` (`hidden` ไม่ใช่ `Hidden`) |
+| D24 | `"[Desktop Entry]\nEXEC=/x\n"` | `null` (ไม่มี `Exec`) |
+| D25 | `"[Desktop Entry]\nExec=/x\nx-gnome-autostart-enabled=false\n"` | `true` |
 
 ---
 
@@ -359,7 +362,7 @@ socket path ในเทสต์ต้องสั้น (`LocalSocketSingleIns
 | P2-25 | `Build("/opt/x/aim")` | `"[Desktop Entry]\nType=Application\nName=AI Usage Monitor\nComment=Start AI Usage Monitor when you log in\nExec=/opt/x/aim\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"` | A6 |
 | P2-26 | `Build("/opt/AI Monitor/aim", "--minimized")` | เหมือน P2-25 แต่ `Exec="/opt/AI Monitor/aim" --minimized` | A6 |
 | P2-27 | `Build("relative")` | `InvalidOperationException` | A6 |
-| P2-28…49 | ตาราง D1–D22 | ตามตาราง | A7, A8 |
+| P2-28…49 | ตาราง D1–D25 (D23–D25 รอบ 9) | ตามตาราง | A7, A8 |
 | P2-50 | `ResolveAutostartDirectory(null, "/home/u")`, `("", …)`, `("   ", …)`, `("cfg", …)`, `("/x\0y", …)` | `"/home/u/.config/autostart"` | A11 |
 | P2-51 | `("/xdg/cfg", "/home/u")` / `("/xdg/cfg/", "/home/u")` / `("/", "/home/u")` | `"/xdg/cfg/autostart"` / `"/xdg/cfg/autostart"` / `"/autostart"` | A11 |
 | P2-52 | `(null, "/home/u/")` | `"/home/u/.config/autostart"` | A11 |
@@ -380,6 +383,7 @@ socket path ในเทสต์ต้องสั้น (`LocalSocketSingleIns
 | P2-66 (Linux) | ไฟล์เดิมเนื้อหา `B`; โฟลเดอร์ autostart ถูก chmod 0500 (non-root, `LinuxNonRootOnlyFact`) แล้ว `Register("/opt/y/aim")` | `InvalidOperationException`; ไฟล์เดิมยังเป็น `B` ครบทุกไบต์ | A13 |
 | P2-67 (Linux) | ไฟล์เนื้อหา `"garbage"` | state `null`, IsRegistered `false` | A8 |
 | P2-68 (`LinuxNonRootOnlyFact`) | ไฟล์โหมด 000 | state `null` | A12 |
+| P2-70 (Linux, รอบ 9) | ไฟล์ byte `"[Desktop Entry]\nExec=/x"` + `0xFF 0xFE` + `"\n"` / ไฟล์ byte `"[Desktop Entry]\nExec=/x\nHidden="` + `0xC3` + `"true\n"` / ไฟล์ byte `"[Desktop Entry]\nExec=/x\nHidden=true\n"` + `0xFF` | state `true` / `true` (ค่า `\uFFFDtrue` ไม่ใช่ boolean) / `false` · ไม่ throw ทุกตัว · แล้ว `Register("/opt/x/aim")` บนไฟล์แรก → ไบต์ไฟล์ == UTF-8 ของ P2-25, state `true` | A12, A13 |
 | P2-69 (Linux, รอบ 8) | `DesktopFilePath` เป็น symlink ไป `<dir>/missing.desktop` ที่ไม่มี | state `false`, IsRegistered `false` · แล้ว `Register("/opt/x/aim")` → path เป็นไฟล์ธรรมดา (`LinkTarget` null) เนื้อหา P2-25, state `true`; `missing.desktop` ยังไม่มี | A12, A13 |
 
 ### 6.3 เฟส 3 — `Linux/SecretServiceErrorsTests.cs` (ทุก OS), `Linux/SecretKeyFileTests.cs`, `Linux/LinuxSecretProtectorTests.cs` (Linux-only), smoke
@@ -736,6 +740,13 @@ dotnet test tests/AIMonitor.Infrastructure.Tests/AIMonitor.Infrastructure.Tests.
 | R1-nit | Reviewer1 | **adopt** — กติกา comment: อังกฤษ, อ้างได้แค่ requirement id, ห้ามอ้าง spec/Inspector id และเลขบรรทัดข้ามไฟล์ · WO2 แก้ในรอบแก้เดียวกัน | §7 |
 | แยกเฟส 3 | coordinator | **3a** (4 ไฟล์ที่ไม่ใช้ `LinuxFileLock` + W3e, W3f และเทสต์ของมัน) เริ่มและ compile ได้ทันที · **3b** (`LinuxSecretProtector`, W3a–W3d และเทสต์) หลังเฟส 1 | §7 |
 
+## 11h. Inspector ขั้น B เฟส 2 — คำตัดสิน (Coding Owner, 2026-11-21)
+
+| mutant | คำตัดสิน | อยู่ที่ | ฝั่งที่ต้องแก้ |
+|---|---|---|---|
+| M02, M15 | ชื่อ key เป็น ordinal case-sensitive (ตาม Desktop Entry spec) · เพิ่ม D23–D25 | A7, D23–D25 | **เทสต์เท่านั้น** — โค้ด WO2 ใช้ `switch` บนสตริงตรงตัวอยู่แล้ว (`XdgDesktopEntry.cs`) |
+| M30 | อ่านแบบไม่ strict: byte เสีย → U+FFFD แล้วแยกตามปกติ (ไม่ใช่ `null`); `Register` เขียนทับเป็นเนื้อหามาตรฐาน · เพิ่ม P2-70 | A12, P2-70 | **เทสต์เท่านั้น** — โค้ดใช้ `File.ReadAllText(path)` ค่าเริ่มต้นอยู่แล้ว |
+
 ## 12. บันทึกการเปลี่ยน spec
 
 | วันที่ | การเปลี่ยน |
@@ -748,3 +759,4 @@ dotnet test tests/AIMonitor.Infrastructure.Tests/AIMonitor.Infrastructure.Tests.
 | 2026-11-21 | รอบ 6: กฎ G-ARG (null → `ArgumentNullException`), A7/A10/A11/A13, P2-53/54/54a, L6, S21, §5 รูป T2a, §11e |
 | 2026-11-21 | รอบ 7: Inspector A รอบ 5 (§11f) — L6/L7/L7a (`_gate`), L8 ขอบเขต E1, R15, P1-22d, P1-26a–d, §6.4 แบบ print-only · §2, §3, §4, §5 ไม่เปลี่ยน |
 | 2026-11-21 | รอบ 8: Inspector A รอบ 6 (§11g) — L6 `IsClosing`, L8/R15 ขอบเขต E1, P1-26d, §6.4 · Reviewer1: A12 + P2-69, A16 `DoNotVerify`, กติกา comment · แยกเฟส 3a/3b |
+| 2026-11-21 | รอบ 9: Inspector ขั้น B เฟส 2 (§11h) — A7 key case-sensitive + D23–D25; A12 ถอด UTF-8 แบบไม่ strict + P2-70 |
