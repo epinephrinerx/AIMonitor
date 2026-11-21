@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using AIMonitor.Infrastructure;
 using AIMonitor.Infrastructure.Linux;
 using AIMonitor.Infrastructure.MacOS;
@@ -73,19 +74,40 @@ public sealed class PlatformAdaptersTests
     }
 
     [Fact]
-    public async Task CreateSingleInstanceCoordinator_PicksTheMutexOnWindowsAndASocketOnMacOS()
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_PicksTheMutexOnWindowsAndASocketOnMacOSAndLinux()
     {
-        await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
-
         if (OperatingSystem.IsWindows())
         {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
             Assert.IsType<NamedMutexSingleInstance>(coordinator);
         }
-        else
+        else if (OperatingSystem.IsMacOS())
         {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
+
             // Constructing it also proves the real socket path fits inside the length a Unix domain
             // socket allows, which depends on how long this user's home directory is.
             Assert.IsType<LocalSocketSingleInstance>(coordinator);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            await using var coordinator = PlatformAdapters.CreateSingleInstanceCoordinator();
+
+            var linux = Assert.IsType<LinuxSingleInstance>(coordinator);
+            var scopedAppId = PlatformAdapters.Scoped("AIUsageMonitor");
+            Assert.Equal(
+                LocalSocketSingleInstance.ResolveSocketPath(
+                    LinuxRuntimeDirectory.ResolveSocketDirectory(
+                        Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR"),
+                        PlatformAdapters.AppDataDirectory,
+                        scopedAppId),
+                    scopedAppId),
+                linux.SocketPath);
+        }
+        else
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => PlatformAdapters.CreateSingleInstanceCoordinator());
         }
     }
 
@@ -173,6 +195,80 @@ public sealed class PlatformAdaptersTests
         // A scope that misses the autostart entry means a test run deletes the real one.
         Assert.Equal("net.apichart.aiusagemonitor.smoke", registrar.FileId);
         Assert.EndsWith("/autostart/net.apichart.aiusagemonitor.smoke.desktop", registrar.DesktopFilePath, StringComparison.Ordinal);
+    }
+
+    [LinuxOnlyFact("the socket coordinator is the Linux adapter")]
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_OnLinux_UnderAScope_UsesItsOwnSocket()
+    {
+        string unscopedPath;
+        await using (var unscoped = PlatformAdapters.CreateSingleInstanceCoordinator())
+        {
+            unscopedPath = Assert.IsType<LinuxSingleInstance>(unscoped).SocketPath;
+        }
+
+        using var scope = new ScopedEnvironment("smoke");
+        await using var scoped = PlatformAdapters.CreateSingleInstanceCoordinator();
+        var scopedPath = Assert.IsType<LinuxSingleInstance>(scoped).SocketPath;
+
+        Assert.NotEqual(unscopedPath, scopedPath);
+        var xdg = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+        var resolved = LinuxRuntimeDirectory.ResolveSocketDirectory(xdg, PlatformAdapters.AppDataDirectory, "AIUsageMonitor.smoke");
+        if (resolved != PlatformAdapters.AppDataDirectory)
+        {
+            Assert.StartsWith(Path.Combine(xdg!, "AIUsageMonitor.smoke") + "/", scopedPath, StringComparison.Ordinal);
+        }
+    }
+
+    [LinuxOnlyFact("activation goes through a real Unix socket")]
+    [SupportedOSPlatform("linux")]
+    public async Task CreateSingleInstanceCoordinator_OnLinux_ASecondLaunchActivatesTheFirst()
+    {
+        // A scope of its own, so the run never touches the folder of an installed copy.
+        using var scope = new ScopedEnvironment("t" + Guid.NewGuid().ToString("N")[..8]);
+        var first = Assert.IsType<LinuxSingleInstance>(PlatformAdapters.CreateSingleInstanceCoordinator());
+        var second = Assert.IsType<LinuxSingleInstance>(PlatformAdapters.CreateSingleInstanceCoordinator());
+        var socketFolder = Path.GetDirectoryName(first.SocketPath)!;
+        try
+        {
+            var activated = new TaskCompletionSource<string[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            first.Activated += arguments => activated.TrySetResult(arguments);
+
+            Assert.True(await first.TryAcquireAsync());
+            Assert.True(first.HasOwnership);
+            Assert.False(await second.TryAcquireAsync());
+            Assert.True(await second.NotifyExistingInstanceAsync(["--show"]));
+
+            Assert.Equal(["--show"], await activated.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            await second.DisposeAsync();
+            await first.DisposeAsync();
+            if (Directory.Exists(socketFolder))
+            {
+                Directory.Delete(socketFolder, recursive: true);
+            }
+        }
+    }
+
+    [LinuxOnlyFact("the data folder rule is Linux-only")]
+    public void AppDataDirectory_OnLinux_IsFullyQualifiedEvenWhenTheDataFolderDoesNotExistYet()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "aim-nodata-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        using var scope = new ScopedEnvironment(null);
+        try
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", missing);
+
+            Assert.Equal(Path.Combine(missing, "AIUsageMonitor"), PlatformAdapters.AppDataDirectory);
+            Assert.False(Directory.Exists(missing));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previous);
+        }
     }
 
     [MacOSOnlyFact("the socket coordinator is the macOS adapter")]
