@@ -100,6 +100,12 @@ public sealed class LinuxRuntimeDirectoryTests : IDisposable
         Assert.Equal(Path.Combine(dir, AppId), Resolve(dir));
     }
 
+    // L3(ฉ) (listability, the MoveNext/enumeration check) has no isolated test on purpose: it is
+    // checked after the mode test, which already demands owner rwx and no group/other bits, and a
+    // folder with such a mode can always be listed by its owner. A folder that passes the mode
+    // checks yet cannot be listed would need a different owner, an ACL or a failing filesystem,
+    // none of which a test can create without another user or root. Left to code review.
+
     [LinuxOnlyFact("reads the real modes of real folders")]
     public void P1_4_AnUnusablePathFallsBack_WithoutBeingTrimmedIntoShape()
     {

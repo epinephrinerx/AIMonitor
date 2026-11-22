@@ -598,6 +598,10 @@ public sealed class LinuxSingleInstanceTests : IAsyncLifetime
     {
         var owner = New(Dir("s"));
         Assert.True(await owner.TryAcquireAsync());
+        // Fail-open also returns true, so ownership and the socket file must be shown first;
+        // otherwise "the socket is gone" below would hold without there ever having been one.
+        Assert.True(owner.HasOwnership, "precondition: the instance must own the socket");
+        Assert.True(File.Exists(owner.SocketPath), "precondition: the socket file must exist before disposal");
 
         await owner.DisposeAsync();
         await owner.DisposeAsync();

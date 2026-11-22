@@ -313,7 +313,9 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
         var registrar = NewRegistrar();
         registrar.Register("/opt/x/aim");
         var anomalies = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var reads = 0;
         using var stop = new CancellationTokenSource();
+        using var firstRead = new ManualResetEventSlim(false);
         var reader = Task.Run(() =>
         {
             while (!stop.IsCancellationRequested)
@@ -321,6 +323,8 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
                 try
                 {
                     var text = File.ReadAllText(registrar.DesktopFilePath);
+                    Interlocked.Increment(ref reads);
+                    firstRead.Set();
                     if (text != BuiltForOptX && text != BuiltForOptY)
                     {
                         anomalies.Enqueue("partial or unexpected content: " + text);
@@ -337,6 +341,8 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
             }
         });
 
+        // The replacements only count once the reader is actually reading.
+        Assert.True(firstRead.Wait(TimeSpan.FromSeconds(30)), "the reader never completed a read");
         for (var round = 0; round < 300; round++)
         {
             registrar.Register(round % 2 == 0 ? "/opt/y/aim" : "/opt/x/aim");
@@ -345,6 +351,7 @@ public sealed class XdgAutostartStartupRegistrarTests : IDisposable
         stop.Cancel();
         reader.GetAwaiter().GetResult();
         Assert.Empty(anomalies);
+        Assert.True(Volatile.Read(ref reads) >= 1, "the reader performed no read, so the check proved nothing");
         Assert.Equal(["net.x.desktop"], EntriesOf(registrar.AutostartDirectory));
     }
 
