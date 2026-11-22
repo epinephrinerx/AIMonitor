@@ -252,9 +252,9 @@ internal sealed class LinuxSingleInstance : ISingleInstanceCoordinator
 
     private async ValueTask<SocketProbe> ConnectProbeAsync(CancellationToken cancellationToken)
     {
-        var client = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         try
         {
+            using var client = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(_connectTimeout);
             await client
@@ -281,10 +281,6 @@ internal sealed class LinuxSingleInstance : ISingleInstanceCoordinator
             }
 
             return SocketProbe.Inconclusive;
-        }
-        finally
-        {
-            client.Dispose();
         }
     }
 

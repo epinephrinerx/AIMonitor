@@ -176,25 +176,34 @@ internal sealed class LinuxSecretProtector : ISecretProtector
             }
 
             var created = RandomNumberGenerator.GetBytes(KeyBytes);
-            var store = _keyring.Store(
-                SchemaName,
-                KeyAttributes(Service, Account),
-                KeyLabel(Service),
-                Convert.ToBase64String(created));
-            if (store.Status == SecretServiceStatus.Done)
+            var handedOff = false;
+            try
             {
-                source = LinuxKeySource.SecretService;
-                return created;
+                var store = _keyring.Store(
+                    SchemaName,
+                    KeyAttributes(Service, Account),
+                    KeyLabel(Service),
+                    Convert.ToBase64String(created));
+                if (store.Status == SecretServiceStatus.Done)
+                {
+                    source = LinuxKeySource.SecretService;
+                    handedOff = true;
+                    return created;
+                }
+                if (store.Status == SecretServiceStatus.Unavailable && _lastSource is null)
+                {
+                    source = LinuxKeySource.KeyFile;
+                    return SecretKeyFile.ReadOrCreate(KeyFilePath);
+                }
+                if (store.Status == SecretServiceStatus.Unavailable)
+                    throw KeyringError("The secret store uses the Secret Service, which is not available in this session; nothing was saved.", store);
+                throw KeyringError("The Secret Service refused to store the secret store key.", store);
             }
-            CryptographicOperations.ZeroMemory(created);
-            if (store.Status == SecretServiceStatus.Unavailable && _lastSource is null)
+            finally
             {
-                source = LinuxKeySource.KeyFile;
-                return SecretKeyFile.ReadOrCreate(KeyFilePath);
+                if (!handedOff)
+                    CryptographicOperations.ZeroMemory(created);
             }
-            if (store.Status == SecretServiceStatus.Unavailable)
-                throw KeyringError("The secret store uses the Secret Service, which is not available in this session; nothing was saved.", store);
-            throw KeyringError("The Secret Service refused to store the secret store key.", store);
         }
     }
 
