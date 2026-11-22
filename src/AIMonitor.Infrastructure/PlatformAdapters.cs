@@ -14,7 +14,8 @@ namespace AIMonitor.Infrastructure;
 /// A composition root calls these instead of naming a concrete adapter, so Windows and macOS make
 /// the same choices from one place rather than each presentation layer repeating them and drifting
 /// apart (R-022). Everything else in this assembly is platform-neutral or already annotated, so this
-/// is the only type that needs to know which operating system it is on.
+/// is the only type that needs to know which operating system it is on, so Windows, macOS and Linux
+/// make the same choices.
 /// </summary>
 public static class PlatformAdapters
 {
@@ -47,9 +48,13 @@ public static class PlatformAdapters
     }
 
     /// <summary>The platforms with a full set of adapters. Nothing else can run the app.</summary>
-    public static bool IsSupportedPlatform => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
+    public static bool IsSupportedPlatform =>
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux();
 
-    /// <summary>Where settings, secrets and logs live for this user.</summary>
+    /// <summary>
+    /// Where settings, secrets and logs live for this user. On Linux, the data folder is not checked
+    /// for existence.
+    /// </summary>
     public static string AppDataDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
             OperatingSystem.IsLinux()
@@ -58,8 +63,9 @@ public static class PlatformAdapters
         Scoped(AppId));
 
     /// <summary>
-    /// The secret store: one sealed file either way, sealed with DPAPI on Windows and with a key
-    /// from the login Keychain on macOS.
+    /// The secret store: one sealed file either way, sealed with DPAPI on Windows, with a key from
+    /// the login Keychain on macOS, and on Linux with a key from the Secret Service, or from a 0600
+    /// key file when there is none.
     /// </summary>
     public static ISecretStore CreateSecretStore(string path)
     {
@@ -67,7 +73,10 @@ public static class PlatformAdapters
         return new DpapiSecretStore(path, CreateSecretProtector(), new AtomicFileWriter());
     }
 
-    /// <summary>The per-user "open at login" entry: the HKCU Run key, or a LaunchAgent plist.</summary>
+    /// <summary>
+    /// The per-user "open at login" entry: the HKCU Run key, a LaunchAgent plist, or an XDG
+    /// autostart entry.
+    /// </summary>
     public static IStartupRegistrar CreateStartupRegistrar()
     {
         if (OperatingSystem.IsWindows())
@@ -98,7 +107,8 @@ public static class PlatformAdapters
 
     /// <summary>
     /// The single-instance guard: a named mutex plus a named pipe on Windows, one listening Unix
-    /// domain socket on macOS.
+    /// domain socket on macOS, and on Linux a socket in <c>$XDG_RUNTIME_DIR</c> when it is usable,
+    /// guarded by a lock file.
     /// </summary>
     public static ISingleInstanceCoordinator CreateSingleInstanceCoordinator()
     {
@@ -171,6 +181,15 @@ public static class PlatformAdapters
                 MacOSCommand.Run);
         }
 
+        if (OperatingSystem.IsLinux())
+        {
+            return new Linux.LinuxSecretProtector(
+                Scoped(KeychainSecretProtector.DefaultService),
+                KeychainSecretProtector.DefaultAccount,
+                new Linux.LibSecretKeyring(),
+                Path.Combine(AppDataDirectory, Linux.LinuxSecretProtector.KeyFileName));
+        }
+
         throw Unsupported(nameof(ISecretProtector));
     }
 
@@ -184,7 +203,7 @@ public static class PlatformAdapters
     private static ILegacySettingsReader CreateLegacyRegistrySettingsReader() => new LegacyRegistrySettingsReader();
 
     private static PlatformNotSupportedException Unsupported(string port) =>
-        new($"{port} has no adapter for this operating system; AI Usage Monitor supports Windows and macOS.");
+        new($"{port} has no adapter for this operating system; AI Usage Monitor supports Windows, macOS and Linux.");
 
     /// <summary>No 1.x profile to read on this platform.</summary>
     private sealed class NoLegacySettings : ILegacySettingsReader

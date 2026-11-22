@@ -44,7 +44,7 @@ internal sealed class PlatformHost : IAsyncDisposable
         if (!PlatformAdapters.IsSupportedPlatform)
         {
             throw new PlatformNotSupportedException(
-                "AI Usage Monitor runs on Windows and macOS; this operating system has no adapters.");
+                "AI Usage Monitor runs on Windows, macOS and Linux; this operating system has no adapters.");
         }
 
         return new PlatformHost(PlatformAdapters.CreateSingleInstanceCoordinator());
