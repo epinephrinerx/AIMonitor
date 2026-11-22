@@ -355,11 +355,41 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-026 · สวิตช์ "เริ่มพร้อมการล็อกอิน" ใน Settings ของ Avalonia ต้องลงทะเบียนจริง
+
+| | |
+|---|---|
+| สถานะ | 🔨 กำลังทำ (รับรอง 2026-11-23) |
+| วันที่ | 2026-11-23 |
+| แตะส่วนไหน | `src/AIMonitor.Presentation.Avalonia/ViewModels/SettingsViewModel.cs` (บันทึก `StartWithWindows`) · `src/AIMonitor.Presentation.Avalonia/PlatformHost.cs` / การประกอบ ViewModel (ส่ง `IStartupRegistrar` เข้ามา) · `tests/AIMonitor.Presentation.Avalonia.Tests/` |
+| เกี่ยวกับ | [[R-024]] พอร์ต Linux (ช่องว่างนี้ถูกแยกออกมาเป็น N11/Q-7) · [[R-022]] พอร์ต macOS |
+
+**คุณระบุ:**
+> เริ่ม Q-7 ต่อเลยครับ แล้วทำ R-025 ต่อได้เลยครับ
+
+คุณรับรองร่างนี้ 2026-11-23 (ตอบ "รับรอง" ต่อการทวนตารางและร่างของ R-026)
+
+(Q-7 = ช่องว่างที่ Inspector พบ และคุณตอบ (ข) ว่าให้เป็น requirement ใหม่แยกจาก R-024)
+
+**ผมเข้าใจว่า:**
+ใน `SettingsViewModel` (Avalonia) การกดบันทึกเขียนแค่ `StartWithWindows` ลง settings ไม่เรียก `IStartupRegistrar.Register/Unregister` ผลคือบน Linux สวิตช์ไม่สร้าง/ลบ `~/.config/autostart/<id>.desktop` และครั้งถัดไป `StartupSettingsReconciler` จะอ่านสถานะจริงแล้วเขียนทับค่าที่ผู้ใช้เลือกกลับ (สวิตช์ "เด้งกลับ") ต้องให้การบันทึกเรียก registrar ตามค่าใหม่ (เปิด → `Register(executablePath)`, ปิด → `Unregister()`) แล้วจัดการความล้มเหลวให้ผู้ใช้เห็น โดยไม่เปลี่ยนตัว registrar ของ Linux/macOS/Windows เอง วิธีนี้ใช้กับทุก OS ที่ใช้ Avalonia (Linux และ macOS) เพราะเป็นโค้ดร่วม
+
+**ไม่รวม:**
+- ไม่แก้ `XdgAutostartStartupRegistrar`, `LaunchAgent` ของ macOS หรือ `WindowsStartupRegistrar` และไม่แก้ฝั่ง WPF
+- ไม่แก้ `StartupSettingsReconciler` นอกเหนือจากที่จำเป็นให้สอดคล้อง
+- ไม่ทำ tray (R-025) หรือแพ็กเกจ
+
+**ตรวจรับเมื่อ:**
+- [ ] เทสต์ใน `AIMonitor.Presentation.Avalonia.Tests` (registrar ปลอม): บันทึกด้วยสวิตช์เปิด → `Register` ถูกเรียกครั้งเดียวด้วย path ของโปรแกรม · ปิด → `Unregister` · ไม่เปลี่ยนค่า → ไม่เรียกอะไร
+- [ ] registrar โยน exception → บันทึกค่าอื่นของ Settings ไม่หาย, สวิตช์กลับเป็นสถานะจริง และผู้ใช้เห็นข้อความผิดพลาด
+- [ ] `dotnet test AIMonitor.CrossPlatform.slnf` ไม่มีข้อล้ม
+- [ ] คุณทดสอบบน Linux จริง: เปิดสวิตช์ → มีไฟล์ใน `~/.config/autostart/`; ปิด → ไฟล์หาย; เปิดแอปใหม่ สวิตช์ไม่เด้งกลับ
+
 ## R-025 · พฤติกรรม tray/menu bar ของ Linux edition
 
 | | |
 |---|---|
-| สถานะ | ✅ ตกลงแล้ว (รับรอง 2026-11-21 · ยังไม่เข้า pipeline จนกว่า [[R-024]] เสร็จ) |
+| สถานะ | 🔨 กำลังทำ (รับรอง 2026-11-21 · R-024 เสร็จแล้ว เริ่ม 2026-11-23) |
 | วันที่ | 2026-11-21 |
 | แตะส่วนไหน | `src/AIMonitor.Presentation.Avalonia/App.axaml.cs` (`ApplyMenuBar`) · `src/AIMonitor.Presentation.Avalonia/MenuBar/MenuBarHost.cs` · `src/AIMonitor.Presentation.Avalonia/ViewModels/SettingsViewModel.cs` · `tests/AIMonitor.Presentation.Avalonia.Tests/` |
 | เกี่ยวกับ | [[R-024]] พอร์ต Linux · [[R-022]] พอร์ต macOS |
