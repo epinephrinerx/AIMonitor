@@ -390,7 +390,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (โค้ด+เทสต์เสร็จ 2026-11-22: build/format/test บน Linux ผ่าน ไม่มีเทสต์ล้ม · ยังไม่ได้ตรวจบน Windows/macOS · ต้องทดสอบด้วยมือ M1–M6 บนเดสก์ท็อป Linux จริง) |
+| สถานะ | ✔️ เสร็จ (ผู้ใช้รับรอง 2026-11-22 จากการเปิดแอปบน Linux: หน้าต่างขึ้น · single-instance · บันทึก connection ผ่าน secret store · เหลือทำภายหลัง: manual M3–M6 (keyring ล็อก/ไม่มี Secret Service), ตรวจบน Windows/macOS, Q-7 startup toggle) |
 | วันที่ | 2026-11-20 |
 | แตะส่วนไหน | `src/AIMonitor.Infrastructure/PlatformAdapters.cs` · adapter ใหม่ของ Linux ใน `src/AIMonitor.Infrastructure/` · `tests/AIMonitor.Infrastructure.Tests/PlatformAdaptersTests.cs` และเทสต์ของ adapter ใหม่ · ข้อความ "runs on Windows and macOS" ที่ `src/AIMonitor.Presentation.Avalonia/PlatformHost.cs:47` (เพิ่ม 2026-11-21 ตามผู้ใช้: "A แก้สำหรับ Branch นี้") · `src/AIMonitor.Presentation.Avalonia/ViewModels/ConnectionsViewModel.cs:327` เพิ่มการจับ `CryptographicException` เมื่อบันทึกความลับไม่ได้ พร้อมเทสต์ใน `tests/AIMonitor.Presentation.Avalonia.Tests/` (เพิ่ม 2026-11-21 ตามผู้ใช้: Q-6 เลือก (a)) |
 | เกี่ยวกับ | [[R-022]] พอร์ต macOS · [[R-023]] update ของ Mac Edition |
