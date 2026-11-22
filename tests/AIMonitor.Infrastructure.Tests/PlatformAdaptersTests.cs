@@ -228,7 +228,15 @@ public sealed class PlatformAdaptersTests
         Assert.Equal(LocalSocketSingleInstance.ResolveSocketPath(resolved, "AIUsageMonitor.smoke"), scopedPath);
         if (resolved != PlatformAdapters.AppDataDirectory)
         {
-            Assert.StartsWith(Path.Combine(xdg!, "AIUsageMonitor.smoke") + "/", scopedPath, StringComparison.Ordinal);
+            // L3 strips every trailing slash before use, so the expected prefix is the normalised path.
+            var normalised = xdg!.TrimEnd('/');
+            if (normalised.Length == 0)
+            {
+                normalised = "/";
+            }
+
+            Assert.StartsWith(Path.Combine(normalised, "AIUsageMonitor.smoke") + "/", scopedPath, StringComparison.Ordinal);
+            Assert.DoesNotContain("//", scopedPath, StringComparison.Ordinal);
         }
     }
 

@@ -199,7 +199,9 @@ public sealed class LinuxSecretProtectorTests : IDisposable
         Assert.Equal("service", Assert.Throws<ArgumentNullException>(() => new LinuxSecretProtector(null!, Account, fake, key)).ParamName);
         Assert.Equal("account", Assert.Throws<ArgumentNullException>(() => new LinuxSecretProtector(Service, null!, fake, key)).ParamName);
         Assert.Equal("keyFilePath", Assert.Throws<ArgumentNullException>(() => new LinuxSecretProtector(Service, Account, fake, null!)).ParamName);
-        Assert.Throws<ArgumentOutOfRangeException>(() => new LinuxSecretProtector(Service, Account, fake, key, TimeSpan.FromMilliseconds(-1)));
+        Assert.Equal(
+            "keyLockTimeout",
+            Assert.Throws<ArgumentOutOfRangeException>(() => new LinuxSecretProtector(Service, Account, fake, key, TimeSpan.FromMilliseconds(-1))).ParamName);
         Assert.Empty(fake.Calls);
         Assert.False(Directory.Exists(_root));
     }
@@ -550,6 +552,44 @@ public sealed class LinuxSecretProtectorTests : IDisposable
                 $"flipping a bit at byte {position} was not refused");
         }
     }
+
+    [LinuxOnlyFact("works on real files and modes")]
+    public void S22_AFailedUnprotectDoesNotMakeTheProtectorRememberThatKeySource_SecretService()
+    {
+        var key = NewKey();
+        var blob = SealWithSecretService(key);
+        blob[14] ^= 0x01; // the tag: the key is found, authentication fails
+        var fake = new FakeKeyring { LookupResult = SecretServiceResultOf.Found(Base64(key)) };
+        var protector = New(fake);
+        Assert.IsAssignableFrom<CryptographicException>(Record.Exception(() => protector.Unprotect(blob)));
+
+        // A remembered Secret Service source would refuse to fall back to the key file now.
+        fake.LookupResult = new(SecretServiceStatus.Unavailable);
+        var sealedData = protector.Protect(Plaintext);
+
+        Assert.Equal(0x02, sealedData[1]);
+        Assert.Equal(Plaintext, Decrypt(File.ReadAllBytes(KeyFile()), sealedData, 0x02));
+    }
+
+    [LinuxOnlyFact("works on real files and modes")]
+    public void S22_AFailedUnprotectDoesNotMakeTheProtectorRememberThatKeySource_KeyFile()
+    {
+        var blob = SealWithKeyFile();
+        blob[14] ^= 0x01;
+        var newKey = NewKey();
+        var fake = new FakeKeyring { LookupResult = new(SecretServiceStatus.Unavailable) };
+        var protector = New(fake);
+        Assert.IsAssignableFrom<CryptographicException>(Record.Exception(() => protector.Unprotect(blob)));
+
+        // A remembered key-file source would skip the Secret Service and keep using the file.
+        fake.LookupResult = SecretServiceResultOf.Found(Base64(newKey));
+        var sealedData = protector.Protect(Plaintext);
+
+        AssertSealedWith(newKey, 0x01, sealedData);
+    }
+
+    // S22 (decoded key buffers are zeroed after use) is not observable through the public API: the
+    // temporary arrays are private and no test can see or hook them, so no test is written for it.
 
     [LinuxOnlyFact("works on real files and modes")]
     public void P3_41_TheSourceByteIsAuthenticated()
