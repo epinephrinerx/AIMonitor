@@ -359,7 +359,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (ผู้ใช้ยืนยัน 2026-11-23 · branch `agent/claude-r022-esp32-display` ยังไม่ commit) |
+| สถานะ | 🧪 รอตรวจรับ (ผู้ใช้ยืนยัน 2026-11-23 · commit `9bd6938` · ออกใน 2.0.5) |
 | วันที่ | 2026-11-23 |
 | แตะส่วนไหน | tray readings (`ITrayReadingsSink` / `MainWindowViewModel.AttachTray`) · composition root (`App.xaml.cs`) · `AppSettings` + `SettingsDialog` · ตัวเขียน serial ใหม่ · dependency `System.IO.Ports` |
 | เกี่ยวกับ | firmware และ protocol อยู่นอก repo นี้: `D:\Dev\ESP32\AIMonitor` (`docs/PROTOCOL.md` v1) |
@@ -416,6 +416,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
     (ข้าม COM3/COM4 ที่เป็น Bluetooth), 65 s ส่ง 3 เฟรม (เฟรมแรก + heartbeat 30/60 s), handshake ผ่านตั้งแต่ ping แรก
 - ยังต้องให้คุณตรวจในแอปจริง: ข้อ 1, ข้อ 5 กับการถอด/เสียบสายจริง, ข้อ 6 (ดูว่าจอไม่กระพริบกลับหน้า "Waiting" ตอนเปิดใช้)
   และข้อ 8 — ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ยังทำงานอยู่ (single instance)
+- 2026-11-23 — ผู้ใช้สั่ง "commit push build release ครับ": commit `9bd6938`; ตรวจบน Release: build 0/0, เทสต์ 344 + 267 + 1,659 + 988 = 3,258 ผ่าน, format สะอาด, audit ไม่พบ vulnerable package, verification 10/10; `VersionPrefix` 2.0.5 + `Docs/RELEASE_2.0.5.md` (ระบุว่า R-022 ยังไม่ตรวจรับและไม่ผ่านผู้ตรวจอิสระ); publish + ISCC → `AIUsageMonitor 2.0.5.exe` และ `AIUsageMonitor Setup 2.0.5.exe` (FileVersion 2.0.5.0)
 
 ## R-021 · คำแนะนำการ login ของ agent อื่นนอกจากที่กำหนดไว้
 
