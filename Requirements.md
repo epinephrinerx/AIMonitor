@@ -359,7 +359,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🔨 กำลังทำ |
+| สถานะ | 🧪 รอตรวจรับ (build 2.0.5 ใหม่แทนไฟล์เดิม · commit `1d5ea68`) |
 | วันที่ | 2026-11-23 |
 | แตะส่วนไหน | title ของหน้าต่าง (`MainWindow`, `UsageLogDialog`, `AboutDialog`, `UpdateProgressWindow`) · tray (`TrayIconHost`, `TrayText`, balloon ใน `MainWindowViewModel`) · `AboutViewModel` · หัวรายงาน (`ReportModels`) · `Directory.Build.props` `Product` · `Description` ของ WPF csproj · `installer/AIMonitor2.iss` · `README.md` / `THIRD-PARTY-NOTICES.md` · เทสต์ที่อ้างข้อความเหล่านี้ |
 | เกี่ยวกับ | [[R-022]] (ออกแทนไฟล์ใน 2.0.5) |
@@ -391,6 +391,9 @@ tooltip/balloon ของ tray, หน้า About, หัวรายงาน 
 ผลทดสอบของผม (2026-11-23, Release): build 0/0 · เทสต์ 344 + 267 + 1,659 + 988 = 3,258 ผ่าน (แก้ assertion ของข้อความ 4 จุด: About, tray tooltip, หัวรายงาน 2 ที่) · format สะอาด · verification OK · grep ใน `src/` เหลือเฉพาะ "AI Quota & Usage Monitor" ในคำอธิบาย Readme (ไม่ใช่ชื่อโปรแกรม) และใน `installer/` เหลือเฉพาะชื่อเดิมที่ใช้ลบ shortcut เก่า · exe มี Product และ FileDescription = "AIMonitor" (เพิ่ม `AssemblyTitle` เพราะ Task Manager แสดงค่านี้) ชื่อไฟล์ยังเป็น `AIUsageMonitor.exe` · ข้อ 1–4 ต้องให้คุณดูในแอปจริงหลังติดตั้งทับ
 
 **ข้อยกเว้น workflow (ผู้ใช้ตัดสิน 2026-11-23):** "ผมเขียนเองทั้งหมด" — Coding Owner (Claude Code, Opus 5.5) เขียนและทดสอบเอง ไม่มีผู้ตรวจอิสระ
+
+**ความคืบหน้า:**
+- 2026-11-23 — commit `1d5ea68`; push `main`, `v2` และย้าย tag `v2.0.5` จาก `730f47b` ไป `1d5ea68` (force เฉพาะ tag ตามที่ผู้ใช้เลือก "แทนไฟล์ใน 2.0.5"); CI ของ tag และ `main` ผ่าน; แทนไฟล์ใน release 2.0.5 (`--clobber`) และเปลี่ยนชื่อ release เป็น "AIMonitor 2.0.5"; digest ตรงกับไฟล์ในเครื่อง
 
 ## R-023 · จอ ESP32 แสดงข้อมูลได้โดยไม่ต้องเปิด PC
 
