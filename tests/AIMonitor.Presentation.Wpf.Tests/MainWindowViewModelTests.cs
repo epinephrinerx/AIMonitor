@@ -218,6 +218,56 @@ public sealed class MainWindowViewModelTests
         Assert.Same(vm.AgyTab, vm.ProviderTabs[2]);
     }
 
+    [Fact]
+    public async Task AttachDisplay_ReceivesTheSameReadingsAsTheTray_AndLeavesTheTraySinkAlone()
+    {
+        var snapshot = new ProviderSnapshot(
+            providerId: "claude",
+            configured: true,
+            meters: [new Meter("session", "session", "Session", "5-hour window", 80.0)]);
+        var client = new TestQuotaClient((req, ct) => Task.FromResult(snapshot));
+        await using var coordinator = new LatestRefreshCoordinator(
+            new RefreshProvidersUseCase([new ProviderClientRegistration("claude", client)]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var vm = new MainWindowViewModel(coordinator, session);
+        var tray = new FakeTrayReadingsSink();
+        var display = new FakeTrayReadingsSink();
+        vm.AttachTray(tray);
+        vm.AttachDisplay(display);
+
+        await vm.RefreshAsync();
+
+        var trayUpdate = Assert.Single(tray.RecordedUpdates);
+        var displayUpdate = Assert.Single(display.RecordedUpdates);
+        Assert.Equal(trayUpdate, displayUpdate);
+        Assert.Equal(80.0, Assert.Single(displayUpdate, r => r.HasData).Percentage);
+    }
+
+    [Fact]
+    public async Task AttachDisplay_ReplaysCachedReadings_AndNullDetaches()
+    {
+        var snapshot = new ProviderSnapshot(
+            providerId: "claude",
+            configured: true,
+            meters: [new Meter("session", "session", "Session", "5-hour window", 55.0)]);
+        var client = new TestQuotaClient((req, ct) => Task.FromResult(snapshot));
+        await using var coordinator = new LatestRefreshCoordinator(
+            new RefreshProvidersUseCase([new ProviderClientRegistration("claude", client)]));
+        var store = new BlockingSettingsStore(new AppSettings());
+        using var session = new SettingsSession(store, new AppSettings());
+        var vm = new MainWindowViewModel(coordinator, session);
+        await vm.RefreshAsync();
+
+        var display = new FakeTrayReadingsSink();
+        vm.AttachDisplay(display);
+        Assert.Equal(55.0, Assert.Single(Assert.Single(display.RecordedUpdates), r => r.HasData).Percentage);
+
+        vm.AttachDisplay(null);
+        await vm.RefreshAsync();
+        Assert.Single(display.RecordedUpdates);
+    }
+
     private sealed class FakeTrayReadingsSink : ITrayReadingsSink
     {
         public List<IReadOnlyList<TrayReading>> RecordedUpdates { get; } = [];

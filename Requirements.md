@@ -355,6 +355,68 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-022 · ส่งค่าโควตาไปแสดงบนจอ ESP32 ผ่าน USB Serial
+
+| | |
+|---|---|
+| สถานะ | 🧪 รอตรวจรับ (ผู้ใช้ยืนยัน 2026-11-23 · branch `agent/claude-r022-esp32-display` ยังไม่ commit) |
+| วันที่ | 2026-11-23 |
+| แตะส่วนไหน | tray readings (`ITrayReadingsSink` / `MainWindowViewModel.AttachTray`) · composition root (`App.xaml.cs`) · `AppSettings` + `SettingsDialog` · ตัวเขียน serial ใหม่ · dependency `System.IO.Ports` |
+| เกี่ยวกับ | firmware และ protocol อยู่นอก repo นี้: `D:\Dev\ESP32\AIMonitor` (`docs/PROTOCOL.md` v1) |
+
+**คุณระบุ:**
+> อ่าน D:\Dev\Apps\AIMonitor2.0 แล้วประเมินวิธี port ลง Esp32 ครับ
+> อย่างนั้นโอเคครับ เชื่อมกับ AIMonitor ได้เลย
+
+บริบท (2026-11-23): port ทั้งแอปลง ESP32 ไม่ได้ เพราะ Codex (`codex app-server`), AGY (`agy.exe`) และ transcript ของ Claude
+อ่านได้บน PC เท่านั้น และ OAuth token ของ Claude หมดอายุโดยแอปตั้งใจไม่ refresh เอง ผู้ใช้จึงเลือกให้ PC เป็นแหล่งข้อมูล
+และ ESP32 (ESP32-2432S028 จอสัมผัส 2.8") เป็นจอแสดงผล firmware ทำเสร็จและทดสอบกับข้อมูลจำลองแล้ว
+
+**ผมเข้าใจว่า:**
+ทุกครั้งที่แอปได้ค่าโควตาใหม่ (ข้อมูลชุดเดียวกับที่ส่งให้ tray) ให้ส่งค่าเหล่านั้นเป็น JSON หนึ่งบรรทัดทาง USB serial
+ตาม protocol v1 ไปยังจอ ESP32 และส่งซ้ำเป็น heartbeat อย่างน้อยทุก 60 วินาที เปิด/ปิดและเลือกพอร์ต (หรือหาอัตโนมัติ
+ด้วย `ping` → `pong aimonitor-cyd 1`) ได้ใน Settings ค่าเริ่มต้นคือปิด การเชื่อมต่อหลุด/เสียบใหม่ต้องต่อเองได้
+โดยแอปไม่ค้างหรือแสดง error รบกวน และ tray ต้องทำงานเหมือนเดิมทุกอย่าง (รวม balloon `ITrayNotifier`)
+
+**ไม่รวม:**
+- ไม่ส่ง token, credential, account หรือข้อมูลอื่นนอกจากชื่อ service, ชื่อหน้าต่าง, %, severity, เวลา reset, stale/error/lock
+- ไม่ทำ Wi-Fi/เครือข่าย และไม่แก้ firmware ใน repo นี้
+- ไม่เปลี่ยนหน้าตาหรือพฤติกรรมของ dashboard, widget และ tray
+
+**ตรวจรับเมื่อ:**
+- [ ] เปิดใช้ใน Settings แล้ว จอ ESP32 แสดงค่าโควตาตรงกับ tray ภายในหนึ่งรอบ refresh
+- [x] ชื่อหน้าต่างแยกกันได้ตามกฎ `t` ใน `docs/PROTOCOL.md` (เช่น `Session`, `Weekly`, `Weekly Fable`) ไม่มีชื่อซ้ำกำกวม
+- [x] ค่าที่ไม่มีเปอร์เซ็นต์ส่งเป็น `null` (จอแสดง `--`) ไม่ส่ง 0 แทน
+- [x] ส่ง heartbeat ซ้ำอย่างน้อยทุก 60 วินาทีแม้ไม่มี refresh ใหม่
+- [ ] ถอดสาย/เสียบใหม่/พอร์ตถูกโปรแกรมอื่นใช้ → แอปไม่ค้าง ไม่ crash และกลับมาส่งเองเมื่อพอร์ตว่าง
+- [ ] เปิดพอร์ตโดยปิด DTR/RTS (บอร์ดไม่รีเซ็ตทุกครั้งที่เชื่อมต่อ)
+- [x] ปิดใช้ (ค่าเริ่มต้น) → ไม่เปิดพอร์ตใด ๆ เลย
+- [ ] tray icon, เมนู และ balloon ครั้งแรกทำงานเหมือนเดิม
+- [x] build, tests และ format ตาม `Docs/TESTING.md` ผ่าน · บันทึกเหตุผลและ license ของ `System.IO.Ports` (MIT)
+
+**ข้อยกเว้น workflow (ผู้ใช้ตัดสิน 2026-11-23):** ผู้ใช้เลือก "ผมเขียนเองทั้งหมด" — Coding Owner (Claude Code, Opus 5.5)
+เขียนทั้ง spec, โค้ดและเทสต์เอง ไม่ผ่าน Writing Owner, Test Author, Inspector และ Reviewer ตาม §5.8 จึงไม่มีผู้ตรวจอิสระ
+
+**เหตุผลของ dependency:** `System.IO.Ports` 10.0.0 (Microsoft / .NET Foundation, MIT) — .NET 10 base library ไม่มี serial port
+ทางเลือกคือ P/Invoke `CreateFile`/`SetCommState` เอง ซึ่งโค้ดมากกว่าและเสี่ยงกว่า; ใช้เฉพาะใน Infrastructure (`SerialPortDisplayPort`)
+`dotnet list package --vulnerable --include-transitive` ไม่พบ advisory
+
+**ความคืบหน้า:**
+- 2026-11-23 — เพิ่ม `DisplayFeed` + port `ISerialDisplayPort` (Application), `SerialPortDisplayPort` (Infrastructure),
+  `DisplayFrame`/`DisplayReadingsSink`/`DisplayPortOption` + `MainWindowViewModel.AttachDisplay` + กลุ่ม "ESP32 desk display"
+  ใน Settings (Presentation), `AppSettings.EspDisplayEnabled`/`EspDisplayPort`; อัปเดต `Docs/ARCHITECTURE.md` §8/§13,
+  `README.md`, `THIRD-PARTY-NOTICES.md`
+- ผลทดสอบของผม (Debug, uncommitted บน `729fcaf`): build 0/0 · format สะอาด · เทสต์ 267 + 344 + 988 + 1,659 ผ่านครบ ·
+  `dotnet publish -c Release -r win-x64 --self-contained true` สำเร็จ · vulnerable check ไม่พบ
+  - ข้อ 2–3: `DisplayFrameTests` (กฎชื่อของ Claude/Codex/AGY, ชื่อ weekly ไม่ซ้ำ, `pct` = null, ASCII, ขนาดบรรทัด ≤ 4000)
+  - ข้อ 4: `DisplayFeedTests.Heartbeat_*` (29 s ไม่ส่ง · 30 s ส่ง โดยสร้าง `now` ใหม่) · ข้อ 7: `Disabled_NeverListsOrOpensAnyPort`,
+    `AppSettingsEspDisplayTests.Defaults_*`
+  - ข้อ 5 (เทสต์อัตโนมัติด้วย fake): write ล้ม/พอร์ตถูกใช้/list พอร์ตไม่ได้ → ไม่ throw และกลับมาเชื่อมเองหลัง 15 s
+  - ทดสอบกับบอร์ดจริงผ่านโปรแกรมทดสอบนอก repo (`DisplayFeed` + `SerialPortDisplayPort` ตัวจริง): `auto` เจอ COM5 ใน 6.3 s
+    (ข้าม COM3/COM4 ที่เป็น Bluetooth), 65 s ส่ง 3 เฟรม (เฟรมแรก + heartbeat 30/60 s), handshake ผ่านตั้งแต่ ping แรก
+- ยังต้องให้คุณตรวจในแอปจริง: ข้อ 1, ข้อ 5 กับการถอด/เสียบสายจริง, ข้อ 6 (ดูว่าจอไม่กระพริบกลับหน้า "Waiting" ตอนเปิดใช้)
+  และข้อ 8 — ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ยังทำงานอยู่ (single instance)
+
 ## R-021 · คำแนะนำการ login ของ agent อื่นนอกจากที่กำหนดไว้
 
 | | |

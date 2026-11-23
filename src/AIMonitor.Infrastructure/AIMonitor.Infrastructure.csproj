@@ -15,4 +15,8 @@
     <InternalsVisibleTo Include="AIMonitor.Infrastructure.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+  </ItemGroup>
+
 </Project>

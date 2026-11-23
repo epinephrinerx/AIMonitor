@@ -544,6 +544,77 @@ public class SettingsViewModelTests
             Task.FromException(exceptionToThrow);
     }
 
+    [Fact]
+    public void EspDisplay_DefaultsToOffAndFindAutomatically_WithPresentPortsListed()
+    {
+        var initial = new AppSettings();
+        using var session = new SettingsSession(new FakeSettingsStore(initial), initial);
+
+        var vm = new SettingsViewModel(session, new FakeStartupRegistrar(), serialPortNames: ["COM3", "COM5"]);
+
+        Assert.False(vm.EspDisplayEnabled);
+        Assert.Equal(["auto", "COM3", "COM5"], vm.DisplayPortOptions.Select(o => o.Value));
+        Assert.Equal(DisplayPortOption.AutoLabel, vm.DisplayPortOptions[0].Label);
+        Assert.Equal("auto", vm.SelectedDisplayPort.Value);
+    }
+
+    [Fact]
+    public void EspDisplay_SavedPortThatIsUnplugged_StaysSelectedAndMarked()
+    {
+        var initial = new AppSettings { EspDisplayEnabled = true, EspDisplayPort = "COM9" };
+        using var session = new SettingsSession(new FakeSettingsStore(initial), initial);
+
+        var vm = new SettingsViewModel(session, new FakeStartupRegistrar(), serialPortNames: ["COM3"]);
+
+        Assert.True(vm.EspDisplayEnabled);
+        Assert.Equal("COM9", vm.SelectedDisplayPort.Value);
+        Assert.Equal("COM9 (not connected)", vm.SelectedDisplayPort.Label);
+        Assert.Equal(["auto", "COM3", "COM9"], vm.DisplayPortOptions.Select(o => o.Value));
+    }
+
+    [Fact]
+    public async Task EspDisplay_IsSavedWithTheOtherSettings()
+    {
+        var initial = new AppSettings();
+        var store = new FakeSettingsStore(initial);
+        using var session = new SettingsSession(store, initial);
+        var vm = new SettingsViewModel(session, new FakeStartupRegistrar(), serialPortNames: ["COM5"]);
+
+        vm.EspDisplayEnabled = true;
+        vm.SelectedDisplayPort = vm.DisplayPortOptions.Single(o => o.Value == "COM5");
+        await vm.SaveAsync();
+
+        Assert.True(store.SavedSettings!.EspDisplayEnabled);
+        Assert.Equal("COM5", store.SavedSettings.EspDisplayPort);
+        Assert.True(session.Current.EspDisplayEnabled);
+    }
+
+    [Fact]
+    public async Task EspDisplay_CancelLeavesTheSavedChoiceUntouched()
+    {
+        var initial = new AppSettings { EspDisplayEnabled = false, EspDisplayPort = "auto" };
+        var store = new FakeSettingsStore(initial);
+        using var session = new SettingsSession(store, initial);
+        var vm = new SettingsViewModel(session, new FakeStartupRegistrar(), serialPortNames: ["COM5"]);
+
+        vm.EspDisplayEnabled = true;
+        vm.SelectedDisplayPort = vm.DisplayPortOptions.Single(o => o.Value == "COM5");
+        vm.Cancel();
+        await session.FlushAsync();
+
+        Assert.Null(store.SavedSettings);
+        Assert.False(session.Current.EspDisplayEnabled);
+        Assert.Equal("auto", session.Current.EspDisplayPort);
+    }
+
+    [Fact]
+    public void DisplayPortOption_Build_DropsDuplicatesAndNonComNames()
+    {
+        var options = DisplayPortOption.Build(["com5", "COM5", "/dev/ttyUSB0", "COM10"], "COM10");
+
+        Assert.Equal(["auto", "COM5", "COM10"], options.Select(o => o.Value));
+    }
+
     private sealed class FakeSettingsStore(AppSettings initial) : ISettingsStore
     {
         public bool Exists => true;

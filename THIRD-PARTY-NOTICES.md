@@ -13,7 +13,10 @@ Their licences are reproduced below as required by each licence's terms.
 The application is built with .NET 10.0, Windows Presentation Foundation (WPF)
 and Windows Forms (WinForms), published as a self-contained executable.
 
-The .NET runtime, WPF, and WinForms are licenced under the
+The ESP32 desk display link uses the `System.IO.Ports` NuGet package
+(<https://www.nuget.org/packages/System.IO.Ports>), part of the same .NET libraries.
+
+The .NET runtime, WPF, WinForms and `System.IO.Ports` are licenced under the
 **MIT Licence** (SPDX: MIT).
 
 ```

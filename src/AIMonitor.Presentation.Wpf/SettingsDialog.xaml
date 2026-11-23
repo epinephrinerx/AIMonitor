@@ -148,7 +148,7 @@
                 </Border>
 
                 <!-- Widget mode -->
-                <Border Style="{StaticResource GroupCard}" Margin="0">
+                <Border Style="{StaticResource GroupCard}">
                     <StackPanel>
                         <TextBlock Text="Widget mode" Style="{StaticResource GroupTitle}" />
                         <TextBlock Text="Press Ctrl+W or use the Widget button to collapse into the compact widget. Double-click the widget to expand it again."
@@ -177,6 +177,25 @@
                                        FontSize="11"
                                        Foreground="{DynamicResource TextSecondaryBrush}" />
                         </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ESP32 desk display (R-022) -->
+                <Border x:Name="EspDisplayGroup" Style="{StaticResource GroupCard}" Margin="0">
+                    <StackPanel>
+                        <TextBlock Text="ESP32 desk display" Style="{StaticResource GroupTitle}" />
+                        <CheckBox x:Name="EspDisplayCheckBox" Content="Send quota to an ESP32 display over USB"
+                                  IsChecked="{Binding EspDisplayEnabled}"
+                                  Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Port" Style="{StaticResource FieldLabel}" />
+                        <ComboBox x:Name="EspDisplayPortComboBox"
+                                  ItemsSource="{Binding DisplayPortOptions}"
+                                  SelectedItem="{Binding SelectedDisplayPort}"
+                                  DisplayMemberPath="Label"
+                                  IsEnabled="{Binding EspDisplayEnabled}"
+                                  Width="220" HorizontalAlignment="Left" Padding="6" />
+                        <TextBlock Text="Needs the AIMonitor ESP32 firmware. Only service and window names, percentages, severity and reset times are sent; never accounts or keys. Find automatically asks each port for the display and uses the one that answers."
+                                   Style="{StaticResource Hint}" />
                     </StackPanel>
                 </Border>
             </StackPanel>

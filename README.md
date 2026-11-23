@@ -42,6 +42,9 @@ writes to another tool's credentials and never sends your usage anywhere.
 - **Tray**: double-click to reopen; right-click lists every quota window with a live countdown.
 - **Settings**: theme, default window size, start with Windows, minimise to tray, per-service monitoring.
 - **Keyboard**: F5 refresh, Ctrl+W widget, Ctrl+L usage log, Ctrl+P print report, Ctrl+Q exit, F1 this readme.
+- **ESP32 desk display** (optional, off by default): Settings > ESP32 desk display sends the tray's quota readings
+  over USB serial to an ESP32 board running the AIMonitor display firmware. Only service and window names,
+  percentages, severity and reset times are sent.
 
 ## Credential handling
 

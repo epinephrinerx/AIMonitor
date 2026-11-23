@@ -23,6 +23,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     internal Task? OpenCodeCheckLoopTask { get; private set; }
     internal Func<Task>? OpenCodeCheckLoopEndedHook { get; set; }
     private ITrayReadingsSink? _traySink;
+    private ITrayReadingsSink? _displaySink;
     private IReadOnlyList<TrayReading>? _latestTrayReadings;
     private readonly Dictionary<string, IReadOnlyList<MeterDisplayItem>> _lastGoodMeters = new(StringComparer.Ordinal);
 
@@ -433,6 +434,19 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Attaches or detaches the ESP32 desk display sink (R-022). It receives exactly what the tray receives, kept
+    /// separate from <see cref="AttachTray"/> so the tray's own <see cref="ITrayNotifier"/> stays reachable.
+    /// </summary>
+    public void AttachDisplay(ITrayReadingsSink? displaySink)
+    {
+        _displaySink = displaySink;
+        if (_displaySink is not null && _latestTrayReadings is not null)
+        {
+            _displaySink.UpdateReadings(_latestTrayReadings);
+        }
+    }
+
+    /// <summary>
     /// The window was just parked in the tray. The first time ever, say so with a balloon, so closing the window
     /// does not look like the app quit (1.3.3 <c>mark_once("trayHint")</c>).
     /// </summary>
@@ -751,6 +765,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             _latestTrayReadings = trayReadings;
 
             _traySink?.UpdateReadings(trayReadings);
+            _displaySink?.UpdateReadings(trayReadings);
 
             _lastSuccess = DateTimeOffset.UtcNow;
             _showComposedStatus = true;

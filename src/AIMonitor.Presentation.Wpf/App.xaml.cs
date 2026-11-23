@@ -5,11 +5,13 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using AIMonitor.Application.AgentUsage;
+using AIMonitor.Application.Display;
 using AIMonitor.Application.Providers;
 using AIMonitor.Application.Reports;
 using AIMonitor.Application.Settings;
 using AIMonitor.Application.Version;
 using AIMonitor.Infrastructure.AgentUsage;
+using AIMonitor.Infrastructure.Display;
 using AIMonitor.Infrastructure.OpenCode;
 using AIMonitor.Infrastructure.Providers.Claude;
 using AIMonitor.Infrastructure.Providers.Agy;
@@ -17,6 +19,7 @@ using AIMonitor.Infrastructure.Providers.OpenAi;
 using AIMonitor.Infrastructure.Storage;
 using AIMonitor.Infrastructure.Time;
 using AIMonitor.Infrastructure.Windows;
+using AIMonitor.Presentation.Wpf.Display;
 using AIMonitor.Presentation.Wpf.Theme;
 using AIMonitor.Presentation.Wpf.Tray;
 using AIMonitor.Presentation.Wpf.Updates;
@@ -46,6 +49,8 @@ public partial class App : System.Windows.Application
     private DispatcherTimer? _refreshTimer;
     private UpdateCoordinator? _updateCoordinator;
     private CachedAgentUsageSource? _agentUsageSource;
+    private SerialPortDisplayPort? _displayPort;
+    private DisplayFeed? _displayFeed;
 
     public ProviderConnectionStore? ConnectionStore => _connectionStore;
 
@@ -181,6 +186,13 @@ public partial class App : System.Windows.Application
         _widgetViewModel.RequestRefresh += async () => await _mainViewModel.RefreshAsync();
         _widgetViewModel.RequestQuit += ShutdownApp;
 
+        // 5b. ESP32 desk display (R-022): same readings as the tray, over USB serial, off unless switched on.
+        _displayPort = new SerialPortDisplayPort();
+        _displayFeed = new DisplayFeed(_displayPort, SystemClock.Instance);
+        _displayFeed.Configure(_settingsSession.Current.EspDisplayEnabled, _settingsSession.Current.EspDisplayPort);
+        _displayFeed.Start();
+        _mainViewModel.AttachDisplay(new DisplayReadingsSink(_displayFeed));
+
         // 6. Periodic Refresh Timer
         _refreshTimer = new DispatcherTimer();
         _refreshTimer.Tick += async (s, args) => await _mainViewModel.RefreshAsync();
@@ -260,6 +272,19 @@ public partial class App : System.Windows.Application
         public IReadOnlyDictionary<string, object?> ReadAll() => values;
     }
 
+    private IReadOnlyList<string> ListSerialPorts()
+    {
+        try
+        {
+            return _displayPort?.GetPortNames() ?? [];
+        }
+        catch (Exception)
+        {
+            // Settings must open even when the serial port list cannot be read.
+            return [];
+        }
+    }
+
     private ITrayHost CreateTrayHost()
     {
         var host = new TrayIconHost();
@@ -276,6 +301,8 @@ public partial class App : System.Windows.Application
 
     private void OnSettingsChanged(AppSettings settings)
     {
+        // Thread-safe: only records the choice and wakes the feed's own loop.
+        _displayFeed?.Configure(settings.EspDisplayEnabled, settings.EspDisplayPort);
         Dispatcher.InvokeAsync(() =>
         {
             _liveSettingsApplier?.Apply(settings);
@@ -363,7 +390,8 @@ public partial class App : System.Windows.Application
                     applier.Apply(settings);
                     _mainViewModel?.ApplyAgentBudgets(settings.AgentBudgets);
                 },
-                knownAgents);
+                knownAgents,
+                ListSerialPorts());
             var dialog = new SettingsDialog(vm)
             {
                 Owner = _mainWindow?.IsVisible == true ? _mainWindow : null
@@ -546,6 +574,8 @@ public partial class App : System.Windows.Application
 
         _refreshTimer?.Stop();
         _liveSettingsApplier?.Shutdown();
+        _mainViewModel?.AttachDisplay(null);
+        _displayFeed?.Dispose();
         _ = _refreshCoordinator?.DisposeAsync();
         _openAiClient?.Dispose();
         _httpClient?.Dispose();

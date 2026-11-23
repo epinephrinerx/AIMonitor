@@ -37,6 +37,9 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private readonly List<AgentBudgetRowViewModel> _budgetRows;
 
+    private bool _espDisplayEnabled;
+    private DisplayPortOption _selectedDisplayPort;
+
     public bool IsSaving
     {
         get => _isSaving;
@@ -47,7 +50,8 @@ public sealed class SettingsViewModel : ViewModelBase
         SettingsSession session,
         IStartupRegistrar startupRegistrar,
         Action<AppSettings>? applyPreview = null,
-        IReadOnlyList<string>? knownAgents = null)
+        IReadOnlyList<string>? knownAgents = null,
+        IReadOnlyList<string>? serialPortNames = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _startupRegistrar = startupRegistrar ?? throw new ArgumentNullException(nameof(startupRegistrar));
@@ -75,6 +79,11 @@ public sealed class SettingsViewModel : ViewModelBase
 
         _budgetRows = CreateBudgetRows(knownAgents);
         _hasBudgetError = _budgetRows.Any(static r => r.HasError);
+
+        _espDisplayEnabled = _entrySettings.EspDisplayEnabled;
+        DisplayPortOptions = DisplayPortOption.Build(serialPortNames, _entrySettings.EspDisplayPort);
+        _selectedDisplayPort = DisplayPortOptions.First(o =>
+            string.Equals(o.Value, AppSettings.NormalizeDisplayPort(_entrySettings.EspDisplayPort), StringComparison.OrdinalIgnoreCase));
 
         SaveCommand = new RelayCommand(
             async () => await ExecuteSaveCommandAsync(),
@@ -287,6 +296,22 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _chartRangeDays, value);
     }
 
+    /// <summary>Send quota readings to the ESP32 desk display (R-022). Applied on Save.</summary>
+    public bool EspDisplayEnabled
+    {
+        get => _espDisplayEnabled;
+        set => SetProperty(ref _espDisplayEnabled, value);
+    }
+
+    /// <summary>"Find automatically" followed by the serial ports present when the dialog opened.</summary>
+    public IReadOnlyList<DisplayPortOption> DisplayPortOptions { get; }
+
+    public DisplayPortOption SelectedDisplayPort
+    {
+        get => _selectedDisplayPort;
+        set => SetProperty(ref _selectedDisplayPort, value ?? DisplayPortOptions[0]);
+    }
+
     public IReadOnlyList<WindowSizeOption> WindowSizeOptions => WindowSizeOption.All;
 
     public WindowSizeOption SelectedWindowSize
@@ -354,7 +379,9 @@ public sealed class SettingsViewModel : ViewModelBase
                 ChartRangeDays = ChartRangeDays,
                 DashboardWidth = SelectedWindowSize.Width,
                 DashboardHeight = SelectedWindowSize.Height,
-                AgentBudgets = BuildBudgetsFromRows()
+                AgentBudgets = BuildBudgetsFromRows(),
+                EspDisplayEnabled = EspDisplayEnabled,
+                EspDisplayPort = SelectedDisplayPort.Value
             }).ConfigureAwait(true);
 
             _saved = true;

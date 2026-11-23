@@ -37,6 +37,12 @@ public sealed record AppSettings
 
     public string ActiveProvider { get; init; } = "claude";
 
+    /// <summary>Send quota readings to the ESP32 desk display over USB serial (R-022). Off unless switched on.</summary>
+    public bool EspDisplayEnabled { get; init; }
+
+    /// <summary>Serial port of the ESP32 desk display, e.g. "COM5", or "auto" to find it by handshake (R-022).</summary>
+    public string EspDisplayPort { get; init; } = "auto";
+
     public IReadOnlyDictionary<string, ProviderPreference> Providers { get; init; } =
         new Dictionary<string, ProviderPreference>(StringComparer.OrdinalIgnoreCase);
 
@@ -111,6 +117,7 @@ public sealed record AppSettings
             ChartRangeDays = range,
             ChartMetric = metric,
             ActiveProvider = activeProvider,
+            EspDisplayPort = NormalizeDisplayPort(EspDisplayPort),
             Providers = providers,
             AgentBudgets = budgets,
             LegacyGeometry = LegacyGeometry is null
@@ -119,6 +126,22 @@ public sealed record AppSettings
                     .Where(static pair => pair.Value is not null)
                     .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase),
         };
+    }
+
+    /// <summary>"auto", or a Windows port name "COM1".."COM256" in upper case; anything else falls back to "auto".</summary>
+    public static string NormalizeDisplayPort(string? port)
+    {
+        var trimmed = port?.Trim() ?? "";
+        if (trimmed.Length > 3
+            && trimmed.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(trimmed.AsSpan(3), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number)
+            && number is >= 1 and <= 256
+            && trimmed[3] != '0')
+        {
+            return "COM" + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return "auto";
     }
 }
 

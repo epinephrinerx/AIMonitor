@@ -325,6 +325,7 @@ migration ภายในไฟล์เดียวกัน แยกจาก
 | OpenAI Admin API | Spend/budget/history เมื่อไม่มี Codex OAuth (PAR-010) | HTTPS timeout มาตรฐานของ HTTP client; ไม่ retry อัตโนมัติ | Provider OpenAI (API mode) แสดง error/`Limited` ตามสิทธิ์ของ key |
 | Gemini Cloud Monitoring API + ADC/service account | Request counts ของ Gemini (PAR-011, PAR-012) | HTTPS timeout มาตรฐาน; ตรวจครบทุก credential candidate ก่อนสรุป `Limited` | Provider Gemini แสดง error/`Limited` พร้อม source ของ credential ที่ใช้ |
 | GitHub Releases API | ตรวจเวอร์ชันล่าสุดแบบ read-only (PAR-033) | HTTPS timeout มาตรฐาน; ไม่ retry อัตโนมัติ | แสดง "ตรวจสอบไม่สำเร็จ" เท่านั้น ไม่กระทบการทำงานหลักของแอป |
+| ESP32 desk display (USB serial, `System.IO.Ports`) | ส่ง tray readings ไปจอภายนอก (R-022) ปิดเป็นค่าเริ่มต้น | handshake `ping`/`pong aimonitor-cyd 1` รอ 1.5 s ต่อพอร์ต; write timeout 1 s; retry ทุก 15 s; heartbeat 30 s | จอแสดง "no update" เท่านั้น แอปไม่ค้างและไม่แสดง error |
 
 สำหรับ Codex/OpenAI integration ให้ยึดเอกสารทางการปัจจุบันของ OpenAI เป็นหลักเมื่อ contract เปลี่ยน
 **Codex App Server capability ที่ใช้ external token ผ่าน `chatgptAuthTokens`/access token ทาง stdin
@@ -435,3 +436,18 @@ AGY preference exists, without reusing a project id or service-account path. No 
   boundary ที่ต้อง fake ใน tests; startup ตรวจ release และถามผู้ใช้ก่อน download/run
 - Installer คง AppId/ค่าเริ่มต้น directory ของ Python 1.3.3, snapshot startup intent ก่อนหยุด executable
   เฉพาะ install path และเปลี่ยน Run command เฉพาะกรณีที่ entry เดิมมีอยู่ ไม่ลบ legacy settings tree
+
+### ESP32 desk display (R-022)
+
+An optional second consumer of the tray readings. `MainWindowViewModel.AttachDisplay` receives exactly
+what `AttachTray` receives, through its own field so the tray host's `ITrayNotifier` is untouched.
+`DisplayReadingsSink` (Presentation) copies the readings and publishes a frame factory to
+`DisplayFeed` (Application); `DisplayFrame` builds protocol v1 JSON (ASCII only, at most 6 services ×
+8 windows, line ≤ 4000 bytes, window names folded from Title + scoping Subtitle, `pct: null` when the
+service gives no percentage). `DisplayFeed` owns one background loop: it opens only a port whose device
+answers `ping` with `pong aimonitor-cyd 1` (port `auto` tries every port), sends a new frame at once
+and a heartbeat every 30 s rebuilt for the current instant, and on any I/O failure closes the port and
+retries after 15 s without surfacing errors. `SerialPortDisplayPort` (Infrastructure) opens 115200 8N1
+with DTR/RTS off so the board is not reset. Settings: `EspDisplayEnabled` (default off; nothing is
+opened or probed while off) and `EspDisplayPort` (`auto` or `COM1`–`COM256`). The firmware and the
+protocol document live outside this repository (`D:\Dev\ESP32\AIMonitor`, `docs/PROTOCOL.md`).
