@@ -359,7 +359,7 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 
 | | |
 |---|---|
-| สถานะ | 🧪 รอตรวจรับ (ผู้ใช้ยืนยัน 2026-11-23 · commit `9bd6938` · ออกใน 2.0.5) |
+| สถานะ | ✔️ เสร็จแล้ว (ผู้ใช้ตรวจกับบอร์ดจริง 2026-11-23 · commit `9bd6938` · ออกใน 2.0.5) |
 | วันที่ | 2026-11-23 |
 | แตะส่วนไหน | tray readings (`ITrayReadingsSink` / `MainWindowViewModel.AttachTray`) · composition root (`App.xaml.cs`) · `AppSettings` + `SettingsDialog` · ตัวเขียน serial ใหม่ · dependency `System.IO.Ports` |
 | เกี่ยวกับ | firmware และ protocol อยู่นอก repo นี้: `D:\Dev\ESP32\AIMonitor` (`docs/PROTOCOL.md` v1) |
@@ -384,14 +384,14 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ไม่เปลี่ยนหน้าตาหรือพฤติกรรมของ dashboard, widget และ tray
 
 **ตรวจรับเมื่อ:**
-- [ ] เปิดใช้ใน Settings แล้ว จอ ESP32 แสดงค่าโควตาตรงกับ tray ภายในหนึ่งรอบ refresh
+- [x] เปิดใช้ใน Settings แล้ว จอ ESP32 แสดงค่าโควตาตรงกับ tray ภายในหนึ่งรอบ refresh
 - [x] ชื่อหน้าต่างแยกกันได้ตามกฎ `t` ใน `docs/PROTOCOL.md` (เช่น `Session`, `Weekly`, `Weekly Fable`) ไม่มีชื่อซ้ำกำกวม
 - [x] ค่าที่ไม่มีเปอร์เซ็นต์ส่งเป็น `null` (จอแสดง `--`) ไม่ส่ง 0 แทน
 - [x] ส่ง heartbeat ซ้ำอย่างน้อยทุก 60 วินาทีแม้ไม่มี refresh ใหม่
-- [ ] ถอดสาย/เสียบใหม่/พอร์ตถูกโปรแกรมอื่นใช้ → แอปไม่ค้าง ไม่ crash และกลับมาส่งเองเมื่อพอร์ตว่าง
-- [ ] เปิดพอร์ตโดยปิด DTR/RTS (บอร์ดไม่รีเซ็ตทุกครั้งที่เชื่อมต่อ)
+- [x] ถอดสาย/เสียบใหม่/พอร์ตถูกโปรแกรมอื่นใช้ → แอปไม่ค้าง ไม่ crash และกลับมาส่งเองเมื่อพอร์ตว่าง
+- [x] เปิดพอร์ตโดยปิด DTR/RTS (บอร์ดไม่รีเซ็ตทุกครั้งที่เชื่อมต่อ)
 - [x] ปิดใช้ (ค่าเริ่มต้น) → ไม่เปิดพอร์ตใด ๆ เลย
-- [ ] tray icon, เมนู และ balloon ครั้งแรกทำงานเหมือนเดิม
+- [x] tray icon, เมนู และ balloon ครั้งแรกทำงานเหมือนเดิม
 - [x] build, tests และ format ตาม `Docs/TESTING.md` ผ่าน · บันทึกเหตุผลและ license ของ `System.IO.Ports` (MIT)
 
 **ข้อยกเว้น workflow (ผู้ใช้ตัดสิน 2026-11-23):** ผู้ใช้เลือก "ผมเขียนเองทั้งหมด" — Coding Owner (Claude Code, Opus 5.5)
@@ -417,6 +417,9 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - ยังต้องให้คุณตรวจในแอปจริง: ข้อ 1, ข้อ 5 กับการถอด/เสียบสายจริง, ข้อ 6 (ดูว่าจอไม่กระพริบกลับหน้า "Waiting" ตอนเปิดใช้)
   และข้อ 8 — ผมไม่ได้รันแอปตัวจริง เพราะตัวที่ติดตั้งไว้ยังทำงานอยู่ (single instance)
 - 2026-11-23 — ผู้ใช้สั่ง "commit push build release ครับ": commit `9bd6938`; ตรวจบน Release: build 0/0, เทสต์ 344 + 267 + 1,659 + 988 = 3,258 ผ่าน, format สะอาด, audit ไม่พบ vulnerable package, verification 10/10; `VersionPrefix` 2.0.5 + `Docs/RELEASE_2.0.5.md` (ระบุว่า R-022 ยังไม่ตรวจรับและไม่ผ่านผู้ตรวจอิสระ); publish + ISCC → `AIUsageMonitor 2.0.5.exe` และ `AIUsageMonitor Setup 2.0.5.exe` (FileVersion 2.0.5.0)
+- 2026-11-23 — ผู้ใช้ตรวจรับ R-022 บน 2.0.5 กับบอร์ดจริง:
+  > ทำงานปรกติครบทุกอย่างครับ
+  ติ๊กข้อ 1, 5, 6, 8 ตามคำยืนยันนี้ (ยืนยันโดยรวม ไม่ได้รายงานผลทีละข้อ)
 
 ## R-021 · คำแนะนำการ login ของ agent อื่นนอกจากที่กำหนดไว้
 
