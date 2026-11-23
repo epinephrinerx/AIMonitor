@@ -11,7 +11,7 @@ public class AboutViewModelTests
         var fakeChecker = new FakeVersionChecker(new ReleaseInfo("v2.0.0", "v2.0.0", "https://example.com", "2026-10-01", false));
         var vm = new AboutViewModel(fakeChecker);
 
-        Assert.Equal("AIMonitor 2.0", vm.AppName);
+        Assert.Equal("AIMonitor", vm.AppName);
         Assert.Equal("Apichart Chantanis", vm.DeveloperName);
         Assert.Equal("apichart@apichart.net", vm.DeveloperEmail);
         Assert.Contains("GNU GENERAL PUBLIC LICENSE", vm.LicenseText);

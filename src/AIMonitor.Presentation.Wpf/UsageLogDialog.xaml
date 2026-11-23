@@ -1,7 +1,7 @@
 <Window x:Class="AIMonitor.Presentation.Wpf.UsageLogDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AIMonitor 2.0 — Usage Log"
+        Title="AIMonitor — Usage Log"
         Width="750" Height="550"
         MinWidth="500" MinHeight="350"
         WindowStartupLocation="CenterOwner"

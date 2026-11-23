@@ -1,4 +1,4 @@
-; Inno Setup script for AI Usage Monitor 2.0 (C# / .NET 10 edition).
+; Inno Setup script for AIMonitor (C# / .NET 10 edition).
 ;
 ; Design choices (see Docs/ARCHITECTURE.md §8, Docs/FEATURE_PARITY.md PAR-035):
 ;
@@ -29,7 +29,7 @@
 #endif
 
 ; === Fixed constants — do not change without understanding the impact ===
-#define AppName        "AI Usage Monitor"
+#define AppName        "AIMonitor"
 #define AppShortName   "AIUsageMonitor"
 #define AppPublisher   "Apichart Chantanis"
 #define AppExe         "AIUsageMonitor.exe"
@@ -59,6 +59,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={autopf}\{#AppShortName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
+; R-024: the group was "AI Usage Monitor" before 2.0.5; do not reuse that folder name on upgrade.
+UsePreviousGroup=no
 AllowNoIcons=yes
 
 ; Output
@@ -106,6 +108,11 @@ Name: "{group}\{#AppName} Licence";  Filename: "{sys}\notepad.exe"; \
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 ; Desktop (optional — user-selected Task)
 Name: "{autodesktop}\{#AppName}";    Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+
+[InstallDelete]
+; R-024: shortcuts from releases named "AI Usage Monitor" (up to the first 2.0.5 build).
+Type: filesandordirs; Name: "{autoprograms}\AI Usage Monitor"
+Type: files; Name: "{autodesktop}\AI Usage Monitor.lnk"
 
 [Run]
 Filename: "{app}\{#AppExe}"; \

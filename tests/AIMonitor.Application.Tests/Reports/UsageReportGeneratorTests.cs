@@ -69,7 +69,7 @@ public class UsageReportGeneratorTests
         var report = UsageReportGenerator.Build(providers, snapshots, days: 7, metric: "Total tokens", generatedAt: now);
         var md = UsageReportGenerator.ToMarkdown(report);
 
-        Assert.Contains("# AI Usage Monitor - usage log", md);
+        Assert.Contains("# AIMonitor - usage log", md);
         Assert.Contains("## Claude", md);
         Assert.Contains("| Date | Total tokens |", md);
         Assert.Contains("| 2026-10-01 | 5,000 |", md);

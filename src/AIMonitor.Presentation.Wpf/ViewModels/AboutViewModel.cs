@@ -48,12 +48,12 @@ public sealed class AboutViewModel : ViewModelBase
         CheckUpdatesCommand = new RelayCommand(async () => await CheckUpdatesAsync(), () => !_isChecking);
     }
 
-    public string AppName => "AIMonitor 2.0";
+    public string AppName => "AIMonitor";
     public string AppVersion { get; }
     public string DeveloperName => "Apichart Chantanis";
 
     public string DeveloperBlurb =>
-        "AI Usage Monitor reads the AI sign-ins you already have on this machine and shows what each service says "
+        "AIMonitor reads the AI sign-ins you already have on this machine and shows what each service says "
         + "you have used. It never writes to another tool's credentials and never sends your usage anywhere.";
 
     public string AssistantsBlurb =>
@@ -112,7 +112,7 @@ public sealed class AboutViewModel : ViewModelBase
 
     public string ReadmeText =>
         """
-        AIMonitor 2.0 - AI Quota & Usage Monitor for Windows Desktop
+        AIMonitor - AI Quota & Usage Monitor for Windows Desktop
 
         A native Windows application to monitor quotas and track token usage across AI providers:
         - Claude (Claude Code login, session/weekly limits, CLI transcript ingestion)

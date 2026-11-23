@@ -459,7 +459,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         notifier.ShowBalloon(
             "Still watching",
-            "AI Usage Monitor is in the notification area. Double-click its icon to reopen it, or use Exit to quit.");
+            "AIMonitor is in the notification area. Double-click its icon to reopen it, or use Exit to quit.");
         _ = _settingsSession.UpdateAsync(s => s with { TrayHintShown = true });
     }
 

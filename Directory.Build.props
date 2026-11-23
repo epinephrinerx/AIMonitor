@@ -20,7 +20,7 @@
     <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
     <FileVersion>$(VersionPrefix).0</FileVersion>
     <InformationalVersion>$(VersionPrefix)</InformationalVersion>
-    <Product>AI Usage Monitor</Product>
+    <Product>AIMonitor</Product>
     <Company>Apichart Chantanis</Company>
     <Copyright>Copyright © 2025 Apichart Chantanis. Licensed under GPL-3.0.</Copyright>
     <NeutralLanguage>en</NeutralLanguage>

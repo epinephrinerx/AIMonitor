@@ -38,7 +38,7 @@ public sealed class TrayIconHost : ITrayHost, ITrayNotifier
     public TrayIconHost(Func<DateTimeOffset>? clock = null)
     {
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
-        _notifyIcon = new NotifyIcon { Visible = true, Text = "AI Usage Monitor" };
+        _notifyIcon = new NotifyIcon { Visible = true, Text = "AIMonitor" };
 
         // Double-click restores the full window; right-click opens the menu (the platform convention).
         _notifyIcon.DoubleClick += (s, e) => OpenDashboardRequested?.Invoke();
@@ -100,7 +100,7 @@ public sealed class TrayIconHost : ITrayHost, ITrayNotifier
         if (_rotation.Count == 0)
         {
             SetIcon(null, Severity.Normal, palette);
-            SetTooltip("AI Usage Monitor — no quota data yet");
+            SetTooltip("AIMonitor — no quota data yet");
             return;
         }
 

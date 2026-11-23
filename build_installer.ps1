@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Build, publish and optionally package AIMonitor 2.0.
+    Build, publish and optionally package AIMonitor.
 
 .DESCRIPTION
     Full pipeline:

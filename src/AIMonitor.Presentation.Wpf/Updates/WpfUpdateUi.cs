@@ -6,7 +6,7 @@ namespace AIMonitor.Presentation.Wpf.Updates;
 /// <summary>The message boxes and progress window of the update flow.</summary>
 public sealed class WpfUpdateUi(Func<Window?> owner) : IUpdateUi
 {
-    private const string Caption = "AI Usage Monitor — Update";
+    private const string Caption = "AIMonitor — Update";
 
     public bool ConfirmInstall(ReleaseInfo release, string installedVersion)
     {

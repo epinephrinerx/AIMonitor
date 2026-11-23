@@ -1,6 +1,6 @@
-# Third-Party Notices — AI Usage Monitor 2.0
+# Third-Party Notices — AIMonitor
 
-AI Usage Monitor 2.0 is built on top of the following open-source components.
+AIMonitor is built on top of the following open-source components.
 Their licences are reproduced below as required by each licence's terms.
 
 ---
@@ -64,7 +64,7 @@ Licensed under the **Apache License 2.0** (SPDX: Apache-2.0).
 **© 2025 ryoppippi**
 <https://github.com/ccusage/ccusage>
 
-AI Usage Monitor can run a `ccusage` that the user installed separately (it is not bundled with the
+AIMonitor can run a `ccusage` that the user installed separately (it is not bundled with the
 installer). The Claude transcript de-duplication rules (message/request keys, sidechain replay and
 survivor choice), the advisor-iteration records and the Claude config-directory resolution in
 `ClaudeTranscriptStore` / `ClaudeTranscriptPathResolver` were re-implemented in C# from ccusage's

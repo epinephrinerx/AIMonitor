@@ -30,11 +30,11 @@ public partial class AboutDialog : Window
 
         (Title, var text) = page switch
         {
-            AboutPage.Readme => ("AI Usage Monitor — Readme", viewModel.ReadmeText),
-            AboutPage.License => ("AI Usage Monitor — License Agreement", viewModel.LicenseText),
-            AboutPage.Notices => ("AI Usage Monitor — Third-party notices", viewModel.NoticesText),
-            AboutPage.Developer => ("AI Usage Monitor — Developer", ""),
-            _ => ("AI Usage Monitor — Version", ""),
+            AboutPage.Readme => ("AIMonitor — Readme", viewModel.ReadmeText),
+            AboutPage.License => ("AIMonitor — License Agreement", viewModel.LicenseText),
+            AboutPage.Notices => ("AIMonitor — Third-party notices", viewModel.NoticesText),
+            AboutPage.Developer => ("AIMonitor — Developer", ""),
+            _ => ("AIMonitor — Version", ""),
         };
 
         if (isDocument)

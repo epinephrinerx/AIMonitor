@@ -28,7 +28,7 @@ using AIMonitor.Presentation.Wpf.ViewModels;
 namespace AIMonitor.Presentation.Wpf;
 
 /// <summary>
-/// Composition Root and application lifecycle coordinator for AIMonitor 2.0.
+/// Composition Root and application lifecycle coordinator for AIMonitor.
 /// Conforms to Docs/ARCHITECTURE.md Section 6 and ADR-0001, ADR-0002, ADR-0003.
 /// </summary>
 public partial class App : System.Windows.Application

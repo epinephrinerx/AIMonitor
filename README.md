@@ -1,4 +1,4 @@
-# AI Usage Monitor 2.0
+# AIMonitor
 
 A native Windows desktop monitor for AI usage quota: Claude, OpenAI / Codex and AGY in one window.
 Version 2.0 is a rewrite of the Python 1.3.3 application in C# / WPF (.NET 10).

@@ -355,6 +355,43 @@ permissions และ error propagation ของ OpenAI/Gemini เทียบ�
 - 2026-10-15 — ปรับปรุงคำแนะนำ login ใน `ProviderMeta.OpenAi.SetupHint` และ `OpenAiLiveQuotaClient.SetupHint`; ซิงก์ assertion ใน `ProviderMetaTests`; ผ่าน `dotnet build` (0 warnings/errors), `dotnet format` (สะอาด) และ `dotnet test` (1,403 passed ครบถ้วน); สรุปข้อมูลเพิ่มเติมที่พร้อมแสดงผลใน `Docs/HANDOFF_R008.md`
 - 2026-10-16 — ผู้ใช้ตรวจคำแนะนำ login ใน UI จริงแล้วผ่าน
 
+## R-024 · ชื่อโปรแกรมที่ผู้ใช้เห็นเป็น "AIMonitor"
+
+| | |
+|---|---|
+| สถานะ | 🔨 กำลังทำ |
+| วันที่ | 2026-11-23 |
+| แตะส่วนไหน | title ของหน้าต่าง (`MainWindow`, `UsageLogDialog`, `AboutDialog`, `UpdateProgressWindow`) · tray (`TrayIconHost`, `TrayText`, balloon ใน `MainWindowViewModel`) · `AboutViewModel` · หัวรายงาน (`ReportModels`) · `Directory.Build.props` `Product` · `Description` ของ WPF csproj · `installer/AIMonitor2.iss` · `README.md` / `THIRD-PARTY-NOTICES.md` · เทสต์ที่อ้างข้อความเหล่านี้ |
+| เกี่ยวกับ | [[R-022]] (ออกแทนไฟล์ใน 2.0.5) |
+
+**คุณระบุ:**
+> ผมข้อแก้เพิ่มเติมใน build 2.0.5 คือเปลี่ยนชื่อโปรแกรมเป็น AIMonitor เฉยๆ ทั้ง Title Bar, Icon โปรแกรม และส่วนอื่นๆ ตอนนี้มีคำว่า AIMonitor 2.0 และ AI Usage Monitor
+
+คำตอบเพิ่มเติม (2026-11-23): "เฉพาะชื่อที่เห็น" · "แทนไฟล์ใน 2.0.5" · "ผมเขียนเองทั้งหมด" · "รับรอง"
+
+**ผมเข้าใจว่า:**
+ทุกข้อความที่ผู้ใช้เห็นซึ่งตอนนี้เป็น "AIMonitor 2.0" หรือ "AI Usage Monitor" เปลี่ยนเป็น "AIMonitor": title bar ทุกหน้าต่าง,
+tooltip/balloon ของ tray, หน้า About, หัวรายงาน usage log, ชื่อใน Task Manager/Properties (`Product`), ชื่อ shortcut ใน Start menu
+และ desktop, ชื่อใน Apps & features และหน้าจอตัวติดตั้ง ตอนอัปเกรดตัวติดตั้งลบ shortcut ชื่อเดิม "AI Usage Monitor"
+ออกให้ ออกโดย build 2.0.5 ใหม่แทนไฟล์ใน release 2.0.5 เดิม (ย้าย tag `v2.0.5`)
+
+**ไม่รวม:**
+- ไม่เปลี่ยนชื่อไฟล์และชื่อภายใน: `AIUsageMonitor.exe`, โฟลเดอร์ติดตั้ง, `%LOCALAPPDATA%\AIUsageMonitor`, Run key, mutex,
+  DPAPI entropy, User-Agent, ชื่อไฟล์ Setup/asset ของ release และ AppId ของตัวติดตั้ง
+- ไม่เปลี่ยนรูปไอคอน (`assets/icon.ico`)
+- ไม่แก้เอกสารประวัติเดิม (`Docs/RELEASE_2.0.x.md` รุ่นก่อน, `Docs/REVIEW_*`, spec เก่า)
+
+**ตรวจรับเมื่อ:**
+- [ ] title bar ของหน้าต่างหลัก, Usage Log, About และ Update เป็น "AIMonitor" ไม่มี "2.0" หรือ "AI Usage Monitor"
+- [ ] tray tooltip และ balloon ใช้ "AIMonitor"
+- [ ] Start menu/desktop shortcut และ Apps & features เป็น "AIMonitor"; อัปเกรดทับแล้ว shortcut ชื่อเดิมหายไป
+- [ ] ค่าตั้ง, API key ที่เก็บไว้ และการเปิดตอนเข้า Windows ยังทำงานเหมือนเดิมหลังอัปเกรด
+- [x] build, tests และ format ผ่าน; `grep` ไม่พบ "AI Usage Monitor" หรือ "AIMonitor 2.0" ในข้อความที่ผู้ใช้เห็นใน `src/` และ `installer/`
+
+ผลทดสอบของผม (2026-11-23, Release): build 0/0 · เทสต์ 344 + 267 + 1,659 + 988 = 3,258 ผ่าน (แก้ assertion ของข้อความ 4 จุด: About, tray tooltip, หัวรายงาน 2 ที่) · format สะอาด · verification OK · grep ใน `src/` เหลือเฉพาะ "AI Quota & Usage Monitor" ในคำอธิบาย Readme (ไม่ใช่ชื่อโปรแกรม) และใน `installer/` เหลือเฉพาะชื่อเดิมที่ใช้ลบ shortcut เก่า · exe มี Product และ FileDescription = "AIMonitor" (เพิ่ม `AssemblyTitle` เพราะ Task Manager แสดงค่านี้) ชื่อไฟล์ยังเป็น `AIUsageMonitor.exe` · ข้อ 1–4 ต้องให้คุณดูในแอปจริงหลังติดตั้งทับ
+
+**ข้อยกเว้น workflow (ผู้ใช้ตัดสิน 2026-11-23):** "ผมเขียนเองทั้งหมด" — Coding Owner (Claude Code, Opus 5.5) เขียนและทดสอบเอง ไม่มีผู้ตรวจอิสระ
+
 ## R-023 · จอ ESP32 แสดงข้อมูลได้โดยไม่ต้องเปิด PC
 
 | | |

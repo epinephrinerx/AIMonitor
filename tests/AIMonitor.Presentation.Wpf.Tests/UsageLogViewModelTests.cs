@@ -20,7 +20,7 @@ public class UsageLogViewModelTests
         var vm = new UsageLogViewModel(report);
 
         Assert.Same(report, vm.Report);
-        Assert.Contains("# AI Usage Monitor - usage log", vm.FormattedContent);
+        Assert.Contains("# AIMonitor - usage log", vm.FormattedContent);
         Assert.Contains("## Claude", vm.FormattedContent);
         Assert.NotNull(vm.SaveAsCommand);
     }

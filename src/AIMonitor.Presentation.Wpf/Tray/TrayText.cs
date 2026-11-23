@@ -28,7 +28,7 @@ public static class TrayText
         var meter = reading.IconMeter;
         if (meter is null)
         {
-            return "AI Usage Monitor — no quota data yet";
+            return "AIMonitor — no quota data yet";
         }
 
         var lines = new List<string>

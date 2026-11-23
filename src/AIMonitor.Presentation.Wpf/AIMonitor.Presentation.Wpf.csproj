@@ -12,10 +12,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- PE / Explorer metadata (version comes from Directory.Build.props) -->
     <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
-    <Description>AI Usage Monitor — view Claude, OpenAI and AGY quota at a glance</Description>
+    <Description>AIMonitor — view Claude, OpenAI and AGY quota at a glance</Description>
     <Platforms>x64</Platforms>
     <!-- Ensure the publish output uses the canonical exe name -->
     <AssemblyName>AIUsageMonitor</AssemblyName>
+    <!-- R-024: Task Manager and file Properties show this title; the exe name stays AIUsageMonitor.exe. -->
+    <AssemblyTitle>AIMonitor</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

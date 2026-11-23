@@ -151,7 +151,7 @@ public static class UsageReportGenerator
         var sb = new StringBuilder();
         var when = report.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
-        sb.AppendLine("# AI Usage Monitor - usage log");
+        sb.AppendLine("# AIMonitor - usage log");
         sb.AppendLine();
         sb.AppendLine($"Generated {when}  ·  last {report.Days} days  ·  {report.Metric}");
         sb.AppendLine();
@@ -244,7 +244,7 @@ public static class UsageReportGenerator
 
         var sb = new StringBuilder();
         sb.AppendLine($"<body style='color:{ink}; font-family:Segoe UI, sans-serif; background:{(dark ? "#14161a" : "#ffffff")}; margin:20px;'>");
-        sb.AppendLine("<h1 style='font-size:19px; margin:0 0 2px 0;'>AI Usage Monitor &mdash; usage log</h1>");
+        sb.AppendLine("<h1 style='font-size:19px; margin:0 0 2px 0;'>AIMonitor &mdash; usage log</h1>");
         sb.AppendLine($"<p style='color:{muted}; font-size:11px; margin:0 0 18px 0;'>Generated {when} &nbsp;&middot;&nbsp; last {report.Days} days &nbsp;&middot;&nbsp; {WebUtility.HtmlEncode(report.Metric)}</p>");
 
         foreach (var section in report.Sections)

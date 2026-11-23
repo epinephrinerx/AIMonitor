@@ -111,7 +111,7 @@ public sealed class TrayTests
     public void NoData_SaysSo()
     {
         var empty = new TrayReading("claude", "Claude", "CL", 0, Severity.Normal, "");
-        Assert.Equal("AI Usage Monitor — no quota data yet", TrayText.Tooltip(empty, 0, 1, Now, TimeZoneInfo.Utc));
+        Assert.Equal("AIMonitor — no quota data yet", TrayText.Tooltip(empty, 0, 1, Now, TimeZoneInfo.Utc));
     }
 
     private sealed class BalloonSink : ITrayReadingsSink, ITrayNotifier
