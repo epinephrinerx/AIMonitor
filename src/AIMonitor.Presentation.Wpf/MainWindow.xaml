@@ -72,7 +72,6 @@
             <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="AIMonitor" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                    <TextBlock Text="2.0" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="6,3,0,0" />
                 </StackPanel>
                 <TextBlock x:Name="AccountLabelText" Text="{Binding SelectedTab.AccountLabel}" FontSize="11"
                            Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0" />

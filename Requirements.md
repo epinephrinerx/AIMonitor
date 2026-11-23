@@ -394,6 +394,7 @@ tooltip/balloon ของ tray, หน้า About, หัวรายงาน 
 
 **ความคืบหน้า:**
 - 2026-11-23 — commit `1d5ea68`; push `main`, `v2` และย้าย tag `v2.0.5` จาก `730f47b` ไป `1d5ea68` (force เฉพาะ tag ตามที่ผู้ใช้เลือก "แทนไฟล์ใน 2.0.5"); CI ของ tag และ `main` ผ่าน; แทนไฟล์ใน release 2.0.5 (`--clobber`) และเปลี่ยนชื่อ release เป็น "AIMonitor 2.0.5"; digest ตรงกับไฟล์ในเครื่อง
+- 2026-11-23 — ผู้ใช้แจ้ง "ยังมีคำว่า AIMonitor 2.0 อยู่บริเวรณใต้เมนูครับ": ส่วนหัวของหน้าต่างหลักมี badge "2.0" เป็น TextBlock แยก (`MainWindow.xaml`) grep ชื่อเต็มจึงไม่เจอ → ลบ badge; ตรวจด้วยภาพ ScreenEvidence `dashboard-claude-light` และ `about-version-light`
 
 ## R-023 · จอ ESP32 แสดงข้อมูลได้โดยไม่ต้องเปิด PC
 
