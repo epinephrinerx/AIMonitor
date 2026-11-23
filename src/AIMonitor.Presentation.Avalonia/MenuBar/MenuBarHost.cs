@@ -31,6 +31,13 @@ internal sealed class MenuBarHost : IDisposable
     {
         _icon.ToolTipText = "AI Usage Monitor";
         _icon.Menu = new NativeMenu();
+        // A TrayIcon that is not attached to the application never registers with the Linux
+        // StatusNotifierWatcher, so attach it explicitly.
+        if (global::Avalonia.Application.Current is { } application)
+        {
+            TrayIcon.SetIcons(application, [_icon]);
+        }
+
         _rotation = new DispatcherTimer { Interval = RotateEvery };
         _rotation.Tick += (_, _) => Advance();
         Rebuild();

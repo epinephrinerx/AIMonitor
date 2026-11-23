@@ -320,6 +320,10 @@ public sealed partial class App : global::Avalonia.Application
     {
         if (_settings is null || !TrayPolicy.ShouldHideOnClose(_settings.Current)) return;
 
+        // Only the user's own close gesture parks the window. A log out, shutdown or Quit must go
+        // through: cancelling it makes the session manager abort the whole log out.
+        if (e.CloseReason != WindowCloseReason.WindowClosing) return;
+
         e.Cancel = true;
         _window?.Hide();
     }
