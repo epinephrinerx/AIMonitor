@@ -158,7 +158,7 @@ public sealed class CcUsageRunnerTests
     /// <c>CcUsageRunner</c> implements <c>ICcUsageRunner.RunAsync</c> explicitly (decision M3 wires
     /// the source to the interface, not the class), so the seam is reached as <c>ICcUsageRunner</c>.
     private static ICcUsageRunner Runner(Func<string?> resolve, Factory factory, TimeSpan timeout, int outputLimit = DefaultLimit) =>
-        new CcUsageRunner(resolve, factory.Start, timeout, outputLimit);
+        new CcUsageRunner(resolve, (info, _) => factory.Start(info), timeout, outputLimit);
 
     private static void AssertCommonStartInfo(ProcessStartInfo info, string expectedFileName)
     {
@@ -182,7 +182,7 @@ public sealed class CcUsageRunnerTests
         // fails (and therefore no second run either).
         ICcUsageRunner runner = new CcUsageRunner( // M3: RunAsync is reachable through ICcUsageRunner only
             () => null,
-            _ => throw new InvalidOperationException("must not start"),
+            (_, _) => throw new InvalidOperationException("must not start"),
             TimeSpan.FromSeconds(1),
             DefaultLimit);
 
@@ -479,7 +479,7 @@ public sealed class CcUsageRunnerTests
         var attempts = 0;
         ICcUsageRunner runner = new CcUsageRunner(
             () => @"C:\synthetic\bin\ccusage.exe",
-            _ =>
+            (_, _) =>
             {
                 attempts++;
                 throw new Win32Exception(2, "synthetic: the system cannot find the file specified");
@@ -640,32 +640,18 @@ public sealed class CcUsageRunnerTests
     [Fact]
     public async Task DeadlineFiredWhileStartBlocks_CompleteExitedChildArrivesLate_ThrowsTimeout_AndOfflineRetryAlsoTimesOut()
     {
-        // Decision R13 — the deterministic R12 reproduction: "the fake `start` blocks (e.g.
-        // Thread.Sleep) longer than the runner timeout, then returns a child with complete
-        // StringReader stdout/stderr, already-exited, exit code 0 → Timeout; 2 starts; the second
-        // has --offline last". Expected RED against the current code (R12: once all three tasks
-        // have completed, WaitAsync(deadline.Token) returns without looking at the token and exit
-        // code 0 turns into a success) — WO2 is fixing R12 in parallel; the flaky
-        // DeadlineFiredWhileProcessExited_… test above (the 2-in-30-parallel-runs version of the
-        // same bug) stays unchanged.
-        //
-        // The deadline is the run's per-run timeout (SPEC P1.3 "Timeout per run"), so sleeping
-        // past it inside `start` means the token has already fired when the child exists — the
-        // R12 rule then applies: "after the reads and the exit wait complete, if the deadline
-        // fired and the caller did not cancel → Timeout". A first-run Timeout is retryable (R1,
-        // A6), hence exactly one second start with --offline; the second start blocks the same
-        // way and times out too, and "Both fail → error of the second run" (P1.3) throws Timeout.
-        const int TimeoutMs = 50;  // the runner's per-run deadline, as the seam takes it (M3/R7)
-        const int BlockMs = 500;   // `start` returns 10× after that deadline has fired — deterministic
+        // Wait for the actual deadline, not just elapsed time: timer callbacks can be delayed
+        // under thread-pool pressure. Both already-exited children must still result in Timeout.
+        const int TimeoutMs = 50;
 
         var infos = new List<ProcessStartInfo>();
         var children = new List<Child>();
         ICcUsageRunner runner = new CcUsageRunner( // M3: reached through ICcUsageRunner, as the source does
             () => "synthetic.exe",
-            info =>
+            (info, deadline) =>
             {
                 infos.Add(info);
-                Thread.Sleep(BlockMs); // the deadline fires while this thread sleeps
+                Assert.True(deadline.WaitHandle.WaitOne(TimeSpan.FromSeconds(10)));
                 var child = new Child(); // Child's defaults: complete StringReader stdout/stderr,
                 children.Add(child);     // already exited (Hang = false), exit code 0
                 return child;
