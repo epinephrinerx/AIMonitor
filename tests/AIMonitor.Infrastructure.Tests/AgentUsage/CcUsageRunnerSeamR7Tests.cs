@@ -45,7 +45,7 @@ public sealed class CcUsageRunnerSeamR7Tests
         var starts = new List<ProcessStartInfo>();
         CcUsageRunner runner = new(
             () => @"C:\synthetic\bin\ccusage.exe",
-            info =>
+            (info, _) =>
             {
                 starts.Add(info);
                 return new Fake();

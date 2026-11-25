@@ -15,18 +15,18 @@ internal sealed class CcUsageRunner : ICcUsageRunner
     internal const int StderrLimit = 1 * 1024 * 1024;
 
     private readonly Func<string?> _resolve;
-    private readonly Func<ProcessStartInfo, ICcUsageProcess> _start;
+    private readonly Func<ProcessStartInfo, CancellationToken, ICcUsageProcess> _start;
     private readonly TimeSpan _timeout;
     private readonly int _outputLimit;
 
     public CcUsageRunner()
-        : this(ResolveExecutable, info => new CcUsageProcess(info), TimeSpan.FromSeconds(120), DefaultOutputLimit)
+        : this(ResolveExecutable, (info, _) => new CcUsageProcess(info), TimeSpan.FromSeconds(120), DefaultOutputLimit)
     {
     }
 
     internal CcUsageRunner(
         Func<string?> resolve,
-        Func<ProcessStartInfo, ICcUsageProcess> start,
+        Func<ProcessStartInfo, CancellationToken, ICcUsageProcess> start,
         TimeSpan timeout,
         int outputLimit = DefaultOutputLimit)
     {
@@ -86,7 +86,7 @@ internal sealed class CcUsageRunner : ICcUsageRunner
 
             try
             {
-                process = _start(BuildStartInfo(path, since, offline));
+                process = _start(BuildStartInfo(path, since, offline), deadline.Token);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
                                        or System.ComponentModel.Win32Exception or DecoderFallbackException)
